@@ -91,8 +91,8 @@ outputs/
 
 ### 2.5 Security, Authentication & Session Hardening
 - **Sovereign HMAC Token Authentication**:
-  - Endpoint `POST /api/auth/login` verifies `officer_id` and `secret_key` against `config.AUTH_OFFICER_ID` (`MOC-7890`) and `config.AUTH_SECRET_PASSWORD` (`SecureEnclave2026!`).
-  - Issues signed HMAC-SHA256 token: `b64(officer_id):b64(timestamp):b64(signature)`.
+  - Endpoint `POST /api/auth/login` verifies `officer_id` and `secret_key` against `config.AUTH_OFFICER_ID` (sourced from `MINEINTEL_OFFICER_ID`) and `config.AUTH_SECRET_PASSWORD` (sourced from `MINEINTEL_AUTH_PASSWORD`). Hardcoded production credentials have been entirely eliminated.
+  - Issues signed HMAC-SHA256 session token with expiration and signature verification.
   - Endpoint `GET /api/auth/verify` validates token expiration (24h TTL) and cryptographic integrity.
 - **CORS Protection**:
   - `allow_credentials=False` when wildcard origins are used.

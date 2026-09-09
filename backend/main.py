@@ -15,7 +15,7 @@ import requests
 
 logger = logging.getLogger("mineintel")
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -162,6 +162,11 @@ class GemmaRequest(BaseModel):
 @app.post("/api/auth/login")
 def auth_login(req: LoginRequest):
     """Authenticates executive officers against sovereign credentials using constant-time comparison."""
+    if not config.AUTH_OFFICER_ID or not config.AUTH_SECRET_PASSWORD:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication is unconfigured. Production credentials must be supplied via MINEINTEL_OFFICER_ID and MINEINTEL_AUTH_PASSWORD environment variables."
+        )
     valid_id = secrets.compare_digest(req.officer_id.strip(), config.AUTH_OFFICER_ID)
     valid_pw = secrets.compare_digest(req.password.strip(), config.AUTH_SECRET_PASSWORD)
     if not (valid_id and valid_pw):
@@ -201,6 +206,25 @@ def auth_verify(authorization: Optional[str] = Header(None), token: Optional[str
         "officer_id": session["officer_id"],
         "role": session["role"]
     }
+
+
+def require_auth(
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None)
+) -> Dict[str, Any]:
+    """Dependency enforcing that protected operations require a valid cryptographic session token."""
+    raw_token = token if isinstance(token, str) and token.strip() else None
+    if not raw_token and isinstance(authorization, str) and authorization.strip():
+        if authorization.startswith("Bearer "):
+            raw_token = authorization.split("Bearer ", 1)[1].strip()
+        else:
+            raw_token = authorization.strip()
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Authentication token required for protected action.")
+    session = verify_session_token(raw_token)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session token invalid, tampered, or expired.")
+    return session
 
 
 @app.post("/api/auth/logout")
@@ -764,7 +788,7 @@ def fill_template_content(template_id: str, req: Optional[TemplateFillRequest] =
         template_id=tpl_key,
         template_name=tpl["name"],
         theme=tpl["theme"],
-        auditor_id="MOC-7890",
+        auditor_id=config.AUTH_OFFICER_ID or "OFFICER-AUDITOR",
         records_count=metrics["count"],
         summary_snippet=sections[0]["content"] if sections else "",
         job_id=job_id
@@ -812,7 +836,7 @@ class RecordHistoryRequest(BaseModel):
     template: str
     template_name: str
     theme: str
-    auditor_id: Optional[str] = "MOC-7890"
+    auditor_id: Optional[str] = None
     records_count: Optional[int] = 18
     summary_snippet: Optional[str] = ""
     job_id: Optional[str] = None
@@ -827,7 +851,7 @@ def add_report_history(req: RecordHistoryRequest):
         template_id=req.template,
         template_name=req.template_name,
         theme=req.theme,
-        auditor_id=req.auditor_id or "MOC-7890",
+        auditor_id=req.auditor_id or config.AUTH_OFFICER_ID or "OFFICER-AUDITOR",
         records_count=req.records_count or 18,
         summary_snippet=req.summary_snippet or "",
         job_id=req.job_id
@@ -880,8 +904,11 @@ class ReportPackageRequest(BaseModel):
 
 
 @app.post("/api/reports/generate-package")
-def generate_report_package(req: Optional[ReportPackageRequest] = None):
-    """Compiles actual publication-grade PDF, DOCX, and XLSX reports."""
+def generate_report_package(
+    req: Optional[ReportPackageRequest] = None,
+    session: Dict[str, Any] = Depends(require_auth)
+):
+    """Compiles actual publication-grade PDF, DOCX, and XLSX reports. Requires valid officer session."""
     tpl = req.template if req else "executive_brief"
     rep_id = req.report_id if req else "REP-2026-B56D"
     job_id = req.job_id if req else None

@@ -68,25 +68,7 @@ const AuthController = {
 
       return sessionData;
     } catch (err) {
-      // In offline/demo scenario, if backend network is down, check fallback credentials
-      if (err.message && err.message.includes("fetch")) {
-        if (employeeId.trim() === "MOC-7890" && password === "SecureEnclave2026!") {
-          const fallbackSession = {
-            employeeId: "MOC-7890",
-            name: "Authorized Auditor (Offline Mode)",
-            role: "Senior Operational Auditor",
-            department: "Ministry of Coal, GoI",
-            token: "OFFLINE-TOKEN-MOC-7890",
-            loginTime: new Date().toISOString()
-          };
-          if (rememberDevice) {
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(fallbackSession));
-          } else {
-            sessionStorage.setItem(this.STORAGE_KEY, JSON.stringify(fallbackSession));
-          }
-          return fallbackSession;
-        }
-      }
+      // Frontend cannot authenticate by itself; propagate real error
       throw err;
     }
   },

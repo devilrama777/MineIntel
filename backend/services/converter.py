@@ -51,11 +51,12 @@ class MarkdownConverter:
         cls,
         file_path: Path,
         output_media_dir: Optional[Path] = None,
-        max_pages: int = 200
+        max_pages: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Converts a PDF file into structured Markdown with extracted tables, text,
         and isolated media assets without premature truncation.
+        Processes all pages by default (max_pages=None).
         """
         markdown_sections: List[str] = []
         total_pages = 0
@@ -128,8 +129,6 @@ class MarkdownConverter:
                 logger.warning(f"pypdf reader initialization error: {pdf_read_err}")
 
         # 2. Extract layout, text, and tables with pdfplumber
-        pages_to_process = min(total_pages or max_pages, max_pages)
-
         if pdfplumber is not None:
             try:
                 with pdfplumber.open(file_path) as pdf:
@@ -142,7 +141,7 @@ class MarkdownConverter:
                         markdown_sections.append(f"- **Extracted Media Attachments:** {len(extracted_audio)} media files recorded (preserved)\n")
                     markdown_sections.append("\n---\n")
 
-                    limit_pages = min(total_pages, max_pages)
+                    limit_pages = total_pages if max_pages is None else min(total_pages, max_pages)
                     for page_num in range(1, limit_pages + 1):
                         page = pdf.pages[page_num - 1]
                         markdown_sections.append(f"\n## Page {page_num}\n")
@@ -162,7 +161,7 @@ class MarkdownConverter:
                             cleaned_lines = [line.rstrip() for line in text.splitlines() if line.strip()]
                             markdown_sections.append("### Content\n" + "\n".join(cleaned_lines) + "\n\n")
 
-                    if total_pages > max_pages:
+                    if max_pages is not None and total_pages > max_pages:
                         markdown_sections.append(f"\n\n*Note: Document contains {total_pages} total pages. First {max_pages} pages processed in primary pass.*\n")
 
             except Exception as plumber_err:
@@ -171,7 +170,8 @@ class MarkdownConverter:
                     try:
                         reader = pypdf.PdfReader(str(file_path))
                         markdown_sections.append(f"# Document Overview: {file_path.name}\n**Total Pages:** {len(reader.pages)}\n\n---\n")
-                        for idx, p in enumerate(reader.pages[:max_pages], start=1):
+                        pages_slice = reader.pages if max_pages is None else reader.pages[:max_pages]
+                        for idx, p in enumerate(pages_slice, start=1):
                             ptxt = p.extract_text() or ""
                             if ptxt.strip():
                                 markdown_sections.append(f"\n## Page {idx}\n\n{ptxt.strip()}\n\n")
@@ -184,7 +184,8 @@ class MarkdownConverter:
                 reader = pypdf.PdfReader(str(file_path))
                 total_pages = len(reader.pages)
                 markdown_sections.append(f"# Document Overview: {file_path.name}\n**Total Pages:** {total_pages}\n\n---\n")
-                for page_num, page in enumerate(reader.pages[:max_pages], start=1):
+                pages_slice = reader.pages if max_pages is None else reader.pages[:max_pages]
+                for page_num, page in enumerate(pages_slice, start=1):
                     txt = page.extract_text() or ""
                     if txt.strip():
                         markdown_sections.append(f"\n## Page {page_num}\n\n{txt.strip()}\n\n")
@@ -284,13 +285,153 @@ class MarkdownConverter:
         }
 
     @classmethod
+    def convert_excel_to_markdown(cls, file_path: Path, max_preview_rows: int = 100) -> Dict[str, Any]:
+        """
+        Converts a multi-sheet Excel spreadsheet (.xlsx, .xls) into structured Markdown.
+        Reads all worksheets, extracts schemas, summaries, and structured records.
+        """
+        md_sections: List[str] = [f"# Excel Spreadsheet Dossier: {file_path.name}\n"]
+        excel_data = pd.read_excel(file_path, sheet_name=None)
+        all_records: List[Dict[str, Any]] = []
+        total_rows = 0
+        total_cols = 0
+        sheet_names = list(excel_data.keys())
+
+        md_sections.append(f"- **Workbook Sheets ({len(sheet_names)}):** {', '.join(sheet_names)}\n")
+        md_sections.append("\n---\n")
+
+        for s_idx, (sheet_name, df) in enumerate(excel_data.items(), start=1):
+            s_rows, s_cols = df.shape
+            total_rows += s_rows
+            total_cols = max(total_cols, s_cols)
+
+            md_sections.append(f"\n## Sheet {s_idx}: {sheet_name}\n")
+            md_sections.append(f"- **Dimensions:** {s_rows} rows × {s_cols} columns\n")
+
+            if df.empty:
+                md_sections.append("*Sheet is empty.*\n")
+                continue
+
+            clean_df = df.copy()
+
+            # Schema Table
+            schema_rows = [["Column Name", "Data Type", "Non-Null Count", "Unique Values"]]
+            for col in clean_df.columns:
+                non_null = int(clean_df[col].notnull().sum())
+                unique = int(clean_df[col].nunique())
+                dtype = str(clean_df[col].dtype)
+                schema_rows.append([str(col), dtype, str(non_null), str(unique)])
+
+            md_sections.append("### Sheet Schema\n")
+            md_sections.append(cls._table_to_markdown(schema_rows))
+
+            # Numerical statistics
+            numeric_df = clean_df.select_dtypes(include=["number"])
+            if not numeric_df.empty:
+                md_sections.append("### Sheet Statistical Summary\n")
+                desc = numeric_df.describe().T.reset_index()
+                desc.rename(columns={"index": "Metric / Column"}, inplace=True)
+                stats_rows = [desc.columns.tolist()] + desc.round(4).values.tolist()
+                md_sections.append(cls._table_to_markdown(stats_rows))
+
+            # Data records preview
+            md_sections.append(f"### Sheet Records Preview (Showing first {min(s_rows, max_preview_rows)} rows)\n")
+            preview_df = clean_df.head(max_preview_rows)
+            preview_rows = [preview_df.columns.tolist()] + preview_df.fillna("").values.tolist()
+            md_sections.append(cls._table_to_markdown(preview_rows))
+
+            if s_idx == 1:
+                all_records = clean_df.head(500).fillna("").to_dict(orient="records")
+
+        full_md = "\n".join(md_sections)
+        first_df = list(excel_data.values())[0] if excel_data else pd.DataFrame()
+
+        return {
+            "markdown": full_md,
+            "file_type": "xlsx",
+            "records": all_records,
+            "dataframe": first_df,
+            "extracted_images": [],
+            "extracted_audio": [],
+            "has_multimedia": False,
+            "metadata": {
+                "filename": file_path.name,
+                "sheet_count": len(sheet_names),
+                "sheet_names": sheet_names,
+                "total_rows": total_rows,
+                "column_count": total_cols,
+                "char_count": len(full_md)
+            }
+        }
+
+    @classmethod
+    def convert_docx_to_markdown(cls, file_path: Path) -> Dict[str, Any]:
+        """Converts a Microsoft Word DOCX file into structured Markdown."""
+        try:
+            import docx
+            doc = docx.Document(file_path)
+            md_sections: List[str] = [f"# Word Document Dossier: {file_path.name}\n"]
+            extracted_tables: List[List[List[Any]]] = []
+
+            for p in doc.paragraphs:
+                txt = p.text.strip()
+                if not txt:
+                    continue
+                if p.style and p.style.name and p.style.name.startswith("Heading 1"):
+                    md_sections.append(f"\n# {txt}\n")
+                elif p.style and p.style.name and p.style.name.startswith("Heading 2"):
+                    md_sections.append(f"\n## {txt}\n")
+                elif p.style and p.style.name and p.style.name.startswith("Heading 3"):
+                    md_sections.append(f"\n### {txt}\n")
+                else:
+                    md_sections.append(f"{txt}\n")
+
+            for t_idx, table in enumerate(doc.tables, start=1):
+                t_rows = []
+                for row in table.rows:
+                    t_rows.append([cell.text.strip() for cell in row.cells])
+                if t_rows:
+                    extracted_tables.append(t_rows)
+                    md_sections.append(f"\n### Table {t_idx}\n" + cls._table_to_markdown(t_rows))
+
+            full_md = "\n".join(md_sections)
+            return {
+                "markdown": full_md,
+                "file_type": "docx",
+                "records": [],
+                "extracted_images": [],
+                "extracted_audio": [],
+                "has_multimedia": False,
+                "tables": extracted_tables,
+                "metadata": {
+                    "filename": file_path.name,
+                    "paragraph_count": len(doc.paragraphs),
+                    "table_count": len(doc.tables),
+                    "char_count": len(full_md)
+                }
+            }
+        except Exception as docx_err:
+            return {
+                "markdown": f"# Word Document: {file_path.name}\n\nExtraction error: {docx_err}",
+                "file_type": "docx",
+                "records": [],
+                "extracted_images": [],
+                "extracted_audio": [],
+                "has_multimedia": False,
+                "metadata": {"filename": file_path.name, "char_count": 0}
+            }
+
+    @classmethod
     def convert(cls, file_path: Path, output_media_dir: Optional[Path] = None) -> Dict[str, Any]:
         """Auto-detects file extension and converts to Markdown."""
         suffix = file_path.suffix.lower()
         if suffix == ".pdf":
             return cls.convert_pdf_to_markdown(file_path, output_media_dir=output_media_dir)
         elif suffix in [".csv", ".tsv", ".txt"]:
-            res = cls.convert_csv_to_markdown(file_path)
-            return res
+            return cls.convert_csv_to_markdown(file_path)
+        elif suffix in [".xlsx", ".xls"]:
+            return cls.convert_excel_to_markdown(file_path)
+        elif suffix == ".docx":
+            return cls.convert_docx_to_markdown(file_path)
         else:
-            raise ValueError(f"Unsupported file format: '{suffix}'. Supported: .pdf, .csv, .tsv, .txt")
+            raise ValueError(f"Unsupported file format: '{suffix}'. Supported: .pdf, .csv, .tsv, .txt, .xlsx, .xls, .docx")

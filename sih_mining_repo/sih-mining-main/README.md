@@ -64,8 +64,8 @@ Open **[http://localhost:8000](http://localhost:8000)** for the Web Application 
 
 | Credential | Value |
 |---|---|
-| **Employee ID** | `MOC-7890` |
-| **Password** | `SecureEnclave2026!` |
+| **Officer ID** | Supplied via `MINEINTEL_OFFICER_ID` |
+| **Password** | Supplied via `MINEINTEL_AUTH_PASSWORD` |
 | **Security Enclave** | `v2.4.0 (Local Secure Enclave)` |
 
 ---

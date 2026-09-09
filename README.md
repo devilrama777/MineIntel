@@ -46,14 +46,19 @@ pip install fastapi uvicorn pandas numpy reportlab python-docx openpyxl requests
 
 ### Launch the Application
 ```bash
+# Configure Sovereign Authentication (Required in Production)
+export MINEINTEL_OFFICER_ID="MOC-OFFICER-DEMO"
+export MINEINTEL_AUTH_PASSWORD="YourSecurePasswordHere"
+export MINEINTEL_JWT_SECRET="YourCryptographicSecretHere"
+
 # Start the FastAPI server
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 Open [http://localhost:8000](http://localhost:8000) in your browser.
 
-**Default Officer Credentials:**
-- **Officer ID:** `MOC-7890`
-- **Password:** `SecureEnclave2026!`
+**Authentication Setup:**
+- Credentials are strictly supplied via environment variables (`MINEINTEL_OFFICER_ID`, `MINEINTEL_AUTH_PASSWORD`).
+- In development/demo mode without env vars set, authentication uses generated local-session tokens or requires explicit environment configuration. Hardcoded production credentials are prohibited.
 
 ---
 

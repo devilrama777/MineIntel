@@ -83,6 +83,34 @@ def _sanitize_text_for_pdf(text: Optional[str]) -> str:
     return s.strip()
 
 
+def _safe_truncate_xml(text: str, max_chars: int = 1200) -> str:
+    """Truncates text safely ensuring balanced XML tags (<b>, <i>, <u>) for ReportLab Paragraph."""
+    if not text or len(text) <= max_chars:
+        return text
+    truncated = text[:max_chars]
+    # If cut inside an opening or closing tag, strip back before the unclosed '<'
+    last_lt = truncated.rfind("<")
+    last_gt = truncated.rfind(">")
+    if last_lt > last_gt:
+        truncated = truncated[:last_lt]
+    # Strip any incomplete XML entity (&...;)
+    last_amp = truncated.rfind("&")
+    last_semi = truncated.rfind(";")
+    if last_amp > last_semi:
+        truncated = truncated[:last_amp]
+    # Balance <b> and </b> tags
+    b_open = truncated.count("<b>")
+    b_close = truncated.count("</b>")
+    if b_open > b_close:
+        truncated += "</b>" * (b_open - b_close)
+    # Balance <i> and </i> tags
+    i_open = truncated.count("<i>")
+    i_close = truncated.count("</i>")
+    if i_open > i_close:
+        truncated += "</i>" * (i_open - i_close)
+    return truncated
+
+
 # Canonical Baseline Colliery Registry (Reflecting Coal India Limited AR 2025-26 authentic metrics)
 COLLIERIES_DATA = [
     {"rank": 1, "name": "Mahanadi Coalfields Ltd (MCL)", "state": "Odisha", "company": "MCL", "type": "Opencast/UG", "production": 218.31, "dispatch": 213.50, "target": 225.00, "share": "28.42%"},
@@ -607,7 +635,8 @@ class DocumentGenerator:
 
         elements.append(Paragraph("<b>1. Executive Analytical Baseline & Findings</b>", ParagraphStyle('Tpl_Sec1', fontName='Helvetica-Bold', fontSize=9.5, textColor=primary, spaceAfter=3)))
         clean_summary = _sanitize_text_for_pdf(summary_text)
-        elements.append(Paragraph(clean_summary[:1200] if len(clean_summary) > 1200 else clean_summary, ParagraphStyle('Tpl_Body', fontSize=7.5, leading=10.5, textColor=colors.HexColor("#1E293B"), spaceAfter=5)))
+        safe_summary = _safe_truncate_xml(clean_summary, max_chars=1200)
+        elements.append(Paragraph(safe_summary, ParagraphStyle('Tpl_Body', fontSize=7.5, leading=10.5, textColor=colors.HexColor("#1E293B"), spaceAfter=5)))
 
         # Embedded user image if available
         if images and len(images) > 0:

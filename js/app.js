@@ -602,9 +602,11 @@ const App = {
     if (e && e.preventDefault) e.preventDefault();
     const empIdEl = document.getElementById("login-emp-id");
     const pwdEl = document.getElementById("login-password");
-    if (empIdEl) empIdEl.value = "MOC-7890";
-    if (pwdEl) pwdEl.value = "SecureEnclave2026!";
-    this.handleLogin(e);
+    if (empIdEl && !empIdEl.value) empIdEl.value = "MOC-OFFICER-DEMO";
+    if (pwdEl) {
+      pwdEl.focus();
+      this.showToast("Enter the enclave password configured in your server environment.", "info");
+    }
   },
 
   handleLogin: async function(e, overrideEmpId = null) {
@@ -1539,9 +1541,17 @@ const App = {
       formData.append("custom_llama_command", customCmd);
     }
 
+    const authHeaders = {};
+    const currentSession = typeof AuthController !== "undefined" ? AuthController.getSession() : null;
+    if (currentSession && currentSession.token) {
+      authHeaders["Authorization"] = `Bearer ${currentSession.token}`;
+      formData.append("token", currentSession.token);
+    }
+
     try {
       const res = await fetch("/api/pipeline/run", {
         method: "POST",
+        headers: authHeaders,
         body: formData
       });
 
@@ -1647,7 +1657,23 @@ const App = {
     if (actions) actions.classList.remove("hidden");
 
     const rawText = result.final_report || result.llama_analysis || "Executive Summary Generated.";
-    
+    const isFallback = !!(result.is_fallback || result.status === "deterministic_fallback" || result.fallback);
+    const bannerHtml = isFallback
+      ? `<div class="mb-4 p-3.5 rounded-xl border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-3">
+          <span class="text-lg leading-none">⚠️</span>
+          <div>
+            <div class="font-bold text-amber-950 dark:text-amber-100 uppercase tracking-wide text-[11px] mb-0.5">Execution Status: Deterministic Fallback Mode</div>
+            <div>Local AI models (LLaMA 3.1 / Gemma) were unavailable. This document was processed through the deterministic extraction and calculation engine. Quantitative records have been verified directly from source data.</div>
+          </div>
+        </div>`
+      : `<div class="mb-4 p-3.5 rounded-xl border border-emerald-300 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 text-xs flex items-start gap-3">
+          <span class="text-lg leading-none">✅</span>
+          <div>
+            <div class="font-bold text-emerald-950 dark:text-emerald-100 uppercase tracking-wide text-[11px] mb-0.5">Execution Status: Real AI Inference Complete</div>
+            <div>Document successfully analyzed and synthesized using authentic local models (${result.model_used || "LLaMA 3.1 & Gemma 4"}).</div>
+          </div>
+        </div>`;
+
     // Format text nicely into HTML
     let formatted = rawText
       .replace(/^# (.*$)/gim, '<h1 class="text-xl font-black text-slate-900 mt-4 mb-2">$1</h1>')
@@ -1660,6 +1686,7 @@ const App = {
 
     if (content) {
       content.innerHTML = `
+        ${bannerHtml}
         <div class="prose prose-slate max-w-none text-xs sm:text-sm">
           ${formatted}
         </div>
@@ -2888,18 +2915,21 @@ const App = {
     if (e && e.preventDefault) e.preventDefault();
     this.showToast(`Preparing download for ${defaultFilename}...`, "info");
 
-    const tpl = (this.currentTemplate || "bento_grid").toLowerCase().replace(/ /g, "_");
-    const candidates = [
-      url,
-      `/reports/${defaultFilename}`,
-      `/reports/Ministry_of_Coal_${tpl}_2026.pdf`,
-      `/reports/Ministry_of_Coal_Report_2026.pdf`
-    ];
+    const candidates = [url];
+    if (url && !url.startsWith("/reports/")) {
+      candidates.push(`/reports/${defaultFilename}`);
+    }
+
+    const session = typeof AuthController !== "undefined" ? AuthController.getSession() : null;
+    const headers = {};
+    if (session && session.token) {
+      headers["Authorization"] = `Bearer ${session.token}`;
+    }
 
     for (const fetchUrl of candidates) {
       if (!fetchUrl) continue;
       try {
-        const resp = await fetch(fetchUrl);
+        const resp = await fetch(fetchUrl, { headers });
         if (resp.ok) {
           const blob = await resp.blob();
           if (blob && blob.size > 0) {

@@ -102,8 +102,8 @@ const App = {
     const pwdEl = document.getElementById("login-password");
     const rememberEl = document.getElementById("remember-device");
 
-    const empId = overrideEmpId || (empIdEl ? empIdEl.value.trim() : "MOC-7890") || "MOC-7890";
-    const pwd = pwdEl ? pwdEl.value : "SecureEnclave2026!";
+    const empId = overrideEmpId || (empIdEl ? empIdEl.value.trim() : "");
+    const pwd = pwdEl ? pwdEl.value : "";
     const remember = rememberEl ? rememberEl.checked : true;
 
     const spinner = document.getElementById("auth-spinner");

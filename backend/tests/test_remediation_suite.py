@@ -8,9 +8,9 @@ import time
 import unittest
 from pathlib import Path
 
-# Set up test environment
-os.environ["MINEINTEL_OFFICER_ID"] = "MOC-7890"
-os.environ["MINEINTEL_AUTH_PASSWORD"] = "SecureEnclave2026!"
+# Set up test environment with secure test-only credentials (NOT hardcoded production values)
+os.environ["MINEINTEL_OFFICER_ID"] = "MOC-TEST-OFFICER-7890"
+os.environ["MINEINTEL_AUTH_PASSWORD"] = "TestEnclaveSecret2026!"
 os.environ["MINEINTEL_JWT_SECRET"] = "test-jwt-secret-key-2026"
 
 import sys
@@ -29,6 +29,7 @@ from backend.main import (
     download_active_csv,
     download_report_format,
     fill_template_content,
+    generate_report_package,
     get_analytics_summary,
     get_dataset_details,
     get_report,
@@ -38,12 +39,14 @@ from backend.main import (
     list_available_datasets,
     list_report_templates,
     quick_preview,
+    require_auth,
     run_full_pipeline,
     save_uploaded_file,
     upload_file,
     validate_uploaded_file,
     verify_session_token,
     LoginRequest,
+    ReportPackageRequest,
     TemplateFillRequest,
 )
 from backend.services.converter import MarkdownConverter
@@ -102,9 +105,12 @@ class TestRemediationSuite(unittest.TestCase):
         self.assertIsNone(verify_session_token("invalid:token"))
 
     def test_02_auth_api_endpoints(self):
-        """Test auth_login and auth_verify endpoints directly."""
-        # 1. Valid login
-        req = LoginRequest(officer_id="MOC-7890", password="SecureEnclave2026!")
+        """Test auth_login and auth_verify endpoints directly with env-supplied credentials."""
+        test_officer = os.environ.get("MINEINTEL_OFFICER_ID", "MOC-TEST-OFFICER-7890")
+        test_pwd = os.environ.get("MINEINTEL_AUTH_PASSWORD", "TestEnclaveSecret2026!")
+
+        # 1. Valid login using environment credentials
+        req = LoginRequest(officer_id=test_officer, password=test_pwd)
         data = auth_login(req)
         self.assertTrue(data["success"])
         self.assertTrue(data["authenticated"])
@@ -114,10 +120,10 @@ class TestRemediationSuite(unittest.TestCase):
         # 2. Verify endpoint with token header
         verify_res = auth_verify(authorization=f"Bearer {token}")
         self.assertTrue(verify_res["authenticated"])
-        self.assertEqual(verify_res["officer_id"], "MOC-7890")
+        self.assertEqual(verify_res["officer_id"], test_officer)
 
         # 3. Invalid credentials
-        bad_req = LoginRequest(officer_id="MOC-7890", password="WrongPassword!")
+        bad_req = LoginRequest(officer_id=test_officer, password="WrongPassword!")
         with self.assertRaises(HTTPException) as ctx:
             auth_login(bad_req)
         self.assertEqual(ctx.exception.status_code, 401)
@@ -127,9 +133,39 @@ class TestRemediationSuite(unittest.TestCase):
             auth_verify(authorization=None, token=None)
         self.assertEqual(ctx2.exception.status_code, 401)
 
-        # 5. Logout endpoint
+        # 5. Tampered token on verify
+        tampered = token[:-6] + "tamper"
+        with self.assertRaises(HTTPException) as ctx3:
+            auth_verify(authorization=f"Bearer {tampered}")
+        self.assertEqual(ctx3.exception.status_code, 401)
+
+        # 6. Logout endpoint
         logout_data = auth_logout()
         self.assertTrue(logout_data["success"])
+
+    def test_02_b_protected_endpoints_require_valid_token(self):
+        """Verify require_auth blocks unauthenticated / tampered requests on protected routes."""
+        test_officer = os.environ.get("MINEINTEL_OFFICER_ID", "MOC-TEST-OFFICER-7890")
+        valid_token = create_session_token(test_officer)
+
+        # 1. require_auth with valid token
+        auth_data = require_auth(authorization=f"Bearer {valid_token}")
+        self.assertEqual(auth_data["officer_id"], test_officer)
+
+        # 2. require_auth missing header
+        with self.assertRaises(HTTPException) as ctx:
+            require_auth(authorization=None)
+        self.assertEqual(ctx.exception.status_code, 401)
+
+        # 3. require_auth bad scheme
+        with self.assertRaises(HTTPException) as ctx2:
+            require_auth(authorization=f"Basic {valid_token}")
+        self.assertEqual(ctx2.exception.status_code, 401)
+
+        # 4. require_auth tampered token
+        with self.assertRaises(HTTPException) as ctx3:
+            require_auth(authorization=f"Bearer {valid_token[:-5]}99999")
+        self.assertEqual(ctx3.exception.status_code, 401)
 
     # -------------------------------------------------------------------------
     # 2. UPLOAD VALIDATION & EXTRACTION
@@ -332,6 +368,7 @@ class TestRemediationSuite(unittest.TestCase):
 
     def test_10_history_manager_atomic_persistence(self):
         """Verify history manager records reports atomically without duplicates."""
+        test_officer = os.environ.get("MINEINTEL_OFFICER_ID", "MOC-TEST-OFFICER-7890")
         test_id = f"REP-TEST-{int(time.time())}"
         entry = record_report(
             report_id=test_id,
@@ -339,7 +376,7 @@ class TestRemediationSuite(unittest.TestCase):
             template_id="bento_grid",
             template_name="Bento Grid",
             theme="Modern Grid",
-            auditor_id="MOC-7890",
+            auditor_id=test_officer,
             records_count=5,
             summary_snippet="Test summary snippet."
         )
@@ -371,6 +408,83 @@ class TestRemediationSuite(unittest.TestCase):
         a = get_analytics_summary()
         self.assertEqual(a["status"], "success")
         self.assertIn("total_production_mt", a)
+
+    def test_12_large_document_coverage_no_page_drop(self):
+        """Verify large document extraction (60 pages) extracts 100% of pages with NO truncation."""
+        try:
+            from reportlab.pdfgen import canvas
+        except ImportError:
+            self.skipTest("ReportLab not available for synthetic PDF generation")
+
+        pdf_path = self.test_dir / "large_60_page_audit.pdf"
+        c = canvas.Canvas(str(pdf_path))
+        for page_num in range(1, 61):
+            c.drawString(100, 750, f"Ministry Audit Telemetry - Page {page_num}")
+            c.drawString(100, 700, f"Colliery Data Block {page_num}: Production={page_num * 10} MT")
+            if page_num == 60:
+                c.drawString(100, 650, "PAGE_60_CRITICAL_TELEMETRY_MARKER_CONFIRMED")
+            c.showPage()
+        c.save()
+
+        # Convert without arbitrary max_pages truncation
+        converter = MarkdownConverter()
+        result = converter.convert(pdf_path)
+        markdown = result["markdown"]
+
+        # Verify all pages extracted without silent drops
+        self.assertIn("## Page 1", markdown)
+        self.assertIn("## Page 30", markdown)
+        self.assertIn("## Page 50", markdown)
+        self.assertIn("## Page 60", markdown)
+        self.assertIn("PAGE_60_CRITICAL_TELEMETRY_MARKER_CONFIRMED", markdown)
+
+        # Verify LLM chunking preserves late pages without truncation
+        llama = LlamaClient()
+        chunks = llama._chunk_markdown(markdown, max_chunk_chars=3000)
+        self.assertTrue(len(chunks) > 1)
+        full_chunked_text = " ".join(chunks)
+        self.assertIn("PAGE_60_CRITICAL_TELEMETRY_MARKER_CONFIRMED", full_chunked_text)
+
+    def test_13_excel_xls_xlsx_pipeline(self):
+        """Verify multi-sheet XLSX extraction, tabular conversion, and full pipeline processing."""
+        try:
+            import pandas as pd
+        except ImportError:
+            self.skipTest("Pandas not available for Excel pipeline test")
+
+        excel_path = self.test_dir / "multisheet_coal_telemetry.xlsx"
+        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+            df_prod = pd.DataFrame({
+                "Colliery": ["MCL-Lakhanpur", "SECL-Dipka", "BCCL-Kusmunda"],
+                "Target_MT": [25.0, 30.0, 40.0],
+                "Actual_MT": [24.8, 31.2, 39.5]
+            })
+            df_prod.to_excel(writer, sheet_name="Production_Data", index=False)
+
+            df_fleet = pd.DataFrame({
+                "Fleet_ID": ["EXC-101", "DUMP-204", "DRAG-302"],
+                "Fuel_Rate_LPH": [42.5, 38.0, 95.0],
+                "Health_Score": [98, 92, 88]
+            })
+            df_fleet.to_excel(writer, sheet_name="Fleet_Telemetry", index=False)
+
+        converter = MarkdownConverter()
+        conv_res = converter.convert(excel_path)
+        self.assertEqual(conv_res["file_type"], "xlsx")
+        self.assertIn("Sheet 1: Production_Data", conv_res["markdown"])
+        self.assertIn("Sheet 2: Fleet_Telemetry", conv_res["markdown"])
+        self.assertIn("MCL-Lakhanpur", conv_res["markdown"])
+        self.assertIn("EXC-101", conv_res["markdown"])
+        self.assertTrue(len(conv_res.get("records", [])) >= 3)
+
+        # Test pipeline execution on this multi-sheet excel file
+        pipeline = DocumentPipeline()
+        pipe_res = pipeline.process_file(file_path=excel_path)
+        self.assertTrue(pipe_res["success"])
+        self.assertEqual(pipe_res["metadata"]["status"], "COMPLETED")
+        job_dir = config.OUTPUTS_DIR / pipe_res["job_id"]
+        self.assertTrue((job_dir / "01_raw_converted.md").exists())
+        self.assertTrue((job_dir / "04_final_systematic_report.md").exists())
 
 
 if __name__ == "__main__":
