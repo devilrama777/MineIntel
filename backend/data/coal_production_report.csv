@@ -1,0 +1,25 @@
+Data_Category,Entity,Financial_Year,Production_MT,YoY_Growth_Percent,Revenue_Crore,Secondary_Metric,Secondary_Value_MT,Source,Data_Status
+National Coal Production,India,2013-14,565.765,,,SECL contribution,124.261,"PIB / Ministry of Coal, Coal Production (02-Apr-2025)",Reported
+National Coal Production,India,2014-15,609.179,7.67,,SECL contribution,128.275,"PIB / Ministry of Coal, Coal Production (02-Apr-2025)",Reported
+National Coal Production,India,2015-16,639.23,4.93,,SECL contribution,137.934,"PIB / Ministry of Coal, Coal Production (02-Apr-2025)",Reported
+National Coal Production,India,2016-17,657.868,2.92,,SECL contribution,140.003,"PIB / Ministry of Coal, Coal Production (02-Apr-2025)",Reported
+National Coal Production,India,2017-18,675.4,2.66,,SECL contribution,144.709,"PIB / Ministry of Coal, Coal Production (02-Apr-2025)",Reported
+National Coal Production,India,2018-19,728.718,7.89,,SECL contribution,157.349,"PIB / Ministry of Coal, Coal Production (02-Apr-2025)",Reported
+National Coal Production,India,2019-20,730.874,0.3,,SECL contribution,150.546,"PIB / Ministry of Coal, Coal Production (02-Apr-2025)",Reported
+National Coal Production,India,2020-21,716.083,-2.02,,SECL contribution,150.606,"PIB / Ministry of Coal, Coal Production (02-Apr-2025)",Reported
+National Coal Production,India,2021-22,778.21,8.68,,SECL contribution,142.514,"PIB / Ministry of Coal, Coal Production (02-Apr-2025)",Reported
+National Coal Production,India,2022-23,893.191,14.78,,SECL contribution,167.006,"PIB / Ministry of Coal, Coal Production (02-Apr-2025)",Reported
+National Coal Production,India,2023-24,997.826,11.71,,SECL contribution,187.536,"PIB / Ministry of Coal, Coal Production (02-Apr-2025)",Reported
+CIL Subsidiary Production,BCCL,2023-24,41.1,,14113.31,,,"Rajya Sabha / Ministry of Coal, Subsidiary-wise raw coal production and revenue (2023-24)",Reported
+CIL Subsidiary Production,CCL,2023-24,86.05,,16565.72,,,"Rajya Sabha / Ministry of Coal, Subsidiary-wise raw coal production and revenue (2023-24)",Reported
+CIL Subsidiary Production,ECL,2023-24,47.56,,14559.14,,,"Rajya Sabha / Ministry of Coal, Subsidiary-wise raw coal production and revenue (2023-24)",Reported
+CIL Subsidiary Production,MCL,2023-24,206.1,,27182.32,,,"Rajya Sabha / Ministry of Coal, Subsidiary-wise raw coal production and revenue (2023-24)",Reported
+CIL Subsidiary Production,NCL,2023-24,136.15,,24632.89,,,"Rajya Sabha / Ministry of Coal, Subsidiary-wise raw coal production and revenue (2023-24)",Reported
+CIL Subsidiary Production,NEC,2023-24,0.2,,115.97,,,"Rajya Sabha / Ministry of Coal, Subsidiary-wise raw coal production and revenue (2023-24)",Reported
+CIL Subsidiary Production,SECL,2023-24,187.38,,27306.37,,,"Rajya Sabha / Ministry of Coal, Subsidiary-wise raw coal production and revenue (2023-24)",Reported
+CIL Subsidiary Production,WCL,2023-24,69.11,,17491.99,,,"Rajya Sabha / Ministry of Coal, Subsidiary-wise raw coal production and revenue (2023-24)",Reported
+CIL Subsidiary Production,CIL Grand Total,2023-24,773.65,,141967.71,,,"Rajya Sabha / Ministry of Coal, Subsidiary-wise raw coal production and revenue (2023-24)",Reported
+Latest Ministry Headline,India,2024-25,1047.523,,,,,Ministry of Coal Production and Supplies,Reported
+Latest Ministry Headline,CIL,2024-25,781.056,,,,,Ministry of Coal Production and Supplies,Reported
+Latest Ministry Headline,CIL,2023-24,773.81,,,,,Ministry of Coal Production and Supplies,Reported
+Latest Ministry Headline,CIL,2022-23,703.2,,,,,Ministry of Coal Production and Supplies,Reported

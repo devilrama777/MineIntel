@@ -104,9 +104,9 @@
               <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 text-sm">
                 🪪
               </div>
-              <input type="text" id="login-emp-id" value="MOC-7890" required
+              <input type="text" id="login-emp-id" required autocomplete="username"
                 class="block w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-sm font-mono font-bold text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400 transition"
-                placeholder="e.g. MOC-7890" />
+                placeholder="Auditor ID (e.g. MOC-7890)" />
             </div>
           </div>
 
@@ -117,9 +117,9 @@
               <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 text-sm">
                 🔒
               </div>
-              <input type="password" id="login-password" value="SecureEnclave2026!" required
+              <input type="password" id="login-password" required autocomplete="current-password"
                 class="block w-full pl-10 pr-12 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-sm font-mono font-bold text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400 transition"
-                placeholder="••••••••" />
+                placeholder="Enclave Security Password" />
               <button type="button" id="btn-toggle-password" onclick="App.togglePasswordVisibility(event)"
                 class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-cyan-300 transition text-sm cursor-pointer z-20 select-none"
                 title="Toggle password visibility">
@@ -146,10 +146,10 @@
               <span id="auth-icon">🔓</span>
             </button>
             
-            <button type="button" id="btn-quick-login" onclick="App.handleLogin(event, 'MOC-7890')"
+            <button type="button" id="btn-quick-login" onclick="App.handleQuickLogin(event)"
               class="w-full py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 border border-slate-700">
               <span>⚡</span>
-              <span>Instant Auditor Access (Demo 1-Click)</span>
+              <span>Fill Demo Credentials & Authenticate</span>
             </button>
           </div>
         </form>

@@ -8,7 +8,7 @@ target_dir.mkdir(parents=True, exist_ok=True)
 
 url = "https://github.com/Skywithsakshamm/sih-mining/archive/refs/heads/main.zip"
 print(f"Downloading from {url}...")
-resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, verify=False)
+resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
 print("Status code:", resp.status_code)
 
 if resp.status_code == 200:

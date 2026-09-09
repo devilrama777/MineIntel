@@ -7,8 +7,6 @@ __pycache__/
 *.pyc
 venv/
 .venv/
-default_data_backup/
-reported_data/
-processed_output/
 *.bak
 test_*.py
+

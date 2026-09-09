@@ -1,4 +1,7 @@
 import json
+import logging
+import os
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -6,13 +9,30 @@ from typing import Any, Dict, List, Optional
 
 from backend import config
 
+logger = logging.getLogger("mineintel.history")
+
 HISTORY_FILE = config.OUTPUTS_DIR / "reports_history.json"
+
+
+def _atomic_write_json(file_path: Path, data: Any) -> None:
+    """Safely writes JSON data atomically using temporary swap to prevent corruption."""
+    try:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile("w", dir=str(file_path.parent), delete=False, encoding="utf-8") as tf:
+            json.dump(data, tf, indent=2)
+            temp_name = tf.name
+        os.replace(temp_name, str(file_path))
+    except Exception as e:
+        logger.warning(f"Atomic write error for {file_path}: {e}")
+        try:
+            file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
 
 def get_history(search: Optional[str] = None, auditor_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Retrieves all generated reports with optional keyword search filtering."""
     if not HISTORY_FILE.exists():
-        # Initialize default foundational history entry
         initial_history = [
             {
                 "id": "REP-2026-B56D",
@@ -29,10 +49,7 @@ def get_history(search: Optional[str] = None, auditor_id: Optional[str] = None) 
                 "csv_url": "/api/reports/download/csv"
             }
         ]
-        try:
-            HISTORY_FILE.write_text(json.dumps(initial_history, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        _atomic_write_json(HISTORY_FILE, initial_history)
         items = initial_history
     else:
         try:
@@ -40,11 +57,9 @@ def get_history(search: Optional[str] = None, auditor_id: Optional[str] = None) 
         except Exception:
             items = []
 
-    # Filter by auditor_id if provided
     if auditor_id:
         items = [i for i in items if i.get("auditor_id", "").lower() == auditor_id.lower()]
 
-    # Filter by search keyword (checks title, template, summary, and id)
     if search and search.strip():
         q = search.strip().lower()
         filtered = []
@@ -69,10 +84,13 @@ def record_report(
 ) -> Dict[str, Any]:
     """Records a newly generated report in the persistent history log."""
     history = get_history()
-    
+
+    # Deduplicate existing report_id if re-recording
+    history = [h for h in history if h.get("id") != report_id]
+
     new_entry = {
         "id": report_id,
-        "title": title or f"Coal Performance Report ({template_name})",
+        "title": title or f"Intelligence Dossier ({template_name})",
         "template": template_id,
         "template_name": template_name,
         "theme": theme,
@@ -80,17 +98,11 @@ def record_report(
         "timestamp": datetime.now().strftime("%d %b %Y, %I:%M %p"),
         "records_count": records_count,
         "summary_snippet": summary_snippet[:180] + ("..." if len(summary_snippet) > 180 else ""),
-        "pdf_url": f"/api/reports/download/pdf?template={template_id}",
-        "docx_url": f"/api/reports/download/docx?template={template_id}",
-        "csv_url": "/api/reports/download/csv"
+        "pdf_url": f"/api/reports/download/pdf?template={template_id}&job_id={report_id}",
+        "docx_url": f"/api/reports/download/docx?template={template_id}&job_id={report_id}",
+        "csv_url": f"/api/reports/download/csv?job_id={report_id}"
     }
 
-    # Prepend new entry
     history.insert(0, new_entry)
-    
-    try:
-        HISTORY_FILE.write_text(json.dumps(history, indent=2), encoding="utf-8")
-    except Exception:
-        pass
-
+    _atomic_write_json(HISTORY_FILE, history)
     return new_entry

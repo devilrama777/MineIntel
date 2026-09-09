@@ -35,11 +35,11 @@ def run():
 
     # 2. Send to Ollama with the exact user command
     user_command = Path(config.PROMPTS_DIR / "llama_csv_prompt.txt").read_text(encoding="utf-8").strip()
-    print(f"\nSending to Ollama (llama3.1:latest) with command:\n\"{user_command}\"")
+    print(f"\nSending to Ollama ({config.LLAMA_MODEL}) with command:\n\"{user_command}\"")
 
     ollama_url = f"{config.OLLAMA_BASE_URL}/api/generate"
     payload = {
-        "model": "llama3.1:latest",
+        "model": config.LLAMA_MODEL,
         "prompt": f"{combined_markdown}\n\nInstruction: {user_command}",
         "system": user_command,
         "stream": False,
@@ -48,10 +48,25 @@ def run():
         }
     }
 
-    resp = requests.post(ollama_url, json=payload, timeout=300)
-    if resp.status_code != 200:
-        print(f"Ollama Error {resp.status_code}: {resp.text}")
-        resp.raise_for_status()
+    try:
+        resp = requests.post(ollama_url, json=payload, timeout=300)
+        if resp.status_code != 200:
+            print(f"Ollama Error {resp.status_code}: {resp.text}")
+            raise Exception(f"Ollama returned status {resp.status_code}")
+    except requests.exceptions.ConnectionError:
+        print("ERROR: Ollama is not available. The local LLM server is not running.")
+        print("Please start Ollama with: ollama serve")
+        print("Then pull the model with: ollama pull llama3.1")
+        summary_text = "# LLM UNAVAILABLE\n\nThe local Ollama server is not running. Please start Ollama and retry.\n\n⚠️ This is a fallback notice - no AI analysis was performed."
+        summary_path = output_dir / "llama_summary.md"
+        summary_path.write_text(summary_text, encoding="utf-8")
+        return
+    except Exception as e:
+        print(f"ERROR: Failed to connect to Ollama: {e}")
+        summary_text = f"# LLM ERROR\n\nFailed to connect to Ollama: {e}\n\n⚠️ This is a fallback notice - no AI analysis was performed."
+        summary_path = output_dir / "llama_summary.md"
+        summary_path.write_text(summary_text, encoding="utf-8")
+        return
 
     summary_text = resp.json().get("response", "").strip()
 

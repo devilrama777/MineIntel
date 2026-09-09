@@ -1,0 +1,377 @@
+import asyncio
+import io
+import json
+import os
+import shutil
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+# Set up test environment
+os.environ["MINEINTEL_OFFICER_ID"] = "MOC-7890"
+os.environ["MINEINTEL_AUTH_PASSWORD"] = "SecureEnclave2026!"
+os.environ["MINEINTEL_JWT_SECRET"] = "test-jwt-secret-key-2026"
+
+import sys
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from fastapi import HTTPException, UploadFile
+from backend import config
+from backend.main import (
+    app,
+    auth_login,
+    auth_logout,
+    auth_verify,
+    create_session_token,
+    download_active_csv,
+    download_report_format,
+    fill_template_content,
+    get_analytics_summary,
+    get_dataset_details,
+    get_report,
+    get_reports_history,
+    get_trends_data,
+    health_check,
+    list_available_datasets,
+    list_report_templates,
+    quick_preview,
+    run_full_pipeline,
+    save_uploaded_file,
+    upload_file,
+    validate_uploaded_file,
+    verify_session_token,
+    LoginRequest,
+    TemplateFillRequest,
+)
+from backend.services.converter import MarkdownConverter
+from backend.services.document_generator import DocumentGenerator, get_active_dataset_metrics
+from backend.services.gemma_client import GemmaClient
+from backend.services.history_manager import get_history, record_report
+from backend.services.llama_client import LlamaClient
+from backend.services.math_engine import MathEngine, safe_eval_expr
+from backend.services.pipeline import DocumentPipeline
+
+
+class TestRemediationSuite(unittest.TestCase):
+    """
+    Comprehensive verification test suite ensuring:
+    1. Zero syntax / compilation errors across all modules
+    2. Real sovereign authentication and session token verification
+    3. Upload validation (file format, size limits, empty files)
+    4. Deterministic conversion & bounded processing without truncation
+    5. Truthful AI status (no fake 100% success or dummy Coal India data)
+    6. Mathematical calculation verification via AST
+    7. Clean multi-format document generation (PDF, DOCX, 4-sheet XLSX)
+    8. Strict job-isolated outputs preventing concurrent collision
+    9. Atomic history management
+    10. API endpoint integrity and Vercel compatibility
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.test_dir = ROOT_DIR / "backend" / "tests" / "temp_test_workspace"
+        cls.test_dir.mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.test_dir.exists():
+            shutil.rmtree(cls.test_dir, ignore_errors=True)
+
+    # -------------------------------------------------------------------------
+    # 1. AUTHENTICATION & SECURITY TESTS
+    # -------------------------------------------------------------------------
+    def test_01_auth_token_lifecycle(self):
+        """Verify HMAC session token creation, verification, and expiration."""
+        token = create_session_token("MOC-7890", "Senior Operational Auditor")
+        self.assertIsInstance(token, str)
+        self.assertEqual(len(token.split(":")), 4)
+
+        session = verify_session_token(token)
+        self.assertIsNotNone(session)
+        self.assertEqual(session["officer_id"], "MOC-7890")
+        self.assertEqual(session["role"], "Senior Operational Auditor")
+
+        # Verify tampered token fails
+        tampered = token[:-4] + "ffff"
+        self.assertIsNone(verify_session_token(tampered))
+
+        # Verify invalid format fails
+        self.assertIsNone(verify_session_token("invalid:token"))
+
+    def test_02_auth_api_endpoints(self):
+        """Test auth_login and auth_verify endpoints directly."""
+        # 1. Valid login
+        req = LoginRequest(officer_id="MOC-7890", password="SecureEnclave2026!")
+        data = auth_login(req)
+        self.assertTrue(data["success"])
+        self.assertTrue(data["authenticated"])
+        self.assertIn("token", data)
+        token = data["token"]
+
+        # 2. Verify endpoint with token header
+        verify_res = auth_verify(authorization=f"Bearer {token}")
+        self.assertTrue(verify_res["authenticated"])
+        self.assertEqual(verify_res["officer_id"], "MOC-7890")
+
+        # 3. Invalid credentials
+        bad_req = LoginRequest(officer_id="MOC-7890", password="WrongPassword!")
+        with self.assertRaises(HTTPException) as ctx:
+            auth_login(bad_req)
+        self.assertEqual(ctx.exception.status_code, 401)
+
+        # 4. Missing token on verify
+        with self.assertRaises(HTTPException) as ctx2:
+            auth_verify(authorization=None, token=None)
+        self.assertEqual(ctx2.exception.status_code, 401)
+
+        # 5. Logout endpoint
+        logout_data = auth_logout()
+        self.assertTrue(logout_data["success"])
+
+    # -------------------------------------------------------------------------
+    # 2. UPLOAD VALIDATION & EXTRACTION
+    # -------------------------------------------------------------------------
+    def test_03_upload_validation(self):
+        """Test upload validation rejects invalid extensions, empty files, and size limits."""
+        # 1. Unsupported extension
+        bad_file = UploadFile(filename="malicious.exe", file=io.BytesIO(b"binary content"))
+        with self.assertRaises(HTTPException) as ctx:
+            validate_uploaded_file(bad_file)
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("Unsupported file format", ctx.exception.detail)
+
+        # 2. Empty file
+        empty_file = UploadFile(filename="empty.csv", file=io.BytesIO(b""))
+        dest = self.test_dir / "empty.csv"
+        with self.assertRaises(HTTPException) as ctx2:
+            save_uploaded_file(empty_file, dest)
+        self.assertEqual(ctx2.exception.status_code, 400)
+        self.assertIn("empty", ctx2.exception.detail.lower())
+
+        # 3. File size limit enforcement
+        large_content = b"X" * (1024 * 1024 + 100)  # 1MB + 100 bytes
+        large_file = UploadFile(filename="large.csv", file=io.BytesIO(large_content))
+        dest_large = self.test_dir / "large.csv"
+        with self.assertRaises(HTTPException) as ctx3:
+            save_uploaded_file(large_file, dest_large, max_bytes=1024 * 1024)  # 1MB limit for test
+        self.assertEqual(ctx3.exception.status_code, 413)
+
+        # 4. Valid CSV upload
+        valid_csv = b"Mine,Target,Actual\nAlpha,100,95\nBeta,200,198\n"
+        valid_file = UploadFile(filename="valid_data.csv", file=io.BytesIO(valid_csv))
+        res_valid = asyncio.run(upload_file(valid_file))
+        self.assertIn("file_id", res_valid)
+        self.assertTrue(Path(res_valid["file_path"]).exists())
+
+    def test_04_converter_deterministic_extraction(self):
+        """Verify converter produces structured markdown without hardcoded 45k char truncation."""
+        converter = MarkdownConverter()
+        sample_csv = self.test_dir / "test_extract.csv"
+        sample_csv.write_text(
+            "State,Colliery,Production_MT,Dispatch_MT\n"
+            "Odisha,Belpahar,15.2,14.8\n"
+            "Chhattisgarh,Gevra,42.5,41.9\n"
+            "Jharkhand,Ashoka,8.4,8.1\n",
+            encoding="utf-8"
+        )
+        res = converter.convert(sample_csv)
+        self.assertEqual(res["file_type"], "csv")
+        self.assertIn("Belpahar", res["markdown"])
+        self.assertIn("Gevra", res["markdown"])
+        self.assertIn("Numerical Summary Statistics", res["markdown"])
+        self.assertTrue(len(res.get("records", [])) >= 3)
+
+    # -------------------------------------------------------------------------
+    # 3. TRUTHFUL STATUS & AI FALLBACK TESTS (NO FAKE COAL INDIA DATA)
+    # -------------------------------------------------------------------------
+    def test_05_llama_client_truthful_fallback(self):
+        """Verify LLaMA client returns truthful status and does NOT fabricate Coal India data."""
+        # Force an offline client with an invalid port
+        offline_client = LlamaClient(base_url="http://127.0.0.1:59999")
+        self.assertFalse(offline_client.is_available())
+
+        sample_custom_content = (
+            "# Solar Farm Equipment Report\n"
+            "Inverters installed: 500 units.\n"
+            "Total Power Generation: 45.8 MW.\n"
+            "Peak Efficiency: 98.2%.\n"
+        )
+        res = offline_client.analyze_document(
+            markdown_content=sample_custom_content,
+            file_type="pdf"
+        )
+        self.assertTrue(res.get("is_fallback"))
+        self.assertEqual(res.get("status"), "deterministic_fallback")
+        analysis = res.get("analysis", "")
+        # Must reflect the user's solar farm text, NOT Coal India SECL/MCL!
+        self.assertIn("Solar Farm Equipment Report", analysis)
+        self.assertNotIn("SECL (Bilaspur)", analysis)
+        self.assertNotIn("131,608.90 MT", analysis)
+
+    def test_06_gemma_client_truthful_fallback(self):
+        """Verify Gemma client synthesizes grounded report without fake claims."""
+        offline_gemma = GemmaClient(base_url="http://127.0.0.1:59999")
+        self.assertFalse(offline_gemma.is_available())
+
+        custom_analysis = "Audit of Hospital Oxygen Supplies: Total cylinders: 1,200. Reserve days: 25 days."
+        custom_math = "Total verified: 1200 cylinders. Discrepancy: 0."
+        res = offline_gemma.generate_systematic_report(
+            llama_analysis=custom_analysis,
+            math_audit_markdown=custom_math
+        )
+        self.assertTrue(res.get("fallback"))
+        self.assertEqual(res.get("status"), "deterministic_fallback")
+        report = res.get("report", "")
+        self.assertIn("Hospital Oxygen Supplies", report)
+        self.assertNotIn("MCL (Sambalpur)", report)
+
+    # -------------------------------------------------------------------------
+    # 4. MATH ENGINE & AST CALCULATIONS
+    # -------------------------------------------------------------------------
+    def test_07_math_engine_verification(self):
+        """Test AST mathematical calculation engine and discrepancy detection."""
+        math_engine = MathEngine()
+
+        # Simple verification
+        verified = math_engine.verify_expression("250 + 150", 400.0)
+        self.assertEqual(verified["status"], "VERIFIED")
+        self.assertEqual(verified["calculated"], 400.0)
+
+        # Discrepancy detection
+        failed = math_engine.verify_expression("250 + 150", 500.0)
+        self.assertEqual(failed["status"], "DISCREPANCY_DETECTED")
+        self.assertEqual(failed["calculated"], 400.0)
+
+        # Safe eval handles standard math but rejects arbitrary code execution
+        self.assertEqual(safe_eval_expr("10 * 5 + 2"), 52)
+        with self.assertRaises(Exception):
+            safe_eval_expr("__import__('os').system('dir')")
+
+    # -------------------------------------------------------------------------
+    # 5. DOCUMENT GENERATION (PDF, DOCX, 4-SHEET XLSX) & DATA ISOLATION
+    # -------------------------------------------------------------------------
+    def test_08_document_generator_custom_data_no_cil_contamination(self):
+        """Verify DocumentGenerator uses custom user data when provided and does not contaminate with CIL baseline."""
+        doc_gen = DocumentGenerator()
+        custom_records = [
+            {"Colliery": "Airport Terminal A", "Production": 12.5, "Dispatch": 11.8},
+            {"Colliery": "Airport Terminal B", "Production": 18.2, "Dispatch": 17.5},
+            {"Colliery": "Airport Terminal C", "Production": 9.4, "Dispatch": 9.0}
+        ]
+
+        metrics = get_active_dataset_metrics(
+            user_records=custom_records,
+            document_title="Airport Logistics Report"
+        )
+        self.assertEqual(metrics["count"], 3)
+        self.assertAlmostEqual(metrics["total_production"], 40.1, places=1)
+        self.assertIn("Airport Terminal", metrics["collieries"][0]["name"])
+
+        # Test report packaging with custom records
+        report_id = "TEST-REP-01"
+        pkg = doc_gen.generate_all_packages(
+            template_name="bento_grid",
+            report_id=report_id,
+            summary_text="Airport Logistics Operational Audit Summary.",
+            user_records=custom_records,
+            custom_title="Airport Logistics Report"
+        )
+        self.assertTrue(pkg.get("success"))
+        files = pkg.get("files", {})
+        self.assertIn("pdf", files)
+        self.assertIn("docx", files)
+        self.assertIn("xlsx", files)
+
+        # Check excel file creation
+        raw_xlsx = files["xlsx"]["path"] if isinstance(files["xlsx"], dict) else files["xlsx"]
+        xlsx_path = Path(raw_xlsx)
+        self.assertTrue(xlsx_path.exists())
+
+        # Inspect excel sheets if openpyxl is available
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(xlsx_path)
+            sheet_names = wb.sheetnames
+            self.assertIn("Overview & KPIs", sheet_names)
+            self.assertIn("Dataset Records", sheet_names)
+            self.assertIn("Statistical Breakdown", sheet_names)
+            self.assertIn("Verification Audit", sheet_names)
+        except ImportError:
+            pass
+
+    def test_09_job_isolated_execution(self):
+        """Verify pipeline strictly isolates files inside outputs/{job_id}/."""
+        pipeline = DocumentPipeline()
+        sample_csv = self.test_dir / "isolated_sample.csv"
+        sample_csv.write_text(
+            "Equipment,Runtime_Hours,Fuel_Liters\n"
+            "Excavator-1,120,4800\n"
+            "Dumper-4,150,6000\n",
+            encoding="utf-8"
+        )
+
+        res = pipeline.process_file(file_path=sample_csv)
+        self.assertIn("job_id", res)
+        job_id = res["job_id"]
+        job_dir = config.OUTPUTS_DIR / job_id
+
+        self.assertTrue(job_dir.exists())
+        self.assertTrue((job_dir / "01_raw_converted.md").exists())
+        self.assertTrue((job_dir / "02_llama_analysis.md").exists())
+        self.assertTrue((job_dir / "03_math_audit.json").exists())
+        self.assertTrue((job_dir / "04_final_systematic_report.md").exists())
+        self.assertTrue((job_dir / "metadata.json").exists())
+
+        # Verify job endpoint retrieves isolated artifacts
+        job_res = get_report(job_id)
+        self.assertEqual(job_res["job_id"], job_id)
+        self.assertIn("Excavator-1", job_res["raw_markdown"])
+
+    def test_10_history_manager_atomic_persistence(self):
+        """Verify history manager records reports atomically without duplicates."""
+        test_id = f"REP-TEST-{int(time.time())}"
+        entry = record_report(
+            report_id=test_id,
+            title="Sovereign Audit Test",
+            template_id="bento_grid",
+            template_name="Bento Grid",
+            theme="Modern Grid",
+            auditor_id="MOC-7890",
+            records_count=5,
+            summary_snippet="Test summary snippet."
+        )
+        self.assertEqual(entry["id"], test_id)
+
+        # Retrieve and verify search
+        history = get_history(search="Sovereign Audit Test")
+        self.assertTrue(any(h["id"] == test_id for h in history))
+
+    def test_11_core_api_endpoints(self):
+        """Verify core discovery and dataset endpoint functions respond successfully."""
+        # 1. Health
+        h = health_check()
+        self.assertEqual(h["status"], "healthy")
+
+        # 2. Templates
+        t = list_report_templates()
+        self.assertEqual(len(t["templates"]), 6)
+
+        # 3. Datasets Catalog
+        d = list_available_datasets()
+        self.assertTrue(len(d["datasets"]) >= 5)
+
+        # 4. Trends
+        tr = get_trends_data()
+        self.assertIn("status", tr)
+
+        # 5. Analytics Summary
+        a = get_analytics_summary()
+        self.assertEqual(a["status"], "success")
+        self.assertIn("total_production_mt", a)
+
+
+if __name__ == "__main__":
+    unittest.main()

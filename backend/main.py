@@ -1,13 +1,21 @@
+import hashlib
+import hmac
 import json
+import logging
 import os
+import secrets
 import shutil
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import numpy as np
 import pandas as pd
 import requests
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+logger = logging.getLogger("mineintel")
+
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -28,10 +36,14 @@ app = FastAPI(
 )
 
 # Enable CORS for frontend integration
+# With wildcard origins, credentials must be disabled per browser CORS policy
+_allowed_origins = config.CORS_ORIGINS
+_allow_creds = (_allowed_origins != ["*"])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_allowed_origins,
+    allow_credentials=_allow_creds,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -42,6 +54,86 @@ llama_client = LlamaClient()
 math_engine = MathEngine()
 gemma_client = GemmaClient()
 document_generator = DocumentGenerator()
+
+
+# -------------------------------------------------------------------------
+# AUTHENTICATION HELPERS & MODELS
+# -------------------------------------------------------------------------
+class LoginRequest(BaseModel):
+    officer_id: str
+    password: str
+    remember_device: Optional[bool] = True
+
+
+def create_session_token(officer_id: str, role: str = "Senior Operational Auditor") -> str:
+    """Creates a cryptographically signed session token with timestamp."""
+    timestamp = int(time.time())
+    payload = f"{officer_id}:{timestamp}:{role}"
+    sig = hmac.new(config.JWT_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{payload}:{sig}"
+
+
+def verify_session_token(token: str) -> Optional[Dict[str, Any]]:
+    """Verifies HMAC signature and 24-hour expiration of session token."""
+    try:
+        parts = token.split(":")
+        if len(parts) != 4:
+            return None
+        officer_id, timestamp_str, role, sig = parts
+        timestamp = int(timestamp_str)
+        if time.time() - timestamp > 86400:  # 24 hours expiry
+            return None
+        payload = f"{officer_id}:{timestamp}:{role}"
+        expected_sig = hmac.new(config.JWT_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        if secrets.compare_digest(sig, expected_sig):
+            return {"officer_id": officer_id, "role": role, "timestamp": timestamp}
+        return None
+    except Exception:
+        return None
+
+
+# -------------------------------------------------------------------------
+# UPLOAD VALIDATION HELPERS
+# -------------------------------------------------------------------------
+def validate_uploaded_file(file: UploadFile) -> str:
+    """Validates file presence and extension."""
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="No file uploaded.")
+    ext = Path(file.filename).suffix.lower()
+    if ext not in config.ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file format '{ext}'. Allowed formats: {', '.join(sorted(config.ALLOWED_EXTENSIONS))}"
+        )
+    return ext
+
+
+def save_uploaded_file(file: UploadFile, dest_path: Path, max_bytes: int = config.MAX_UPLOAD_SIZE_BYTES) -> int:
+    """Safely saves an uploaded file enforcing non-empty and max upload size constraints."""
+    total_read = 0
+    chunk_size = 1024 * 1024  # 1MB
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    exceeded = False
+    with open(dest_path, "wb") as buffer:
+        while True:
+            chunk = file.file.read(chunk_size)
+            if not chunk:
+                break
+            total_read += len(chunk)
+            if total_read > max_bytes:
+                exceeded = True
+                break
+            buffer.write(chunk)
+    if exceeded:
+        dest_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds maximum upload limit of {max_bytes // (1024 * 1024)}MB."
+        )
+    if total_read == 0:
+        dest_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Uploaded file is empty (0 bytes).")
+    return total_read
 
 
 # Pydantic Request Models
@@ -64,6 +156,59 @@ class GemmaRequest(BaseModel):
     model_override: Optional[str] = None
 
 
+# -------------------------------------------------------------------------
+# AUTHENTICATION ENDPOINTS
+# -------------------------------------------------------------------------
+@app.post("/api/auth/login")
+def auth_login(req: LoginRequest):
+    """Authenticates executive officers against sovereign credentials using constant-time comparison."""
+    valid_id = secrets.compare_digest(req.officer_id.strip(), config.AUTH_OFFICER_ID)
+    valid_pw = secrets.compare_digest(req.password.strip(), config.AUTH_SECRET_PASSWORD)
+    if not (valid_id and valid_pw):
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication failed: Invalid Officer Employee ID or Enclave Password."
+        )
+    token = create_session_token(req.officer_id.strip())
+    return {
+        "success": True,
+        "authenticated": True,
+        "token": token,
+        "officer_id": req.officer_id.strip(),
+        "name": "Authorized Inspector",
+        "role": "Senior Operational Auditor",
+        "department": "Ministry of Coal, Government of India",
+        "expires_in": 86400
+    }
+
+
+@app.get("/api/auth/verify")
+def auth_verify(authorization: Optional[str] = Header(None), token: Optional[str] = Query(None)):
+    """Verifies authenticity and timestamp of an active session token."""
+    raw_token = token if isinstance(token, str) and token.strip() else None
+    if not raw_token and isinstance(authorization, str) and authorization.strip():
+        if authorization.startswith("Bearer "):
+            raw_token = authorization.split("Bearer ", 1)[1].strip()
+        else:
+            raw_token = authorization.strip()
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Authentication token required.")
+    session = verify_session_token(raw_token)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session token invalid or expired.")
+    return {
+        "authenticated": True,
+        "officer_id": session["officer_id"],
+        "role": session["role"]
+    }
+
+
+@app.post("/api/auth/logout")
+def auth_logout():
+    """Terminates active enclave session."""
+    return {"success": True, "message": "Enclave session terminated."}
+
+
 @app.get("/api/health")
 def health_check():
     """Checks service health and local Ollama connectivity."""
@@ -81,19 +226,13 @@ def health_check():
 
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
-    """Uploads a PDF or CSV file to the backend."""
-    ext = Path(file.filename).suffix.lower()
-    if ext not in [".pdf", ".csv", ".tsv"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type: {ext}. Only PDF and CSV files are allowed."
-        )
-
-    file_id = f"{uuid.uuid4().hex[:8]}_{file.filename}"
+    """Uploads a PDF, CSV, or spreadsheet file to the backend with size and extension validation."""
+    ext = validate_uploaded_file(file)
+    safe_filename = "".join(c for c in file.filename if c.isalnum() or c in "._- ").strip()[:100]
+    file_id = f"{uuid.uuid4().hex[:8]}_{safe_filename}"
     save_path = config.UPLOADS_DIR / file_id
 
-    with open(save_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    save_uploaded_file(file, save_path)
 
     return {
         "file_id": file_id,
@@ -162,11 +301,12 @@ async def run_full_pipeline(
     route_media_to_gemma: bool = Form(True)
 ):
     """Executes the full end-to-end multi-stage pipeline on an uploaded file."""
-    # 1. Save uploaded file
-    file_id = f"{uuid.uuid4().hex[:8]}_{file.filename}"
+    # 1. Validate and save uploaded file
+    validate_uploaded_file(file)
+    safe_filename = "".join(c for c in file.filename if c.isalnum() or c in "._- ").strip()[:100]
+    file_id = f"{uuid.uuid4().hex[:8]}_{safe_filename}"
     save_path = config.UPLOADS_DIR / file_id
-    with open(save_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    save_uploaded_file(file, save_path)
 
     # 2. Parse custom calculations if present
     custom_calcs = None
@@ -189,55 +329,11 @@ async def run_full_pipeline(
         )
         return pipeline_output
     except Exception as e:
-        logger.warning(f"Pipeline execution fallback triggered for {file.filename}: {e}")
-        return {
-            "success": True,
-            "filename": file.filename,
-            "file_type": "pdf" if file.filename.lower().endswith(".pdf") else "csv",
-            "markdown_content": f"# ANNUAL REPORT AUDIT • {file.filename}\nComprehensive colliery production and offtake audit data synthesized.",
-            "llama_analysis": (
-                f"### EXECUTIVE ANALYSIS AUDIT: {file.filename}\n\n"
-                "**1. Macro-Level Operational Findings:**\n"
-                "- Evaluated comprehensive production, offtake, and financial performance across major coal mining subsidiaries (SECL, MCL, ECL, BCCL, CCL, WCL, NCL).\n"
-                "- Aggregate extraction trends demonstrate positive YoY trajectory with key opencast facilities achieving over 96.4% target fulfillment.\n\n"
-                "**2. Evacuation & Supply Chain Offtake:**\n"
-                "- Bulk rail rake mobilization ensured consistent supply to critical thermal power generating stations.\n"
-                "- Mechanized coal handling plants (CHPs) and silo-loading systems maintained 98.2% operational availability.\n\n"
-                "**3. Environmental, Safety & Capital Expenditure Governance:**\n"
-                "- Capital expenditure (CAPEX) allocation exceeded statutory quarterly targets in sustainable first-mile connectivity corridors.\n"
-                "- Progressive mine reclamation, solar power installations, and dust suppression systems meet Ministry guidelines."
-            ),
-            "math_audit": {
-                "ast_verified": True,
-                "total_checks": 18,
-                "passed_checks": 18,
-                "discrepancies": 0,
-                "confidence_score": 100.0,
-                "markdown": "### AST Deterministic Math Engine Audit\n- All tabular sums and YoY variations verified with 100% mathematical precision."
-            },
-            "final_report": (
-                f"# MINISTRY OF COAL • GOVERNMENT OF INDIA\n"
-                f"## Executive Colliery Production & Dispatch Dossier\n"
-                f"**Source Document**: {file.filename} • **Status**: Verified\n\n"
-                "---\n\n"
-                "### 1. Executive Summary & Strategic Findings\n"
-                "The national coal mining sector demonstrates sustained operational efficiency across major opencast and underground basins.\n"
-                "Key subsidiaries (SECL, MCL, NCL, CCL, ECL, BCCL, WCL) recorded resilient production and offtake metrics aligned with union targets.\n\n"
-                "| Subsidiary / Basin | Target (MT) | Actual Extracted (MT) | Achievement Rate | Status |\n"
-                "| :--- | :--- | :--- | :--- | :--- |\n"
-                "| **SECL (Bilaspur)** | 42,500.00 | 41,280.50 | 97.13% | ✅ On Track |\n"
-                "| **MCL (Sambalpur)** | 48,000.00 | 47,150.20 | 98.23% | ✅ On Track |\n"
-                "| **NCL (Singrauli)** | 31,000.00 | 30,480.00 | 98.32% | ✅ High Yield |\n"
-                "| **CCL (Ranchi)** | 18,500.00 | 17,920.40 | 96.87% | ✅ Stable |\n"
-                "| **BCCL (Dhanbad)** | 9,800.00 | 9,210.30 | 93.98% | ⚠️ Monitored |\n\n"
-                "---\n\n"
-                "### 2. Evacuation Logistics & Strategic Offtake\n"
-                "- **Critical Thermal Plants**: Over 126,491 MT evacuated with zero days of stock depletion.\n"
-                "- **Rail Infrastructure**: FMC rapid-loading corridors reduced turnaround time by 14.2%.\n"
-                "- **Math Determinism**: Verified via AST arithmetic calculation engine.\n"
-            ),
-            "media_assets": []
-        }
+        logger.error(f"Pipeline execution failed for {file.filename}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pipeline execution failed: {str(e)}. AI services may be unavailable."
+        )
 
 
 @app.post("/api/pipeline/stream-run")
@@ -256,10 +352,11 @@ async def run_pipeline_stream(
         raise HTTPException(status_code=400, detail="Either a file upload or raw_csv_text must be provided.")
 
     if file:
-        file_id = f"{uuid.uuid4().hex[:8]}_{file.filename}"
+        validate_uploaded_file(file)
+        safe_filename = "".join(c for c in file.filename if c.isalnum() or c in "._- ").strip()[:100]
+        file_id = f"{uuid.uuid4().hex[:8]}_{safe_filename}"
         save_path = config.UPLOADS_DIR / file_id
-        with open(save_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        save_uploaded_file(file, save_path)
     else:
         file_id = f"{uuid.uuid4().hex[:8]}_pasted_data.csv"
         save_path = config.UPLOADS_DIR / file_id
@@ -297,14 +394,13 @@ async def quick_preview(
     raw_csv_text: Optional[str] = Form(None)
 ):
     """Provides instant dataset stats and preview before AI processing completes."""
-    import pandas as pd
-    import numpy as np
     import io
 
     df = None
     fname = "Uploaded_Data.csv"
     if file:
         fname = file.filename or fname
+        validate_uploaded_file(file)
         content = await file.read()
         try:
             if fname.endswith((".xlsx", ".xls")):
@@ -331,22 +427,40 @@ async def quick_preview(
                 clean_row[str(k)] = str(v)
         clean_preview.append(clean_row)
 
-    # Persist active uploaded records for dynamic template presentation and report compilation
+    # Compute numeric summary stats
+    numeric_summary = {}
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if numeric_cols:
+        primary_col = numeric_cols[0]
+        series = df[primary_col].dropna()
+        if len(series) > 0:
+            numeric_summary = {
+                "column": primary_col,
+                "count": int(len(series)),
+                "sum": round(float(series.sum()), 2),
+                "mean": round(float(series.mean()), 2),
+                "min": round(float(series.min()), 2),
+                "max": round(float(series.max()), 2)
+            }
+
+    # Persist preview records safely
+    preview_id = f"preview_{uuid.uuid4().hex[:8]}"
     try:
         active_records = df.to_dict(orient="records")
-        (config.OUTPUTS_DIR / "active_user_dataset.json").write_text(
-            json.dumps(active_records, default=str), encoding="utf-8"
-        )
-        df.to_csv(config.OUTPUTS_DIR / "active_cleaned_dataset.csv", index=False)
+        preview_json = config.OUTPUTS_DIR / f"{preview_id}_active_user_dataset.json"
+        preview_json.write_text(json.dumps(active_records, default=str), encoding="utf-8")
+        preview_csv = config.OUTPUTS_DIR / f"{preview_id}_active_cleaned_dataset.csv"
+        df.to_csv(preview_csv, index=False)
     except Exception:
         pass
 
     return {
         "filename": fname,
+        "preview_id": preview_id,
         "rows": int(len(df)),
         "columns": [str(c) for c in df.columns],
         "preview": clean_preview,
-        "numeric_summary": {}
+        "numeric_summary": numeric_summary
     }
 
 
@@ -417,10 +531,12 @@ class ReportRevisionRequest(BaseModel):
 @app.post("/api/reports/revise")
 async def revise_report_with_gemma(req: ReportRevisionRequest):
     """Revises a compiled report using Gemma 4 according to user feedback directives."""
-    summary_path = config.PROCESSED_OUTPUT_DIR / "llama_summary.md"
+    summary_path = config.PROCESSED_OUTPUT_DIR / f"llama_summary_{req.report_id or 'rev'}.md"
     current_md = req.current_content or ""
-    if not current_md and summary_path.exists():
-        current_md = summary_path.read_text(encoding="utf-8")
+    if not current_md:
+        fallback_path = config.PROCESSED_OUTPUT_DIR / "llama_summary.md"
+        if fallback_path.exists():
+            current_md = fallback_path.read_text(encoding="utf-8")
 
     result = gemma_client.revise_report(
         current_report_markdown=current_md,
@@ -437,44 +553,56 @@ async def revise_report_with_gemma(req: ReportRevisionRequest):
             pass
 
     return {
-        "success": True,
+        "success": not result.get("fallback", True),
         "report_id": req.report_id or "REP-2026-REV",
         "template": req.template,
         "model_used": result.get("model_used", "gemma-4"),
         "revised_content": revised_text,
         "revision_prompt": req.revision_prompt,
-        "message": "Report revised successfully by Gemma 4."
+        "fallback": result.get("fallback", True),
+        "message": "Report revised successfully by Gemma 4." if not result.get("fallback", True) else "Report revised using deterministic fallback. LLM was unavailable."
     }
 
 
 @app.get("/api/reports/latest-summary")
 def get_latest_summary():
-    """Returns the latest LLaMA 3.1 summary and converted Markdown."""
-    summary_path = config.PROCESSED_OUTPUT_DIR / "llama_summary.md"
-    md_path = config.PROCESSED_OUTPUT_DIR / "converted_data.md"
+    """Returns the latest LLaMA 3.1 summary and converted Markdown with safe fallback resolution."""
+    summary_path = config.find_data_file("llama_summary.md")
+    md_path = config.find_data_file("converted_data.md")
     
+    csv_files = set()
+    for d in [config.REPORTED_DATA_DIR, config.DATA_DIR, config.BASE_DIR / "reported_data", config.BASE_DIR / "default_data_backup"]:
+        if d and d.exists():
+            csv_files.update(f.name for f in d.glob("*.csv"))
+
     return {
-        "summary": summary_path.read_text(encoding="utf-8") if summary_path.exists() else None,
-        "markdown": md_path.read_text(encoding="utf-8") if md_path.exists() else None,
-        "files": [f.name for f in config.REPORTED_DATA_DIR.glob("*.csv")]
+        "summary": summary_path.read_text(encoding="utf-8") if summary_path and summary_path.exists() else None,
+        "markdown": md_path.read_text(encoding="utf-8") if md_path and md_path.exists() else None,
+        "files": sorted(list(csv_files))
     }
 
 
 @app.get("/api/reports/download-summary")
 def download_summary():
-    summary_path = config.PROCESSED_OUTPUT_DIR / "llama_summary.md"
-    if not summary_path.exists():
+    summary_path = config.find_data_file("llama_summary.md")
+    if not summary_path or not summary_path.exists():
         raise HTTPException(status_code=404, detail="Summary not found.")
     return FileResponse(path=summary_path, filename="LLaMA_Coal_Summary.md", media_type="text/markdown")
+
 
 
 @app.get("/api/templates")
 def list_report_templates():
     """Returns the catalog of 6 modern report templates with metadata and section schemas."""
     templates = []
+    seen = set()
     for tpl_id, tpl in TEMPLATE_CONFIGS.items():
+        canonical_id = tpl["id"]
+        if canonical_id in seen:
+            continue
+        seen.add(canonical_id)
         templates.append({
-            "id": tpl_id,
+            "id": canonical_id,
             "name": tpl["name"],
             "theme": tpl["theme"],
             "header_title": tpl["header_title"],
@@ -494,6 +622,7 @@ class TemplateFillRequest(BaseModel):
     data_summary: Optional[str] = None
     custom_focus: Optional[str] = None
     model: Optional[str] = None
+    job_id: Optional[str] = None
 
 
 @app.post("/api/templates/{template_id}/fill")
@@ -504,12 +633,22 @@ def fill_template_content(template_id: str, req: Optional[TemplateFillRequest] =
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found. Available: {list(TEMPLATE_CONFIGS.keys())}")
 
     tpl = TEMPLATE_CONFIGS[tpl_key]
-    metrics = get_active_dataset_metrics()
+    job_id = req.job_id if req else None
+    metrics = get_active_dataset_metrics(job_id=job_id)
 
     data_summary = ""
     if req and req.data_summary:
         data_summary = req.data_summary
-    else:
+    elif job_id:
+        job_dir = config.OUTPUTS_DIR / job_id
+        rep_file = job_dir / "04_final_systematic_report.md"
+        llama_file = job_dir / "02_llama_analysis.md"
+        if rep_file.exists():
+            data_summary = rep_file.read_text(encoding="utf-8")
+        elif llama_file.exists():
+            data_summary = llama_file.read_text(encoding="utf-8")
+
+    if not data_summary:
         summary_path = config.PROCESSED_OUTPUT_DIR / "llama_summary.md"
         if summary_path.exists():
             data_summary = summary_path.read_text(encoding="utf-8")
@@ -587,15 +726,24 @@ def fill_template_content(template_id: str, req: Optional[TemplateFillRequest] =
             }
         ]
 
-    # Check if active media assets exist from PDF extraction
+    # Check if active media assets exist from PDF extraction (check job-isolated first)
     active_images = []
-    active_media_file = config.OUTPUTS_DIR / "active_media_assets.json"
-    if active_media_file.exists():
-        try:
-            m_data = json.loads(active_media_file.read_text(encoding="utf-8"))
-            active_images = m_data.get("images", [])
-        except Exception:
-            active_images = []
+    if job_id:
+        manifest = config.OUTPUTS_DIR / job_id / "media_manifest.json"
+        if manifest.exists():
+            try:
+                m_data = json.loads(manifest.read_text(encoding="utf-8"))
+                active_images = [img.get("path") for img in m_data.get("images", []) if img.get("path")]
+            except Exception:
+                pass
+    if not active_images:
+        active_media_file = config.OUTPUTS_DIR / "active_media_assets.json"
+        if active_media_file.exists():
+            try:
+                m_data = json.loads(active_media_file.read_text(encoding="utf-8"))
+                active_images = m_data.get("images", [])
+            except Exception:
+                active_images = []
 
     # Re-compile the template-specific documents immediately with active dataset metrics
     combined_summary = "\n\n".join(f"## {s['title']}\n{s['content']}" for s in sections)
@@ -605,7 +753,8 @@ def fill_template_content(template_id: str, req: Optional[TemplateFillRequest] =
         report_id=report_id,
         summary_text=combined_summary,
         user_records=metrics["collieries"],
-        images=active_images
+        images=active_images,
+        job_id=job_id
     )
 
     # Persist report to Generated Report History Hub
@@ -617,11 +766,13 @@ def fill_template_content(template_id: str, req: Optional[TemplateFillRequest] =
         theme=tpl["theme"],
         auditor_id="MOC-7890",
         records_count=metrics["count"],
-        summary_snippet=sections[0]["content"] if sections else ""
+        summary_snippet=sections[0]["content"] if sections else "",
+        job_id=job_id
     )
 
     return {
         "success": True,
+        "job_id": job_id,
         "template_id": tpl_key,
         "template_name": tpl["name"],
         "theme": tpl["theme"],
@@ -664,6 +815,7 @@ class RecordHistoryRequest(BaseModel):
     auditor_id: Optional[str] = "MOC-7890"
     records_count: Optional[int] = 18
     summary_snippet: Optional[str] = ""
+    job_id: Optional[str] = None
 
 
 @app.post("/api/reports/history")
@@ -677,7 +829,8 @@ def add_report_history(req: RecordHistoryRequest):
         theme=req.theme,
         auditor_id=req.auditor_id or "MOC-7890",
         records_count=req.records_count or 18,
-        summary_snippet=req.summary_snippet or ""
+        summary_snippet=req.summary_snippet or "",
+        job_id=req.job_id
     )
     return {"success": True, "entry": entry}
 
@@ -686,17 +839,33 @@ def add_report_history(req: RecordHistoryRequest):
 # REPORT DOWNLOAD ENDPOINTS
 # -------------------------------------------------------------------------
 @app.get("/api/reports/download/csv")
-def download_active_csv():
+def download_active_csv(job_id: Optional[str] = Query(None)):
     """Downloads the raw clean CSV dataset (strictly without template styling)."""
+    effective_job_id = job_id if isinstance(job_id, str) and job_id.strip() else None
+    if effective_job_id:
+        job_csv = config.OUTPUTS_DIR / effective_job_id / "active_dataset.csv"
+        if job_csv.exists() and job_csv.stat().st_size > 0:
+            return FileResponse(path=job_csv, filename=f"Cleaned_Dataset_{effective_job_id}.csv", media_type="text/csv")
+        job_json = config.OUTPUTS_DIR / effective_job_id / "active_dataset.json"
+        if job_json.exists():
+            try:
+                recs = json.loads(job_json.read_text(encoding="utf-8"))
+                if recs:
+                    df = pd.DataFrame(recs)
+                    df.to_csv(job_csv, index=False)
+                    return FileResponse(path=job_csv, filename=f"Cleaned_Dataset_{effective_job_id}.csv", media_type="text/csv")
+            except Exception:
+                pass
+
     active_csv = config.OUTPUTS_DIR / "active_cleaned_dataset.csv"
-    if active_csv.exists():
+    if active_csv.exists() and active_csv.stat().st_size > 0:
         return FileResponse(path=active_csv, filename="Cleaned_Coal_Dataset_2026.csv", media_type="text/csv")
 
     base_csv = config.REPORTED_DATA_DIR / "coal_production_report.csv"
     if base_csv.exists():
         return FileResponse(path=base_csv, filename="National_Coal_Production_Dataset.csv", media_type="text/csv")
 
-    metrics = get_active_dataset_metrics()
+    metrics = get_active_dataset_metrics(job_id=effective_job_id)
     df = pd.DataFrame(metrics["collieries"])
     active_csv.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(active_csv, index=False)
@@ -707,6 +876,7 @@ class ReportPackageRequest(BaseModel):
     template: str = "executive_brief"
     report_id: str = "REP-2026-B56D"
     custom_summary: Optional[str] = None
+    job_id: Optional[str] = None
 
 
 @app.post("/api/reports/generate-package")
@@ -714,10 +884,15 @@ def generate_report_package(req: Optional[ReportPackageRequest] = None):
     """Compiles actual publication-grade PDF, DOCX, and XLSX reports."""
     tpl = req.template if req else "executive_brief"
     rep_id = req.report_id if req else "REP-2026-B56D"
+    job_id = req.job_id if req else None
     summary_text = None
     if req and req.custom_summary:
         summary_text = req.custom_summary
-    else:
+    elif job_id:
+        rep_file = config.OUTPUTS_DIR / job_id / "04_final_systematic_report.md"
+        if rep_file.exists():
+            summary_text = rep_file.read_text(encoding="utf-8")
+    if not summary_text:
         summary_path = config.PROCESSED_OUTPUT_DIR / "llama_summary.md"
         if summary_path.exists():
             summary_text = summary_path.read_text(encoding="utf-8")
@@ -725,17 +900,18 @@ def generate_report_package(req: Optional[ReportPackageRequest] = None):
     result = document_generator.generate_all_packages(
         template_name=tpl,
         report_id=rep_id,
-        summary_text=summary_text
+        summary_text=summary_text,
+        job_id=job_id
     )
     return result
 
 
 @app.get("/api/reports/download/{fmt}")
-def download_report_format(fmt: str, template: Optional[str] = None):
+def download_report_format(fmt: str, template: Optional[str] = None, job_id: Optional[str] = Query(None)):
     """Downloads the generated report in the requested format (pdf, docx, xlsx, csv) for the selected template."""
     fmt = fmt.lower().lstrip(".")
     if fmt == "csv":
-        return download_active_csv()
+        return download_active_csv(job_id=job_id)
 
     mapping = {
         "pdf": ("Ministry_of_Coal_Report_2026.pdf", "application/pdf"),
@@ -759,7 +935,23 @@ def download_report_format(fmt: str, template: Optional[str] = None):
     tpl_key = TEMPLATE_ALIASES.get(raw_key, raw_key)
     target_fname = f"Ministry_of_Coal_{tpl_key}_2026.{fmt}" if template else default_fname
 
-    # Search candidates in priority order: REPORTS_DIR, PUBLIC_REPORTS_DIR, STATIC_REPORTS_DIR
+    effective_job_id = job_id if isinstance(job_id, str) and job_id.strip() else None
+
+    # If job_id provided, look in job-isolated directory first
+    if effective_job_id:
+        job_dirs = [config.OUTPUTS_DIR / effective_job_id, config.REPORTS_DIR / effective_job_id]
+        for jd in job_dirs:
+            if jd.exists():
+                for f in jd.glob(f"*.{fmt}"):
+                    if f.stat().st_size > 0:
+                        return FileResponse(
+                            path=f,
+                            filename=f.name,
+                            media_type=media_type,
+                            headers={"Content-Disposition": f'attachment; filename="{f.name}"'}
+                        )
+
+    # Search candidates in standard report directories
     search_dirs = [config.REPORTS_DIR, getattr(config, "PUBLIC_REPORTS_DIR", None), getattr(config, "STATIC_REPORTS_DIR", None)]
     search_dirs = [d for d in search_dirs if d is not None and d.exists()]
 
@@ -776,11 +968,11 @@ def download_report_format(fmt: str, template: Optional[str] = None):
     # If specific template not found yet, attempt on-the-fly generation
     try:
         if fmt == "pdf":
-            document_generator.generate_pdf_report(template_name=tpl_key)
+            document_generator.generate_pdf_report(template_name=tpl_key, job_id=effective_job_id)
         elif fmt == "docx":
-            document_generator.generate_docx_report(template_name=tpl_key)
+            document_generator.generate_docx_report(template_name=tpl_key, job_id=effective_job_id)
         elif fmt == "xlsx":
-            document_generator.generate_excel_workbook(template_name=tpl_key)
+            document_generator.generate_excel_workbook(template_name=tpl_key, job_id=effective_job_id)
     except Exception:
         pass
 
@@ -806,9 +998,10 @@ def download_report_format(fmt: str, template: Optional[str] = None):
                 headers={"Content-Disposition": f'attachment; filename="{target_fname}"'}
             )
 
-    # On serverless (Vercel), static pre-generated files are hosted at /reports/ on Vercel CDN
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url=f"/reports/{target_fname}", status_code=307)
+    raise HTTPException(
+        status_code=404,
+        detail=f"Report '{target_fname}' not found. Please generate the report first or try again later."
+    )
 
 
 @app.get("/api/reports/{job_id}")
@@ -872,10 +1065,211 @@ def run_dataset_audit():
 
 
 
-# Mount static directory for frontend UI
+# -------------------------------------------------------------------------
+# COMPREHENSIVE DATASETS & TRENDS ENDPOINTS
+# -------------------------------------------------------------------------
+@app.get("/api/trends")
+def get_trends_data():
+    """Returns multi-horizon trends including 10-year production, 12-month trajectory, 6-month colliery trajectory, import substitution, and subsidiary finances."""
+    trends_file = config.find_data_file("trends_data.json")
+    if trends_file and trends_file.exists():
+        try:
+            return json.loads(trends_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"Error reading trends_data.json: {e}")
+
+    # Fallback to authentic Coal India dataset metrics
+    metrics = get_active_dataset_metrics()
+    return {
+        "status": "success",
+        "data_as_of": "2026-03-31",
+        "reporting_body": "Ministry of Coal / Coal India Limited",
+        "total_production": metrics.get("total_production", 773.60),
+        "total_dispatch": metrics.get("total_dispatch", 753.50),
+        "achievement_pct": metrics.get("achievement_pct", 96.84),
+        "collieries_preview": metrics.get("collieries", [])[:10]
+    }
+
+
+@app.get("/api/datasets")
+def list_available_datasets():
+    """Returns catalog of all authentic national coal mining datasets available in the platform."""
+    datasets = [
+        {
+            "id": "coal_production_10yr",
+            "title": "National Coal Production & YoY Trajectory (2013–2025)",
+            "description": "10-Year official national time-series: total coal extracted, YoY growth percentages, and subsidiary volume shares.",
+            "source": "Ministry of Coal / PIB Official Gazette",
+            "format": "csv",
+            "rows": 25,
+            "filename": "coal_production_report.csv",
+            "download_url": "/api/datasets/coal_production_10yr/download"
+        },
+        {
+            "id": "historical_coking_noncoking",
+            "title": "Historical Coking, Non-Coking & Washery Coke (2000–2026)",
+            "description": "Category-wise coal extraction trends: Coking Coal, Non-Coking Coal, Hard Coke, and Washed Coke.",
+            "source": "Coal Controller's Organization (CCO)",
+            "format": "csv",
+            "rows": 11,
+            "filename": "datafile.csv",
+            "download_url": "/api/datasets/historical_coking_noncoking/download"
+        },
+        {
+            "id": "parliamentary_import_supply",
+            "title": "Parliamentary Coal Supply & Import Substitution (RS Session 249)",
+            "description": "Domestic coal production versus imported coal supplies and non-coking thermal power plant deliveries.",
+            "source": "Rajya Sabha / Parliamentary Records (RS 249 AS18)",
+            "format": "csv",
+            "rows": 12,
+            "filename": "RS_249_AS18.csv",
+            "download_url": "/api/datasets/parliamentary_import_supply/download"
+        },
+        {
+            "id": "subsidiary_revenue_production",
+            "title": "CIL Subsidiary-Wise Production & Revenue Breakdown (RS Session 265)",
+            "description": "Subsidiary-wise extraction volume in Million Tonnes and financial turnover in Rs. Crore (Rs. 1,41,967 Crore Total).",
+            "source": "Rajya Sabha Starred Question / CIL Audited Statements",
+            "format": "csv",
+            "rows": 9,
+            "filename": "RS_Session_265_AU_52_B.csv",
+            "download_url": "/api/datasets/subsidiary_revenue_production/download"
+        },
+        {
+            "id": "cil_collieries_master",
+            "title": "Coal India Master Colliery & Mining Asset Registry",
+            "description": "Active extraction benchmarks, dragline and shovel-dumper HEMM telemetry, state coordinates, and offtake fulfillment rates.",
+            "source": "CIL Integrated Annual Report & BRSR Filings",
+            "format": "json",
+            "rows": 18,
+            "filename": "cil_colliery_data.json",
+            "download_url": "/api/datasets/cil_collieries_master/download"
+        }
+    ]
+    return {
+        "status": "success",
+        "count": len(datasets),
+        "datasets": datasets
+    }
+
+
+@app.get("/api/datasets/{dataset_id}")
+def get_dataset_details(dataset_id: str):
+    """Returns dataset content as structured JSON records."""
+    mapping = {
+        "coal_production_10yr": "coal_production_report.csv",
+        "historical_coking_noncoking": "datafile.csv",
+        "parliamentary_import_supply": "RS_249_AS18.csv",
+        "subsidiary_revenue_production": "RS_Session_265_AU_52_B.csv",
+        "cil_collieries_master": "cil_colliery_data.json"
+    }
+    fname = mapping.get(dataset_id)
+    if not fname:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found.")
+
+    target_file = config.find_data_file(fname)
+    if not target_file or not target_file.exists():
+        raise HTTPException(status_code=404, detail=f"Dataset file '{fname}' not available.")
+
+    if fname.endswith(".json"):
+        return json.loads(target_file.read_text(encoding="utf-8"))
+
+    try:
+        df = pd.read_csv(target_file)
+        return {
+            "id": dataset_id,
+            "filename": fname,
+            "total_rows": len(df),
+            "columns": list(df.columns),
+            "data": df.fillna("").to_dict(orient="records")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read dataset: {str(e)}")
+
+
+@app.get("/api/datasets/{dataset_id}/download")
+def download_dataset_file(dataset_id: str):
+    """Direct download endpoint for dataset files (CSV or JSON)."""
+    mapping = {
+        "coal_production_10yr": ("coal_production_report.csv", "text/csv"),
+        "historical_coking_noncoking": ("datafile.csv", "text/csv"),
+        "parliamentary_import_supply": ("RS_249_AS18.csv", "text/csv"),
+        "subsidiary_revenue_production": ("RS_Session_265_AU_52_B.csv", "text/csv"),
+        "cil_collieries_master": ("cil_colliery_data.json", "application/json")
+    }
+    if dataset_id not in mapping:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+
+    fname, mtype = mapping[dataset_id]
+    target_file = config.find_data_file(fname)
+    if not target_file or not target_file.exists():
+        raise HTTPException(status_code=404, detail="Dataset file missing.")
+
+    return FileResponse(
+        path=target_file,
+        filename=fname,
+        media_type=mtype,
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'}
+    )
+
+
+@app.get("/api/analytics/summary")
+def get_analytics_summary(job_id: Optional[str] = Query(None)):
+    """Computes high-precision descriptive statistics and IQR anomaly boundaries across active colliery records."""
+    effective_job_id = job_id if isinstance(job_id, str) and job_id.strip() else None
+    metrics = get_active_dataset_metrics(job_id=effective_job_id)
+    collieries = metrics.get("collieries", [])
+    prods = [c.get("production", 0.0) for c in collieries if isinstance(c.get("production"), (int, float))]
+    
+    anomalies = []
+    if prods:
+        lower_bound = metrics.get("lower_fence", 0.0)
+        upper_bound = metrics.get("upper_fence", 0.0)
+        for c in collieries:
+            p = c.get("production", 0.0)
+            if p > upper_bound:
+                anomalies.append({
+                    "mine": c.get("name"),
+                    "type": "SURGE_PRODUCTION",
+                    "severity": "HIGH",
+                    "production": p,
+                    "threshold": upper_bound,
+                    "reason": "Production output exceeds upper IQR quartile fence (Mega-Producer)."
+                })
+            elif p < lower_bound:
+                anomalies.append({
+                    "mine": c.get("name"),
+                    "type": "LOW_OUTPUT",
+                    "severity": "MEDIUM",
+                    "production": p,
+                    "threshold": lower_bound,
+                    "reason": "Production below lower IQR quartile fence."
+                })
+
+    return {
+        "status": "success",
+        "count": len(collieries),
+        "total_production_mt": metrics.get("total_production", 773.60),
+        "total_dispatch_mt": metrics.get("total_dispatch", 753.50),
+        "achievement_pct": metrics.get("achievement_pct", 96.84),
+        "mean_mt": metrics.get("mean", 96.02),
+        "median_mt": metrics.get("median", 0.0),
+        "std_dev": metrics.get("std_dev", 68.45),
+        "q1": metrics.get("q1", 0.0),
+        "q3": metrics.get("q3", 0.0),
+        "iqr": metrics.get("iqr", 0.0),
+        "lower_fence": metrics.get("lower_fence", 0.0),
+        "upper_fence": metrics.get("upper_fence", 0.0),
+        "anomalies": anomalies,
+        "state_aggregates": metrics.get("state_aggregates", {})
+    }
+
+
+# Mount static directory for frontend UI (when NOT in serverless mode)
 static_dir = Path(__file__).resolve().parent / "static"
-if static_dir.exists():
+if not config.IS_VERCEL and static_dir.exists():
     from starlette.staticfiles import StaticFiles
     app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+
 
 

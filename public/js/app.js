@@ -16,6 +16,7 @@ const App = {
   shareChart: null,
   topCollieriesTrendChart: null,
   dispatchGapTrendChart: null,
+  currentJobId: null,
 
   factsList: [
     "Synthesizing colliery extraction logs across 432 operational basins...",
@@ -597,6 +598,15 @@ const App = {
     }
   },
 
+  handleQuickLogin: function(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const empIdEl = document.getElementById("login-emp-id");
+    const pwdEl = document.getElementById("login-password");
+    if (empIdEl) empIdEl.value = "MOC-7890";
+    if (pwdEl) pwdEl.value = "SecureEnclave2026!";
+    this.handleLogin(e);
+  },
+
   handleLogin: async function(e, overrideEmpId = null) {
     if (e) {
       e.preventDefault();
@@ -606,14 +616,19 @@ const App = {
     const pwdEl = document.getElementById("login-password");
     const rememberEl = document.getElementById("remember-device");
 
-    const empId = overrideEmpId || (empIdEl ? empIdEl.value.trim() : "MOC-7890") || "MOC-7890";
-    const pwd = pwdEl ? pwdEl.value : "SecureEnclave2026!";
+    const empId = overrideEmpId || (empIdEl ? empIdEl.value.trim() : "");
+    const pwd = pwdEl ? pwdEl.value : "";
     const remember = rememberEl ? rememberEl.checked : true;
 
     const spinner = document.getElementById("auth-spinner");
     const icon = document.getElementById("auth-icon");
     const text = document.getElementById("auth-btn-text");
     const btn = document.getElementById("btn-authenticate");
+
+    if (!empId || !pwd) {
+      this.showToast("Please enter your Auditor Employee ID and Enclave Password.", "error");
+      return;
+    }
 
     if (spinner) spinner.classList.remove("hidden");
     if (icon) icon.classList.add("hidden");
@@ -1508,16 +1523,18 @@ const App = {
     }, 260);
 
     const formData = new FormData();
-    // Vercel serverless edge payload limit is 4.5 MB.
-    // If the file is > 4.2 MB, slice the first 4.1MB so Vercel edge does not reject with HTTP 413.
-    let fileToUpload = this.selectedFile;
-    if (this.selectedFile && this.selectedFile.size > 4.2 * 1024 * 1024) {
-      console.warn("Large PDF annual report detected (>4.2MB). Budgeting payload slice to prevent HTTP 413 Gateway timeout.");
-      fileToUpload = new File([this.selectedFile.slice(0, 4.1 * 1024 * 1024)], this.selectedFile.name, {
-        type: this.selectedFile.type || "application/pdf"
-      });
+    if (this.selectedFile && this.selectedFile.size > 50 * 1024 * 1024) {
+      clearInterval(this.pipelineInterval);
+      clearInterval(this.factIntervalId);
+      this.stopWaveformAnimation();
+      hub.classList.add("hidden");
+      this.showToast("File exceeds 50MB maximum allowable size.", "error");
+      btn.disabled = false;
+      btn.classList.remove("opacity-75");
+      return;
     }
-    formData.append("file", fileToUpload);
+
+    formData.append("file", this.selectedFile);
     if (customCmd) {
       formData.append("custom_llama_command", customCmd);
     }
@@ -1532,22 +1549,30 @@ const App = {
       clearInterval(this.factIntervalId);
       this.stopWaveformAnimation();
 
-      let result;
-      if (res.status === 413 || !res.ok) {
-        console.warn(`Pipeline server status ${res.status}: Activating executive report synthesis engine.`);
-        result = this.generateExecutivePresentationFallback(this.selectedFile ? this.selectedFile.name : "Annual_Report_2026.pdf");
-      } else {
+      if (!res.ok) {
+        let errorDetail = `Server responded with HTTP ${res.status}`;
         try {
-          result = await res.json();
-        } catch (_) {
-          result = this.generateExecutivePresentationFallback(this.selectedFile ? this.selectedFile.name : "Annual_Report_2026.pdf");
-        }
+          const errData = await res.json();
+          if (errData && errData.detail) errorDetail = errData.detail;
+        } catch (_) {}
+        throw new Error(errorDetail);
+      }
+
+      const result = await res.json();
+
+      if (result.job_id) {
+        this.currentJobId = result.job_id;
       }
 
       // Complete to 100%
       if (progressBar) progressBar.style.width = "100%";
       if (pctLabel) pctLabel.innerText = "100%";
-      if (stageLabel) stageLabel.innerText = "Executive Dossier Compiled & Verified!";
+      const isFallback = result.is_fallback || result.status === "deterministic_fallback";
+      if (stageLabel) {
+        stageLabel.innerText = isFallback
+          ? "Executive Dossier Compiled (Deterministic Fallback Mode)"
+          : "Executive Dossier Compiled & Verified!";
+      }
 
       // Cache summary text
       if (result.final_report || result.llama_analysis) {
@@ -1560,7 +1585,11 @@ const App = {
       setTimeout(() => {
         hub.classList.add("hidden");
         this.displayExecutiveResults(result);
-        this.showToast("Analysis complete! Executive Dossier synthesized successfully.", "success");
+        if (isFallback) {
+          this.showToast("Analysis complete via deterministic fallback (Ollama offline).", "info");
+        } else {
+          this.showToast("Analysis complete! Executive Dossier synthesized successfully.", "success");
+        }
       }, 500);
 
     } catch (err) {
@@ -1568,21 +1597,13 @@ const App = {
       clearInterval(this.factIntervalId);
       this.stopWaveformAnimation();
 
-      console.warn("Pipeline exception caught:", err);
-      // Fallback: Ensure presentation never displays an HTTP 413 error toast
-      const fallbackResult = this.generateExecutivePresentationFallback(this.selectedFile ? this.selectedFile.name : "Annual_Report_2026.pdf");
-      if (progressBar) progressBar.style.width = "100%";
-      if (pctLabel) pctLabel.innerText = "100%";
-      if (stageLabel) stageLabel.innerText = "Executive Dossier Compiled & Verified!";
+      console.error("Pipeline exception caught:", err);
+      if (progressBar) progressBar.style.width = "0%";
+      if (pctLabel) pctLabel.innerText = "0%";
+      if (stageLabel) stageLabel.innerText = "Execution failed: " + err.message;
 
-      this.currentSummaryText = fallbackResult.final_report;
-      this.loadReportHistory();
-
-      setTimeout(() => {
-        hub.classList.add("hidden");
-        this.displayExecutiveResults(fallbackResult);
-        this.showToast("Executive Analysis synthesized successfully for presentation!", "success");
-      }, 500);
+      hub.classList.add("hidden");
+      this.showToast("Pipeline Error: " + err.message, "error");
     } finally {
       btn.disabled = false;
       btn.classList.remove("opacity-75");
@@ -1590,50 +1611,29 @@ const App = {
   },
 
   generateExecutivePresentationFallback: function(filename) {
-    const safeName = filename || "Annual_Report_2026.pdf";
+    const safeName = filename || "Uploaded_Document.pdf";
     return {
       success: true,
+      is_fallback: true,
       filename: safeName,
-      file_type: "pdf",
-      llama_analysis: `### EXECUTIVE ANALYSIS AUDIT: ${safeName}\n\n` +
-        `**1. Document Overview & Operational Production:**\n` +
-        `- Evaluated annual production, offtake, and financial targets across primary coal operational subsidiaries (SECL, MCL, NCL, CCL, ECL, BCCL, WCL).\n` +
-        `- Total colliery extraction reached **131,608.90 MT** against the aggregate statutory baseline of **136,076.60 MT** (96.72% fulfillment rate).\n` +
-        `- High-yield opencast facilities (Gevra, Kusmunda, Dipka, Belpahar) recorded 98.4% capacity utilization.\n\n` +
-        `**2. Critical Utility Evacuation & Offtake:**\n` +
-        `- Successfully evacuated **126,491.21 MT** to critical thermal power generating stations (96.11% offtake ratio).\n` +
-        `- Rail rake availability and mechanized first-mile loading facilities maintained an average 18.4-day coal buffer reserve at pitheads.\n\n` +
-        `**3. AST Mathematical & Statutory Audit:**\n` +
-        `- 100% mathematical determinism verified across operational and financial tables with zero discrepancies.`,
-      final_report: `# MINISTRY OF COAL • GOVERNMENT OF INDIA\n` +
-        `## Executive Annual Colliery Intelligence & Offtake Dossier\n` +
-        `**Source Document**: ${safeName} • **Engine**: Gemma 4 & LLaMA 3.1 Sovereign Pipeline • **Status**: Statutory Verified\n\n` +
+      file_type: safeName.split('.').pop() || "pdf",
+      llama_analysis: `### ANALYSIS REPORT: ${safeName}\n\n` +
+        `**Source Document**: ${safeName}\n` +
+        `- Extraction completed in deterministic fallback mode.\n` +
+        `- Local AI inference services were unavailable at the time of execution.\n` +
+        `- Quantitative figures and structured tables preserved for inspection.`,
+      final_report: `# EXECUTIVE INTELLIGENCE REPORT: ${safeName}\n\n` +
+        `**Source Document**: ${safeName} • **Status**: Deterministic Fallback Mode\n\n` +
         `---\n\n` +
-        `### 1. Executive Summary & Strategic Production Overview\n` +
-        `The national coal sector maintains stable operational resilience across major subsidiary basins. ` +
-        `Target attainment across thermal power evacuation corridors has achieved statutory standards with zero critical supply disruptions.\n\n` +
-        `| Subsidiary / Basin | Target (MT) | Actual Extracted (MT) | Fulfillment Rate | Operational Status |\n` +
-        `| :--- | :--- | :--- | :--- | :--- |\n` +
-        `| **SECL (Bilaspur)** | 42,500.00 | 41,280.50 | 97.13% | ✅ On Track |\n` +
-        `| **MCL (Sambalpur)** | 48,000.00 | 47,150.20 | 98.23% | ✅ On Track |\n` +
-        `| **NCL (Singrauli)** | 31,000.00 | 30,480.00 | 98.32% | ✅ High Yield |\n` +
-        `| **CCL (Ranchi)** | 18,500.00 | 17,920.40 | 96.87% | ✅ Stable |\n` +
-        `| **BCCL (Dhanbad)** | 9,800.00 | 9,210.30 | 93.98% | ⚠️ Monitored |\n` +
-        `| **ECL (Sanctoria)** | 7,200.00 | 6,850.10 | 95.14% | ✅ Stable |\n\n` +
-        `---\n\n` +
-        `### 2. Infrastructure & Evacuation Corridors\n` +
-        `- **First-Mile Rail Connectivity**: 14 continuous rapid loading silo systems operational across Korba and Talcher.\n` +
-        `- **Thermal Power Plant Dispatch**: 126,491.21 MT delivered with zero stockout incidents.\n` +
-        `- **Environmental Governance**: Afforestation and bio-reclamation targets achieved 104.2% statutory fulfillment.\n\n` +
-        `---\n\n` +
-        `### 3. Abstract Syntax Tree (AST) Mathematical Verification\n` +
-        `- Total Arithmetic Checks: **18** | Passed: **18** | Discrepancies: **0**\n` +
-        `- Hash Seal: \`SHA256: 4b9f2...81a0e\` (Verified Deterministic Audit)`,
+        `### Document Overview\n` +
+        `The document **${safeName}** has been processed through the deterministic extraction pipeline. ` +
+        `AI synthesis was bypassed due to offline LLM service state.\n`,
       math_audit: {
-        ast_verified: true,
-        total_checks: 18,
-        passed_checks: 18,
-        discrepancies: 0
+        ast_verified: false,
+        total_checks: 0,
+        passed_checks: 0,
+        discrepancies: 0,
+        note: "Deterministic fallback: arithmetic verification skipped."
       }
     };
   },
@@ -1670,8 +1670,8 @@ const App = {
     showcase.scrollIntoView({ behavior: "smooth" });
     this.showToast("Analysis complete! Select your modern report template below.", "success");
 
-    // Automatically update all dashboard static & graphical telemetry with CIL data
-    if (typeof CIL_ANNUAL_REPORT_DATA !== "undefined") {
+    // Only apply static CIL data if not a custom user dataset
+    if (!this.currentJobId && typeof CIL_ANNUAL_REPORT_DATA !== "undefined") {
       this.updateDashboardWithAnnualReportData(CIL_ANNUAL_REPORT_DATA);
     }
 
@@ -1708,23 +1708,27 @@ const App = {
     const badge = document.getElementById("active-template-badge");
     const exportLabel = document.getElementById("export-template-label");
 
-    // Update download buttons href immediately
+    // Update download buttons href immediately with isolated job_id
     const pdfBtn = document.getElementById("btn-download-tpl-pdf");
     const docxBtn = document.getElementById("btn-download-tpl-docx");
     const csvBtn = document.getElementById("btn-download-tpl-csv") || document.getElementById("btn-download-tpl-xlsx");
+    const jobQuery = this.currentJobId ? `&job_id=${encodeURIComponent(this.currentJobId)}` : "";
+    const baseName = this.selectedFile ? this.selectedFile.name.replace(/\.[^/.]+$/, "") : `Ministry_of_Coal`;
+
     if (pdfBtn) {
-      pdfBtn.href = `/api/reports/download/pdf?template=${templateId}`;
-      pdfBtn.download = `Ministry_of_Coal_${templateId}_2026.pdf`;
+      pdfBtn.href = `/api/reports/download/pdf?template=${templateId}${jobQuery}`;
+      pdfBtn.download = `${baseName}_${templateId}.pdf`;
       pdfBtn.onclick = (e) => this.handleTplPdfDownload(e);
     }
     if (docxBtn) {
-      docxBtn.href = `/api/reports/download/docx?template=${templateId}`;
-      docxBtn.download = `Ministry_of_Coal_${templateId}_2026.docx`;
+      docxBtn.href = `/api/reports/download/docx?template=${templateId}${jobQuery}`;
+      docxBtn.download = `${baseName}_${templateId}.docx`;
       docxBtn.onclick = (e) => this.handleTplDocxDownload(e);
     }
     if (csvBtn) {
-      csvBtn.href = `/api/reports/download/csv`;
-      csvBtn.download = `Cleaned_Coal_Dataset_2026.csv`;
+      const csvJobQuery = this.currentJobId ? `?job_id=${encodeURIComponent(this.currentJobId)}` : "";
+      csvBtn.href = `/api/reports/download/csv${csvJobQuery}`;
+      csvBtn.download = `${baseName}_Cleaned.csv`;
       csvBtn.onclick = (e) => this.handleTplCsvDownload(e);
     }
 
@@ -1976,7 +1980,8 @@ const App = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          data_summary: this.currentSummaryText || ""
+          data_summary: this.currentSummaryText || "",
+          job_id: this.currentJobId || null
         })
       });
       if (res.ok) {
@@ -2377,19 +2382,24 @@ const App = {
     const btnPdf = document.getElementById("btn-download-tpl-pdf");
     const btnDocx = document.getElementById("btn-download-tpl-docx");
     const btnXlsx = document.getElementById("btn-download-tpl-xlsx");
+    const jobQuery = this.currentJobId ? `&job_id=${encodeURIComponent(this.currentJobId)}` : "";
+    const baseName = this.selectedFile ? this.selectedFile.name.replace(/\.[^/.]+$/, "") : "Ministry_of_Coal";
+
     if (btnPdf) {
-      btnPdf.href = `/api/reports/download/pdf?template=${templateId}`;
-      btnPdf.download = `Ministry_of_Coal_${templateId}_2026.pdf`;
+      btnPdf.href = `/api/reports/download/pdf?template=${templateId}${jobQuery}`;
+      btnPdf.download = `${baseName}_${templateId}.pdf`;
       btnPdf.onclick = (e) => this.handleTplPdfDownload(e);
     }
     if (btnDocx) {
-      btnDocx.href = `/api/reports/download/docx?template=${templateId}`;
-      btnDocx.download = `Ministry_of_Coal_${templateId}_2026.docx`;
+      btnDocx.href = `/api/reports/download/docx?template=${templateId}${jobQuery}`;
+      docxBtn = btnDocx;
+      btnDocx.download = `${baseName}_${templateId}.docx`;
       btnDocx.onclick = (e) => this.handleTplDocxDownload(e);
     }
     if (btnXlsx) {
-      btnXlsx.href = `/api/reports/download/csv`;
-      btnXlsx.download = `Cleaned_Coal_Dataset_2026.csv`;
+      const csvJobQuery = this.currentJobId ? `?job_id=${encodeURIComponent(this.currentJobId)}` : "";
+      btnXlsx.href = `/api/reports/download/csv${csvJobQuery}`;
+      btnXlsx.download = `${baseName}_Cleaned.csv`;
       btnXlsx.onclick = (e) => this.handleTplCsvDownload(e);
     }
   },
@@ -2929,23 +2939,29 @@ const App = {
   handleTplPdfDownload: function(e) {
     if (e && e.preventDefault) e.preventDefault();
     const tpl = this.currentTemplate || "bento_grid";
-    const filename = `Ministry_of_Coal_${tpl}_2026.pdf`;
-    const url = `/api/reports/download/pdf?template=${tpl}`;
+    const baseName = this.selectedFile ? this.selectedFile.name.replace(/\.[^/.]+$/, "") : "Ministry_of_Coal";
+    const filename = `${baseName}_${tpl}.pdf`;
+    const jobQuery = this.currentJobId ? `&job_id=${encodeURIComponent(this.currentJobId)}` : "";
+    const url = `/api/reports/download/pdf?template=${tpl}${jobQuery}`;
     this.downloadFileSafely(e, url, filename);
   },
 
   handleTplDocxDownload: function(e) {
     if (e && e.preventDefault) e.preventDefault();
     const tpl = this.currentTemplate || "bento_grid";
-    const filename = `Ministry_of_Coal_${tpl}_2026.docx`;
-    const url = `/api/reports/download/docx?template=${tpl}`;
+    const baseName = this.selectedFile ? this.selectedFile.name.replace(/\.[^/.]+$/, "") : "Ministry_of_Coal";
+    const filename = `${baseName}_${tpl}.docx`;
+    const jobQuery = this.currentJobId ? `&job_id=${encodeURIComponent(this.currentJobId)}` : "";
+    const url = `/api/reports/download/docx?template=${tpl}${jobQuery}`;
     this.downloadFileSafely(e, url, filename);
   },
 
   handleTplCsvDownload: function(e) {
     if (e && e.preventDefault) e.preventDefault();
-    const filename = `Cleaned_Coal_Dataset_2026.csv`;
-    const url = `/api/reports/download/csv`;
+    const baseName = this.selectedFile ? this.selectedFile.name.replace(/\.[^/.]+$/, "") : "Cleaned_Coal_Dataset_2026";
+    const filename = `${baseName}.csv`;
+    const jobQuery = this.currentJobId ? `?job_id=${encodeURIComponent(this.currentJobId)}` : "";
+    const url = `/api/reports/download/csv${jobQuery}`;
     this.downloadFileSafely(e, url, filename);
   },
 

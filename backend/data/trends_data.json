@@ -1,0 +1,115 @@
+{
+  "status": "success",
+  "data_as_of": "2026-03-31",
+  "reporting_body": "Ministry of Coal / Coal India Limited",
+  "historical_10yr_production": [
+    { "fiscal_year": "2013-14", "production_mt": 565.77, "yoy_growth_pct": 0.0, "secl_contribution_mt": 124.26 },
+    { "fiscal_year": "2014-15", "production_mt": 609.18, "yoy_growth_pct": 7.67, "secl_contribution_mt": 128.28 },
+    { "fiscal_year": "2015-16", "production_mt": 639.23, "yoy_growth_pct": 4.93, "secl_contribution_mt": 137.93 },
+    { "fiscal_year": "2016-17", "production_mt": 657.87, "yoy_growth_pct": 2.92, "secl_contribution_mt": 140.00 },
+    { "fiscal_year": "2017-18", "production_mt": 675.40, "yoy_growth_pct": 2.66, "secl_contribution_mt": 144.71 },
+    { "fiscal_year": "2018-19", "production_mt": 728.72, "yoy_growth_pct": 7.89, "secl_contribution_mt": 157.35 },
+    { "fiscal_year": "2019-20", "production_mt": 730.87, "yoy_growth_pct": 0.30, "secl_contribution_mt": 150.55 },
+    { "fiscal_year": "2020-21", "production_mt": 716.08, "yoy_growth_pct": -2.02, "secl_contribution_mt": 150.61 },
+    { "fiscal_year": "2021-22", "production_mt": 778.21, "yoy_growth_pct": 8.68, "secl_contribution_mt": 142.51 },
+    { "fiscal_year": "2022-23", "production_mt": 893.19, "yoy_growth_pct": 14.78, "secl_contribution_mt": 167.01 },
+    { "fiscal_year": "2023-24", "production_mt": 997.83, "yoy_growth_pct": 11.71, "secl_contribution_mt": 187.54 },
+    { "fiscal_year": "2024-25", "production_mt": 1047.52, "yoy_growth_pct": 4.98, "secl_contribution_mt": 195.20 }
+  ],
+  "monthly_12m_trajectory": {
+    "months": ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"],
+    "actual_mt": [53.5, 56.2, 58.1, 53.7, 55.4, 58.9, 63.4, 68.2, 72.5, 75.8, 76.4, 80.5],
+    "target_mt": [55.0, 57.0, 59.0, 55.0, 56.5, 60.0, 65.0, 70.0, 74.0, 77.0, 78.5, 81.8],
+    "variance_mt": [-1.5, -0.8, -0.9, -1.3, -1.1, -1.1, -1.6, -1.8, -1.5, -1.2, -2.1, -1.3],
+    "fulfillment_pct": [97.27, 98.60, 98.47, 97.64, 98.05, 98.17, 97.54, 97.43, 97.97, 98.44, 97.32, 98.41]
+  },
+  "top_collieries_6m_trend": {
+    "months": ["Oct 2025", "Nov 2025", "Dec 2025", "Jan 2026", "Feb 2026", "Mar 2026"],
+    "series": [
+      {
+        "name": "Gevra Expansion OCP (SECL)",
+        "subsidiary": "SECL",
+        "state": "Chhattisgarh",
+        "production_data": [47.5, 48.8, 49.6, 50.4, 51.2, 52.50],
+        "total_actual": 52.50,
+        "target": 54.00,
+        "share_pct": 14.85
+      },
+      {
+        "name": "Kusmunda Colliery OCP (SECL)",
+        "subsidiary": "SECL",
+        "state": "Chhattisgarh",
+        "production_data": [38.2, 39.4, 40.5, 41.2, 42.1, 43.20],
+        "total_actual": 43.20,
+        "target": 44.00,
+        "share_pct": 12.22
+      },
+      {
+        "name": "Dipka Mega Project (SECL)",
+        "subsidiary": "SECL",
+        "state": "Chhattisgarh",
+        "production_data": [30.1, 30.8, 31.6, 32.5, 33.2, 34.00],
+        "total_actual": 34.00,
+        "target": 35.00,
+        "share_pct": 9.62
+      },
+      {
+        "name": "Bhubaneswari OCP (MCL)",
+        "subsidiary": "MCL",
+        "state": "Odisha",
+        "production_data": [25.0, 25.8, 26.5, 27.1, 27.8, 28.40],
+        "total_actual": 28.40,
+        "target": 29.00,
+        "share_pct": 8.03
+      },
+      {
+        "name": "Jayant Colliery OCP (NCL)",
+        "subsidiary": "NCL",
+        "state": "Madhya Pradesh",
+        "production_data": [21.0, 21.8, 22.4, 23.0, 23.6, 24.10],
+        "total_actual": 24.10,
+        "target": 24.50,
+        "share_pct": 6.82
+      },
+      {
+        "name": "Nigahi Project OCP (NCL)",
+        "subsidiary": "NCL",
+        "state": "Madhya Pradesh",
+        "production_data": [19.2, 19.8, 20.2, 20.8, 21.1, 21.50],
+        "total_actual": 21.50,
+        "target": 22.00,
+        "share_pct": 6.08
+      }
+    ]
+  },
+  "coking_vs_noncoking_historical": [
+    { "year": "2000-01", "coking_mt": 30.90, "non_coking_mt": 282.80, "total_mt": 313.70, "hard_coke_mt": 11.70, "washed_coke_mt": 8.64 },
+    { "year": "2001-02", "coking_mt": 28.67, "non_coking_mt": 299.12, "total_mt": 327.79, "hard_coke_mt": 11.73, "washed_coke_mt": 8.01 },
+    { "year": "2002-03", "coking_mt": 30.20, "non_coking_mt": 311.08, "total_mt": 341.28, "hard_coke_mt": 13.92, "washed_coke_mt": 8.20 },
+    { "year": "2003-04", "coking_mt": 29.40, "non_coking_mt": 331.85, "total_mt": 361.25, "hard_coke_mt": 13.12, "washed_coke_mt": 8.20 },
+    { "year": "2004-05", "coking_mt": 30.22, "non_coking_mt": 352.39, "total_mt": 382.61, "hard_coke_mt": 12.67, "washed_coke_mt": 8.79 },
+    { "year": "2005-06", "coking_mt": 31.51, "non_coking_mt": 375.50, "total_mt": 407.01, "hard_coke_mt": 13.38, "washed_coke_mt": 8.38 },
+    { "year": "2006-07", "coking_mt": 32.10, "non_coking_mt": 398.74, "total_mt": 430.84, "hard_coke_mt": 12.57, "washed_coke_mt": 7.03 },
+    { "year": "2007-08", "coking_mt": 34.46, "non_coking_mt": 422.63, "total_mt": 457.09, "hard_coke_mt": 12.54, "washed_coke_mt": 7.17 },
+    { "year": "2008-09", "coking_mt": 34.81, "non_coking_mt": 457.95, "total_mt": 492.76, "hard_coke_mt": 13.68, "washed_coke_mt": 7.18 },
+    { "year": "2009-10", "coking_mt": 44.26, "non_coking_mt": 487.81, "total_mt": 532.07, "hard_coke_mt": 12.66, "washed_coke_mt": 7.50 },
+    { "year": "2024-25", "coking_mt": 68.20, "non_coking_mt": 705.40, "total_mt": 773.60, "hard_coke_mt": 24.10, "washed_coke_mt": 16.80 }
+  ],
+  "import_substitution_trends": [
+    { "year": "2016-17", "domestic_production_mt": 554.14, "imported_coal_mt": 190.95, "thermal_import_mt": 149.31 },
+    { "year": "2017-18", "domestic_production_mt": 567.37, "imported_coal_mt": 208.27, "thermal_import_mt": 161.27 },
+    { "year": "2018-19", "domestic_production_mt": 606.89, "imported_coal_mt": 235.24, "thermal_import_mt": 183.40 },
+    { "year": "2023-24", "domestic_production_mt": 773.65, "imported_coal_mt": 222.10, "thermal_import_mt": 165.40 }
+  ],
+  "subsidiary_financial_revenue": [
+    { "subsidiary": "South Eastern Coalfields Limited (SECL)", "code": "SECL", "production_mt": 187.38, "revenue_crore": 27306.37, "share_pct": 20.8 },
+    { "subsidiary": "Mahanadi Coalfields Limited (MCL)", "code": "MCL", "production_mt": 206.10, "revenue_crore": 27182.32, "share_pct": 25.7 },
+    { "subsidiary": "Northern Coalfields Limited (NCL)", "code": "NCL", "production_mt": 136.15, "revenue_crore": 24632.89, "share_pct": 17.3 },
+    { "subsidiary": "Western Coalfields Limited (WCL)", "code": "WCL", "production_mt": 69.11, "revenue_crore": 17491.99, "share_pct": 8.5 },
+    { "subsidiary": "Central Coalfields Limited (CCL)", "code": "CCL", "production_mt": 86.05, "revenue_crore": 16565.72, "share_pct": 10.4 },
+    { "subsidiary": "Eastern Coalfields Limited (ECL)", "code": "ECL", "production_mt": 47.56, "revenue_crore": 14559.14, "share_pct": 4.6 },
+    { "subsidiary": "Bharat Coking Coal Limited (BCCL)", "code": "BCCL", "production_mt": 41.10, "revenue_crore": 14113.31, "share_pct": 5.1 },
+    { "subsidiary": "North Eastern Coalfields (NEC)", "code": "NEC", "production_mt": 0.20, "revenue_crore": 115.97, "share_pct": 0.2 },
+    { "subsidiary": "Grand Total / Consolidated CIL", "code": "CIL", "production_mt": 773.65, "revenue_crore": 141967.71, "share_pct": 100.0 }
+  ]
+}
