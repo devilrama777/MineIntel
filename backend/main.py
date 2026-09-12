@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from backend import config
+from backend import config, auth_store
 from backend.services.converter import MarkdownConverter
 from backend.services.document_generator import DocumentGenerator, TEMPLATE_CONFIGS, get_active_dataset_metrics
 from backend.services.gemma_client import GemmaClient
@@ -63,6 +63,22 @@ class LoginRequest(BaseModel):
     officer_id: str
     password: str
     remember_device: Optional[bool] = True
+
+
+class CreateUserRequest(BaseModel):
+    master_officer_id: str
+    master_password: str
+    officer_id: str
+    password: str
+    display_name: Optional[str] = None
+    role: Optional[str] = "Operational Auditor"
+
+
+class MasterUserActionRequest(BaseModel):
+    master_officer_id: str
+    master_password: str
+    target_officer_id: str
+    is_active: bool
 
 
 def create_session_token(officer_id: str, role: str = "Senior Operational Auditor") -> str:
@@ -161,31 +177,116 @@ class GemmaRequest(BaseModel):
 # -------------------------------------------------------------------------
 @app.post("/api/auth/login")
 def auth_login(req: LoginRequest):
-    """Authenticates executive officers against sovereign credentials using constant-time comparison."""
+    """Authenticates executive master officers and registered members against secure credential store."""
+    officer_id = req.officer_id.strip()
+    password = req.password.strip()
+
     officer_id_configured = config.get_auth_officer_id()
     secret_pw_configured = config.get_auth_secret_password()
-    if not officer_id_configured or not secret_pw_configured:
+
+    # If neither master environment credentials nor local users exist, report unconfigured
+    if not (officer_id_configured and secret_pw_configured) and not auth_store.load_users():
         raise HTTPException(
             status_code=503,
             detail="Authentication is unconfigured. Production credentials must be supplied via MINEINTEL_OFFICER_ID and MINEINTEL_AUTH_PASSWORD environment variables."
         )
-    valid_id = secrets.compare_digest(req.officer_id.strip(), officer_id_configured)
-    valid_pw = secrets.compare_digest(req.password.strip(), secret_pw_configured)
-    if not (valid_id and valid_pw):
+
+    auth_result = auth_store.authenticate_user(officer_id, password)
+    if not auth_result:
         raise HTTPException(
             status_code=401,
             detail="Authentication failed: Invalid Officer Employee ID or Enclave Password."
         )
-    token = create_session_token(req.officer_id.strip())
+
+    if auth_result.get("error") == "USER_DISABLED":
+        raise HTTPException(
+            status_code=403,
+            detail=auth_result.get("message", "This account has been disabled or revoked.")
+        )
+
+    role = auth_result.get("role", "Operational Auditor")
+    display_name = auth_result.get("display_name", officer_id)
+    token = create_session_token(auth_result["officer_id"], role=role)
+
     return {
         "success": True,
         "authenticated": True,
         "token": token,
-        "officer_id": req.officer_id.strip(),
-        "name": "Authorized Inspector",
-        "role": "Senior Operational Auditor",
+        "officer_id": auth_result["officer_id"],
+        "name": display_name,
+        "role": role,
+        "is_master": auth_result.get("is_master", False),
         "department": "Ministry of Coal, Government of India",
         "expires_in": 86400
+    }
+
+
+@app.post("/api/auth/users")
+def auth_create_user(req: CreateUserRequest):
+    """
+    Creates a new normal user account.
+    Requires Master Officer authentication.
+    """
+    master_officer = config.get_auth_officer_id().strip()
+    master_secret = config.get_auth_secret_password().strip()
+
+    if not master_officer or not master_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Master authentication is unconfigured on the server."
+        )
+
+    valid_master_id = secrets.compare_digest(req.master_officer_id.strip().lower(), master_officer.lower())
+    valid_master_pw = secrets.compare_digest(req.master_password.strip(), master_secret)
+
+    if not (valid_master_id and valid_master_pw):
+        raise HTTPException(
+            status_code=401,
+            detail="Master authentication failed: Invalid Master Officer ID or Enclave Password."
+        )
+
+    try:
+        new_user = auth_store.create_user(
+            officer_id=req.officer_id,
+            password=req.password,
+            display_name=req.display_name,
+            role=req.role or "Operational Auditor"
+        )
+        return {
+            "success": True,
+            "message": f"Normal user '{new_user['officer_id']}' provisioned successfully.",
+            "user": new_user
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.patch("/api/auth/users/status")
+def auth_update_user_status(req: MasterUserActionRequest):
+    """
+    Enables or disables/revokes a user account.
+    Requires Master Officer authentication.
+    """
+    master_officer = config.get_auth_officer_id().strip()
+    master_secret = config.get_auth_secret_password().strip()
+
+    if not master_officer or not master_secret:
+        raise HTTPException(status_code=503, detail="Master authentication is unconfigured.")
+
+    valid_master_id = secrets.compare_digest(req.master_officer_id.strip().lower(), master_officer.lower())
+    valid_master_pw = secrets.compare_digest(req.master_password.strip(), master_secret)
+
+    if not (valid_master_id and valid_master_pw):
+        raise HTTPException(status_code=401, detail="Master authentication failed.")
+
+    success = auth_store.set_user_status(req.target_officer_id, req.is_active)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"User '{req.target_officer_id}' not found.")
+
+    status_str = "activated" if req.is_active else "disabled/revoked"
+    return {
+        "success": True,
+        "message": f"User '{req.target_officer_id}' has been {status_str}."
     }
 
 
@@ -227,6 +328,15 @@ def require_auth(
     if not session:
         raise HTTPException(status_code=401, detail="Session token invalid, tampered, or expired.")
     return session
+
+
+@app.get("/api/auth/users")
+def auth_list_users(auth: Dict[str, Any] = Depends(require_auth)):
+    """Lists registered users for authorized inspectors."""
+    return {
+        "success": True,
+        "users": auth_store.get_all_users_safe()
+    }
 
 
 @app.post("/api/auth/logout")

@@ -77,6 +77,12 @@ AUTH_OFFICER_ID = os.getenv("MINEINTEL_OFFICER_ID") or os.getenv("AUTH_OFFICER_I
 AUTH_SECRET_PASSWORD = os.getenv("MINEINTEL_AUTH_PASSWORD") or os.getenv("AUTH_SECRET_PASSWORD", "")
 JWT_SECRET = os.getenv("JWT_SECRET", "sih-mining-enclave-secret-key-2026-secure")
 SESSION_EXPIRY_HOURS = int(os.getenv("SESSION_EXPIRY_HOURS", "24"))
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or ""
+
+
+def get_database_url() -> str:
+    """Returns PostgreSQL connection string if configured in environment."""
+    return os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or DATABASE_URL
 
 
 def get_auth_officer_id() -> str:

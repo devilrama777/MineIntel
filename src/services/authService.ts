@@ -248,6 +248,46 @@ class AuthService {
     this.clearSession();
   }
 
+  /**
+   * Create a new normal user account. Requires Master Officer credentials for authorization.
+   */
+  public async createUser(data: {
+    master_officer_id: string;
+    master_password: string;
+    officer_id: string;
+    password: string;
+    display_name?: string;
+    role?: string;
+  }): Promise<{ success: boolean; message: string; user?: any }> {
+    const resp = await fetch(`${API_BASE}/api/auth/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    const resData = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(resData.detail || 'Failed to create user.');
+    }
+    return resData;
+  }
+
+  /**
+   * List registered users. Requires valid active session.
+   */
+  public async listUsers(): Promise<any[]> {
+    const resp = await fetch(`${API_BASE}/api/auth/users`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.getAuthHeader(),
+      },
+    });
+    if (!resp.ok) return [];
+    const data = await resp.json().catch(() => ({}));
+    return data.users || [];
+  }
+
   private setSession(token: string, user: UserProfile) {
     this.activeToken = token;
     this.currentUser = user;
