@@ -32,28 +32,42 @@ class DesktopBridgeService {
   public getSystemInfo(): DesktopSystemInfo {
     const isMac = this.currentPlatform === 'macos';
     const isWin = this.currentPlatform === 'windows';
+    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI__;
 
     return {
       platform: this.currentPlatform,
-      osName: isMac
-        ? 'macOS 15.3 (Sequoia)'
-        : isWin
-        ? 'Windows 11 Enterprise (Build 26100)'
-        : 'Linux (Ubuntu 24.04 LTS / Kernel 6.8)',
-      kernelVersion: isMac ? 'Darwin 24.3.0' : isWin ? 'NT 10.0.26100' : 'x86_64 Linux 6.8.0-45-generic',
-      architecture: isMac ? 'Apple Silicon (aarch64)' : 'x86_64 (AVX-512)',
-      runtimeEngine: 'MineIntel Desktop Engine (Tauri 2.0 / Rust Core + Webview2 / WebKitGTK)',
-      localDaemonUrl: isWin ? '127.0.0.1:8765 (Named Pipe: \\\\.\\pipe\\mineintel)' : '127.0.0.1:8765 (UNIX Socket: /run/mineintel.sock)',
-      cpuUsagePercent: 18.4,
-      vramUsageGb: 14.8,
-      totalVramGb: 24.0,
-      memoryUsageMb: 3840,
-      totalMemoryMb: 32768,
-      isAirgapped: true,
+      osName: isTauri
+        ? (isMac
+          ? 'macOS 15.3 (Sequoia)'
+          : isWin
+          ? 'Windows 11 Enterprise (Build 26100)'
+          : 'Linux (Ubuntu 24.04 LTS / Kernel 6.8)')
+        : 'Web Browser / Cloud Enclave',
+      kernelVersion: isTauri
+        ? (isMac ? 'Darwin 24.3.0' : isWin ? 'NT 10.0.26100' : 'x86_64 Linux 6.8.0-45-generic')
+        : 'Browser Engine (W3C Standard)',
+      architecture: isTauri
+        ? (isMac ? 'Apple Silicon (aarch64)' : 'x86_64 (AVX-512)')
+        : 'Architecture Independent',
+      runtimeEngine: isTauri
+        ? 'MineIntel Desktop Engine (Tauri 2.0 / Rust Core + Webview2 / WebKitGTK)'
+        : 'MineIntel Enterprise Web (FastAPI + React)',
+      localDaemonUrl: isTauri
+        ? (isWin ? 'Local IPC (Named Pipe: \\\\.\\pipe\\mineintel)' : 'Local IPC (Socket: /run/mineintel.sock)')
+        : 'Connected (/api)',
+      cpuUsagePercent: isTauri ? 18.4 : 0,
+      vramUsageGb: isTauri ? 14.8 : 0,
+      totalVramGb: isTauri ? 24.0 : 0,
+      memoryUsageMb: isTauri ? 3840 : 0,
+      totalMemoryMb: isTauri ? 32768 : 0,
+      isAirgapped: isTauri,
     };
   }
 
   public getRootDataPath(): string {
+    if (typeof window !== 'undefined' && !(window as any).__TAURI__) {
+      return 'Sovereign Enclave Storage (/api/data)';
+    }
     switch (this.currentPlatform) {
       case 'windows':
         return 'C:\\ProgramData\\MineIntel\\data_repository';

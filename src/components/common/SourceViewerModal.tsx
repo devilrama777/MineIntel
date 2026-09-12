@@ -652,7 +652,7 @@ export const SourceViewerModal: React.FC<SourceViewerModalProps> = ({
                   <span>Provenance Cryptographically Verified</span>
                 </div>
                 <p className="text-[10px] text-emerald-400/80 font-mono">
-                  Origin file checksum matches local workspace partition snapshot. Zero cloud telemetry.
+                  Origin file checksum matches workspace snapshot. Sovereign tamper verification intact.
                 </p>
               </div>
             </div>

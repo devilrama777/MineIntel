@@ -63,7 +63,7 @@ class LocalDesktopService {
             engine: 'FastAPI Production Gateway',
             status: 'healthy',
             latency: '<5ms',
-            detail: `Listening on ${API_BASE || '127.0.0.1:8000'} (Uptime: ${h.uptime || 0}s)`,
+            detail: `Listening on ${API_BASE || 'Sovereign Gateway (/api)'} (Uptime: ${h.uptime || 0}s)`,
             metrics: 'FastAPI Core Active',
           },
           {
@@ -714,7 +714,7 @@ class LocalDesktopService {
             target: l.resource_id || l.target || '',
             severity: l.severity || 'info',
             details: typeof l.details === 'object' ? JSON.stringify(l.details) : String(l.details || ''),
-            ipOrOrigin: l.ip || '127.0.0.1 (Local Loopback)',
+            ipOrOrigin: l.ip || 'Sovereign Enclave Gateway',
             verificationHash: l.current_hash || l.hashSignature || 'verified-local',
             hashSignature: l.current_hash || l.hashSignature || '',
           }));

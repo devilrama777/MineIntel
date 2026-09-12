@@ -2,7 +2,7 @@
  * Centralized Authentication & Profile Context.
  */
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { UserProfile, LoginCredentials, FirstRunSetupData } from '../types';
+import { UserProfile, LoginCredentials, FirstRunSetupData, AuthState, AuthConfigStatus } from '../types';
 import { authService } from '../services/authService';
 
 interface AuthContextType {
@@ -10,11 +10,13 @@ interface AuthContextType {
   sessionToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  requiresSetup: boolean;
+  authConfigStatus: AuthConfigStatus | null;
+  authState: AuthState;
   login: (credentials: LoginCredentials) => Promise<void>;
   firstRunSetup: (data: FirstRunSetupData) => Promise<void>;
   logout: () => Promise<void>;
   checkSession: () => Promise<void>;
+  refreshAuthConfig: () => Promise<AuthConfigStatus>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -23,29 +25,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<UserProfile | null>(null);
   const [sessionToken, setSessionToken] = useState<string | null>(authService.getToken());
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [requiresSetup, setRequiresSetup] = useState<boolean>(false);
+  const [authConfigStatus, setAuthConfigStatus] = useState<AuthConfigStatus | null>(null);
+  const [authState, setAuthState] = useState<AuthState>('IDLE');
+
+  const refreshAuthConfig = async (): Promise<AuthConfigStatus> => {
+    const status = await authService.checkAuthConfig();
+    setAuthConfigStatus(status);
+    if (!status.reachable) {
+      setAuthState('BACKEND_UNREACHABLE');
+    } else if (!status.configured) {
+      setAuthState('AUTHENTICATION_NOT_CONFIGURED');
+    } else {
+      setAuthState('AUTHENTICATION_CONFIGURED');
+    }
+    return status;
+  };
 
   const checkSession = async () => {
     setIsLoading(true);
     try {
-      // 1. Check whether database requires first-run setup
-      const status = await authService.getSetupStatus();
-      setRequiresSetup(status.requires_setup);
-
-      if (status.requires_setup) {
-        setUser(null);
-        setSessionToken(null);
-        setIsLoading(false);
-        return;
-      }
+      // 1. Proactively check backend connectivity and authentication configuration
+      const status = await refreshAuthConfig();
 
       // 2. If token exists, validate session with backend
       const activeToken = authService.getToken();
-      if (activeToken) {
+      if (activeToken && status.reachable) {
         const validatedUser = await authService.validateSession();
         if (validatedUser) {
           setUser(validatedUser);
           setSessionToken(activeToken);
+          setAuthState('AUTHENTICATION_SUCCESSFUL');
         } else {
           setUser(null);
           setSessionToken(null);
@@ -53,6 +62,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (e) {
       console.error('Session validation error:', e);
+      setAuthState('BACKEND_UNREACHABLE');
     } finally {
       setIsLoading(false);
     }
@@ -63,16 +73,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (credentials: LoginCredentials) => {
-    const session = await authService.login(credentials);
-    setUser(session.user);
-    setSessionToken(session.session_token);
+    try {
+      const session = await authService.login(credentials);
+      setUser(session.user);
+      setSessionToken(session.session_token);
+      setAuthState('AUTHENTICATION_SUCCESSFUL');
+    } catch (err: any) {
+      if (err.code === 'AUTHENTICATION_NOT_CONFIGURED') {
+        setAuthState('AUTHENTICATION_NOT_CONFIGURED');
+      } else if (err.code === 'AUTHENTICATION_REJECTED') {
+        setAuthState('AUTHENTICATION_REJECTED');
+      } else if (err.code === 'BACKEND_UNREACHABLE') {
+        setAuthState('BACKEND_UNREACHABLE');
+      } else {
+        setAuthState('AUTHENTICATION_REQUEST_FAILED');
+      }
+      throw err;
+    }
   };
 
   const firstRunSetup = async (data: FirstRunSetupData) => {
-    const session = await authService.firstRunSetup(data);
-    setUser(session.user);
-    setSessionToken(session.session_token);
-    setRequiresSetup(false);
+    await login({
+      username: data.username,
+      password: data.password,
+    });
   };
 
   const logout = async () => {
@@ -89,11 +113,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sessionToken,
         isAuthenticated: !!user && !!sessionToken,
         isLoading,
-        requiresSetup,
+        authConfigStatus,
+        authState,
         login,
         firstRunSetup,
         logout,
         checkSession,
+        refreshAuthConfig,
       }}
     >
       {children}

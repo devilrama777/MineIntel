@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { ReportItem, ValidationIssueItem } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
+import { getApiBaseUrl } from '../../services/config';
 
 interface ExportViewProps {
   report: ReportItem;
@@ -24,7 +25,7 @@ interface ExportViewProps {
   onOpenEditor: () => void;
 }
 
-const API_BASE = (typeof window !== 'undefined' && (window as any).__MINEINTEL_API_BASE__) || 'http://127.0.0.1:8765';
+const API_BASE = getApiBaseUrl();
 
 export const ExportView: React.FC<ExportViewProps> = ({
   report,

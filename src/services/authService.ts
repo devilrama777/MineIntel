@@ -11,6 +11,7 @@ import {
   LoginCredentials,
   FirstRunSetupData,
   SetupStatus,
+  AuthConfigStatus,
 } from '../types';
 import { getApiBaseUrl } from './config';
 
@@ -54,13 +55,65 @@ class AuthService {
 
   /**
    * Check whether any accounts exist or if first-run setup is required.
+   * Note: The backend credentials are provided solely via environment variables.
    */
   public async getSetupStatus(): Promise<SetupStatus> {
     return { has_users: true, requires_setup: false };
   }
 
   /**
-   * Initial profile setup delegating to authentication.
+   * Proactively checks whether backend is reachable and authentication is configured.
+   */
+  public async checkAuthConfig(): Promise<AuthConfigStatus> {
+    try {
+      // 1. Probe health endpoint
+      const healthResp = await fetch(`${API_BASE}/api/health`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!healthResp.ok) {
+        return {
+          configured: false,
+          reachable: true,
+          message: `Backend server returned unexpected status: ${healthResp.status}`,
+        };
+      }
+
+      // 2. Probe auth endpoint to check if environment credentials are set
+      const probeResp = await fetch(`${API_BASE}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ officer_id: '', password: '' }),
+      });
+
+      if (probeResp.status === 503) {
+        const errData = await probeResp.json().catch(() => ({}));
+        return {
+          configured: false,
+          reachable: true,
+          message:
+            errData.detail ||
+            'Authentication is unconfigured. Production credentials must be supplied via MINEINTEL_OFFICER_ID and MINEINTEL_AUTH_PASSWORD environment variables.',
+        };
+      }
+
+      // If status is 401 or anything else, authentication is configured
+      return {
+        configured: true,
+        reachable: true,
+      };
+    } catch {
+      return {
+        configured: false,
+        reachable: false,
+        message: 'Backend service is unreachable. Ensure the backend server is running and accessible.',
+      };
+    }
+  }
+
+  /**
+   * First-run setup delegates to standard login since sovereign credentials
+   * are provisioned exclusively via host environment variables.
    */
   public async firstRunSetup(data: FirstRunSetupData): Promise<AuthSession> {
     return this.login({
@@ -78,17 +131,41 @@ class AuthService {
       password: credentials.password.trim(),
     };
 
-    const resp = await fetch(`${API_BASE}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    let resp: Response;
+    try {
+      resp = await fetch(`${API_BASE}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      const err: any = new Error(
+        'Backend service unreachable: Unable to establish connection to MineIntel server.'
+      );
+      err.code = 'BACKEND_UNREACHABLE';
+      err.status = 0;
+      throw err;
+    }
 
     if (!resp.ok) {
       const errData = await resp.json().catch(() => ({}));
-      throw new Error(
-        errData.detail || 'Authentication failed: Invalid Officer ID or Enclave Password.'
-      );
+      let errCode: string = 'AUTHENTICATION_REQUEST_FAILED';
+      let message = errData.detail || 'Authentication failed.';
+
+      if (resp.status === 503) {
+        errCode = 'AUTHENTICATION_NOT_CONFIGURED';
+        message =
+          errData.detail ||
+          'Authentication is unconfigured. Production credentials must be supplied via MINEINTEL_OFFICER_ID and MINEINTEL_AUTH_PASSWORD environment variables.';
+      } else if (resp.status === 401) {
+        errCode = 'AUTHENTICATION_REJECTED';
+        message = errData.detail || 'Authentication failed: Invalid Officer ID or Enclave Password.';
+      }
+
+      const err: any = new Error(message);
+      err.code = errCode;
+      err.status = resp.status;
+      throw err;
     }
 
     const data = await resp.json();

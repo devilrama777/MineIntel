@@ -91,7 +91,7 @@ export const ReportEditorView: React.FC<ReportEditorViewProps> = ({
   }, [activeProposal]);
 
   const [agentHistory, setAgentHistory] = useState<string[]>([
-    'Local inference agent online on 127.0.0.1:8765. Contextual evidence binding active.',
+    'MineIntel statutory intelligence engine online. Contextual evidence binding active.',
   ]);
 
   const activeSectionBlocks = blocks.filter((b) => b.sectionId === activeSectionId);

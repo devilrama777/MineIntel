@@ -673,10 +673,10 @@ export const AppTitlebar: React.FC<AppTitlebarProps> = ({
               ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
               : 'text-emerald-400 bg-emerald-950/40 hover:bg-emerald-900/50 border-emerald-800/40'
           }`}
-          title="Airgap Hardware Integrity Active"
+          title="Sovereign Enclave Security Active"
         >
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-          <span className="font-semibold hidden sm:inline">AIRGAPPED NODE</span>
+          <span className="font-semibold hidden sm:inline">SOVEREIGN ENCLAVE</span>
         </button>
       </div>
     </header>

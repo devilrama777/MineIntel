@@ -33,8 +33,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
 
   const [savedNotice, setSavedNotice] = useState(false);
 
-  // Settings mock state
-  const [ipcEndpoint, setIpcEndpoint] = useState('http://127.0.0.1:8000');
+  // Settings state
+  const [ipcEndpoint, setIpcEndpoint] = useState('/api');
   const [defaultModel, setDefaultModel] = useState('openrouter/free');
   const [gpuLayers, setGpuLayers] = useState(0);
   const [contextWindow, setContextWindow] = useState(32768);
@@ -51,12 +51,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
 
   const tabs = [
     { id: 'General', label: 'General' },
-    { id: 'AI Models', label: 'AI Models (Local LLM)' },
+    { id: 'AI Models', label: 'AI Engine & Models' },
     { id: 'Processing', label: 'Processing Pipelines' },
     { id: 'OCR', label: 'OCR & Vision Engine' },
     { id: 'Search', label: 'Vector & Hybrid Search' },
-    { id: 'Storage', label: 'Local NVMe Storage' },
-    { id: 'Security', label: 'Airgap & Security' },
+    { id: 'Storage', label: 'Storage & Repositories' },
+    { id: 'Security', label: 'Security & Integrity' },
     { id: 'Performance', label: 'Hardware Acceleration' },
   ] as const;
 
@@ -68,11 +68,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
           <div className="flex items-center gap-2 mb-1">
             <SettingsIcon className="w-5 h-5 text-blue-400" />
             <h1 className="text-lg font-bold text-slate-100 tracking-tight">
-              Local System Configuration & Engine Settings
+              System Configuration & Engine Settings
             </h1>
           </div>
           <p className="text-xs text-slate-400">
-            Configure local IPC bindings, hardware acceleration parameters, OCR pipelines, and airgap firewall rules.
+            Configure backend API bindings, processing pipelines, OCR settings, and audit security guardrails.
           </p>
         </div>
 
@@ -80,7 +80,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
           {savedNotice && (
             <span className="text-xs font-mono text-emerald-400 flex items-center gap-1">
               <CheckCircle2 className="w-4 h-4" />
-              Settings Applied to Local Daemon
+              Settings Applied to Session
             </span>
           )}
           <button
@@ -124,16 +124,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
             <div className="space-y-4 max-w-2xl">
               <div>
                 <h2 className="text-sm font-semibold text-slate-100 font-sans mb-1">
-                  Local AI Inference Engine & Model Registry
+                  AI Inference Engine & Sovereign Model Registry
                 </h2>
                 <p className="text-xs text-slate-400 font-sans">
-                  The local application invokes LLMs directly via local UNIX socket or HTTP loopback (Tauri IPC).
+                  The application invokes AI reasoning models through the sovereign OpenRouter pipeline.
                 </p>
               </div>
 
               <div className="space-y-3">
                 <div>
-                  <label className="block text-slate-300 mb-1">LOCAL IPC ENDPOINT</label>
+                  <label className="block text-slate-300 mb-1">BACKEND API PREFIX</label>
                   <input
                     type="text"
                     value={ipcEndpoint}
@@ -141,7 +141,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
                     className="w-full bg-[#182333] border border-slate-700 rounded px-3 py-1.5 text-slate-100"
                   />
                   <span className="text-[10px] text-slate-500 font-mono">
-                    Backend service endpoint (Loopback secure).
+                    Centralized FastAPI backend routing prefix (/api).
                   </span>
                 </div>
 
@@ -285,8 +285,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
                   <span className="text-emerald-400 font-bold">Optimal / Online</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Local Daemon Host:</span>
-                  <span>127.0.0.1:8000</span>
+                  <span className="text-slate-400">Backend API Gateway:</span>
+                  <span>/api (Relative Origin)</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Process Affinity:</span>

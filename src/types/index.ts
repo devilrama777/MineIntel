@@ -309,3 +309,18 @@ export interface SetupStatus {
   requires_setup: boolean;
 }
 
+export type AuthState =
+  | 'IDLE'
+  | 'AUTHENTICATION_CONFIGURED'
+  | 'AUTHENTICATION_NOT_CONFIGURED'
+  | 'BACKEND_UNREACHABLE'
+  | 'AUTHENTICATION_REQUEST_FAILED'
+  | 'AUTHENTICATION_SUCCESSFUL'
+  | 'AUTHENTICATION_REJECTED';
+
+export interface AuthConfigStatus {
+  configured: boolean;
+  reachable: boolean;
+  message?: string;
+}
+

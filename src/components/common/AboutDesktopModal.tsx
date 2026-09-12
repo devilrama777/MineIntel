@@ -65,17 +65,17 @@ export const AboutDesktopModal: React.FC<AboutDesktopModalProps> = ({
           <div className="p-3 bg-[#131b28] border border-[#233247] rounded space-y-2">
             <div className="text-slate-200 font-semibold flex items-center gap-1.5">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Airgapped Cross-Platform Desktop Architecture</span>
+              <span>Sovereign Enclave Intelligence Architecture</span>
             </div>
             <p className="text-slate-400 leading-relaxed">
-              MineIntel is an airgapped, high-throughput desktop application engineered specifically for Linux, macOS, and Windows workstations. It executes large-scale mining operational and statutory report generation entirely on-premise using local AI models without external cloud connectivity.
+              MineIntel is an enterprise-grade statutory compliance and intelligence platform. It executes large-scale mining operational and statutory report generation, mathematical cross-validation, and sovereign audit reconciliation.
             </p>
           </div>
 
           {/* OS Platform Switcher */}
           <div>
             <label className="block text-slate-300 font-medium mb-1.5">
-              Active Desktop Environment:
+              Target Environment Profile:
             </label>
             <div className="grid grid-cols-3 gap-2">
               <button
@@ -125,23 +125,23 @@ export const AboutDesktopModal: React.FC<AboutDesktopModalProps> = ({
           {/* Desktop Subsystem Specifications */}
           <div className="border border-[#1e2a3c] rounded bg-[#0b1018] p-3 space-y-1.5 font-mono text-[11px]">
             <div className="flex justify-between py-0.5 border-b border-slate-800/80">
-              <span className="text-slate-400">Host OS:</span>
+              <span className="text-slate-400">Host Environment:</span>
               <span className="text-slate-200">{sysInfo.osName}</span>
             </div>
             <div className="flex justify-between py-0.5 border-b border-slate-800/80">
-              <span className="text-slate-400">Kernel:</span>
+              <span className="text-slate-400">Platform Kernel:</span>
               <span className="text-slate-200">{sysInfo.kernelVersion}</span>
             </div>
             <div className="flex justify-between py-0.5 border-b border-slate-800/80">
-              <span className="text-slate-400">Desktop Shell:</span>
-              <span className="text-slate-200">Tauri 2.0 / Rust (Webview2 / WebKitGTK)</span>
+              <span className="text-slate-400">Application Shell:</span>
+              <span className="text-slate-200">{sysInfo.runtimeEngine}</span>
             </div>
             <div className="flex justify-between py-0.5 border-b border-slate-800/80">
-              <span className="text-slate-400">Local AI IPC:</span>
+              <span className="text-slate-400">Backend API:</span>
               <span className="text-blue-400">{sysInfo.localDaemonUrl}</span>
             </div>
             <div className="flex justify-between py-0.5">
-              <span className="text-slate-400">Repository Path:</span>
+              <span className="text-slate-400">Repository Root:</span>
               <span className="text-slate-300 truncate max-w-[280px]">{desktopBridge.getRootDataPath()}</span>
             </div>
           </div>
@@ -151,7 +151,7 @@ export const AboutDesktopModal: React.FC<AboutDesktopModalProps> = ({
         <div className="bg-[#0b0f17] border-t border-[#1b2535] px-5 py-3 flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-emerald-400 text-xs font-mono">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Certified Airgap Zero-Exfiltration Node</span>
+            <span>Sovereign Enclave Verified</span>
           </div>
 
           <button
