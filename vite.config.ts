@@ -25,7 +25,7 @@ export default defineConfig({
   },
   envPrefix: ["VITE_"],
   build: {
-    outDir: "backend/static",
+    outDir: "dist",
     emptyOutDir: true,
     target: ["es2021", "chrome100", "safari13"],
   },

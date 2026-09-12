@@ -24,8 +24,10 @@ reported_data/*
 !reported_data/.gitkeep
 outputs/job_*
 outputs/active_*
-
-# Node & Frontend Build
+outputs/reports/*
+!outputs/reports/.gitkeep
+.freebuff/
+scratch/
 node_modules/
 dist/
 .vercel/

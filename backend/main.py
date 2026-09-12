@@ -1320,7 +1320,9 @@ def get_analytics_summary(job_id: Optional[str] = Query(None)):
 
 
 # Mount static directory for frontend UI (when NOT in serverless mode)
-static_dir = Path(__file__).resolve().parent / "static"
+static_dir = Path(__file__).resolve().parent.parent / "dist"
+if not static_dir.exists():
+    static_dir = Path(__file__).resolve().parent / "static"
 if not config.IS_VERCEL and static_dir.exists():
     from starlette.staticfiles import StaticFiles
     app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
