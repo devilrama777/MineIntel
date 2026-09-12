@@ -166,12 +166,31 @@ def get_active_dataset_metrics(
 
     # Check job-isolated dataset first
     if not records and job_id and isinstance(job_id, str) and job_id.strip():
-        job_dataset = config.OUTPUTS_DIR / job_id.strip() / "active_dataset.json"
+        job_dir = config.OUTPUTS_DIR / job_id.strip()
+        job_dataset = job_dir / "active_dataset.json"
         if job_dataset.exists():
             try:
                 records = json.loads(job_dataset.read_text(encoding="utf-8"))
             except Exception:
                 records = None
+        if not records:
+            raw_md_file = job_dir / "01_raw_converted.md"
+            if raw_md_file.exists():
+                try:
+                    md_text = raw_md_file.read_text(encoding="utf-8")
+                    tbl_lines = [l.strip() for l in md_text.splitlines() if l.strip().startswith("|") and l.strip().endswith("|")]
+                    if len(tbl_lines) >= 3:
+                        headers = [c.strip() for c in tbl_lines[0].split("|")[1:-1]]
+                        parsed_rows = []
+                        for r_line in tbl_lines[2:]:
+                            cells = [c.strip() for c in r_line.split("|")[1:-1]]
+                            if any(cells):
+                                row_d = {headers[i]: cells[i] if i < len(cells) else "" for i in range(len(headers))}
+                                parsed_rows.append(row_d)
+                        if parsed_rows:
+                            records = parsed_rows
+                except Exception:
+                    pass
 
     # Fallback check
     if not records:
@@ -493,16 +512,16 @@ class DocumentGenerator:
         """Extracts table rows matching either user dataset columns or CIL baseline."""
         if metrics.get("is_user_data"):
             cols = metrics.get("table_columns", ["Rank", "Name", "Value"])
-            header = [str(c)[:18] for c in cols]
+            header = [str(c) for c in cols]
             rows = [header]
-            for c in metrics.get("collieries", [])[:10]:
+            for c in metrics.get("collieries", [])[:25]:
                 row = []
                 for col_name in cols:
                     val = c.get(col_name, "")
                     if isinstance(val, (int, float)):
                         row.append(f"{val:,.2f}")
                     else:
-                        row.append(str(val)[:20])
+                        row.append(str(val))
                 rows.append(row)
             return rows
 
@@ -545,13 +564,43 @@ class DocumentGenerator:
             tpl_key = "aurora_gradient"
         tpl = TEMPLATE_CONFIGS[tpl_key]
 
-        metrics = get_active_dataset_metrics(user_records, document_title=document_title)
+        effective_report_id = job_id if (job_id and report_id == "REP-2026-B56D") else report_id
+        metrics = get_active_dataset_metrics(user_records, job_id=job_id, document_title=document_title)
         safe_title = re.sub(r'[^a-zA-Z0-9_-]', '_', metrics.get("document_title", "Report"))[:24]
 
         target_dir = (config.OUTPUTS_DIR / job_id) if job_id else self.output_dir
         target_dir.mkdir(parents=True, exist_ok=True)
         pdf_path = target_dir / f"{safe_title}_{tpl_key}.pdf"
         default_pdf = self.output_dir / f"Ministry_of_Coal_{tpl_key}_2026.pdf"
+
+        if (not summary_text or not summary_text.strip()) and job_id:
+            job_dir = config.OUTPUTS_DIR / job_id
+            for sf in ["04_final_systematic_report.md", "02_llama_analysis.md"]:
+                p = job_dir / sf
+                if p.exists():
+                    try:
+                        summary_text = p.read_text(encoding="utf-8")
+                        break
+                    except Exception:
+                        pass
+
+        if images is None and job_id:
+            job_dir = config.OUTPUTS_DIR / job_id
+            manifest = job_dir / "media_manifest.json"
+            if manifest.exists():
+                try:
+                    m_data = json.loads(manifest.read_text(encoding="utf-8"))
+                    images = [img.get("path") for img in m_data.get("images", []) if img.get("path")]
+                except Exception:
+                    pass
+            if not images:
+                active_media = job_dir / "active_media_assets.json"
+                if active_media.exists():
+                    try:
+                        m_data = json.loads(active_media.read_text(encoding="utf-8"))
+                        images = [img.get("path") for img in m_data.get("extracted_images", []) if img.get("path")]
+                    except Exception:
+                        pass
 
         if not summary_text or not summary_text.strip():
             summary_text = CIL_ANNUAL_REPORT_SUMMARY if not metrics.get("is_user_data") else "Operational summary compiled from uploaded dataset."
@@ -573,7 +622,7 @@ class DocumentGenerator:
         styles = getSampleStyleSheet()
         elements = []
 
-        self._build_template_pdf(elements, styles, tpl, metrics, summary_text, report_id, images=images)
+        self._build_template_pdf(elements, styles, tpl, metrics, summary_text, effective_report_id, images=images)
         doc.build(elements)
 
         # Mirror copy to backward-compatible location if needed
@@ -635,8 +684,8 @@ class DocumentGenerator:
 
         elements.append(Paragraph("<b>1. Executive Analytical Baseline & Findings</b>", ParagraphStyle('Tpl_Sec1', fontName='Helvetica-Bold', fontSize=9.5, textColor=primary, spaceAfter=3)))
         clean_summary = _sanitize_text_for_pdf(summary_text)
-        safe_summary = _safe_truncate_xml(clean_summary, max_chars=1200)
-        elements.append(Paragraph(safe_summary, ParagraphStyle('Tpl_Body', fontSize=7.5, leading=10.5, textColor=colors.HexColor("#1E293B"), spaceAfter=5)))
+        safe_summary = _safe_truncate_xml(clean_summary, max_chars=4800)
+        elements.append(Paragraph(safe_summary, ParagraphStyle('Tpl_Body', fontSize=7.2, leading=9.8, textColor=colors.HexColor("#1E293B"), spaceAfter=5)))
 
         # Embedded user image if available
         if images and len(images) > 0:
@@ -691,14 +740,31 @@ class DocumentGenerator:
         elements.append(Paragraph("Strategic Action Items & Deterministic Proof", ParagraphStyle('Tpl_T3', fontName='Helvetica-Bold', fontSize=14, leading=17, textColor=primary, spaceAfter=3)))
         elements.append(HRFlowable(width="100%", thickness=1.5, color=accent, spaceAfter=6))
 
-        elements.append(Paragraph("<b>4. Strategic Recommendations & Follow-Up Directives</b>", ParagraphStyle('Tpl_Sec4', fontName='Helvetica-Bold', fontSize=9.5, textColor=primary, spaceAfter=3)))
+        custom_directives = []
+        if summary_text:
+            for l in summary_text.splitlines():
+                cl = l.strip()
+                if (re.match(r"^(\d+\.|\-|\*)\s+", cl) or "Directive" in cl or "Action" in cl or "Recommendation" in cl) and len(cl) > 25:
+                    clean_d = re.sub(r"^(\d+\.|\-|\*)\s*", "", cl).strip()
+                    clean_d = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", clean_d)
+                    custom_directives.append(clean_d)
+                    if len(custom_directives) >= 4:
+                        break
+
+        if custom_directives:
+            dir_text = "<br/>".join([f"<b>- DIRECTIVE {i+1}:</b> {d}" for i, d in enumerate(custom_directives)])
+        else:
+            dir_text = (
+                "<b>- ACTION ITEM 1 (Automated Verification):</b> Re-verify extracted sums against statutory primary records on scheduled intervals.<br/>"
+                "<b>- ACTION ITEM 2 (Variance Containment):</b> Flag records exhibiting >5% discrepancy from budgeted operational quotas.<br/>"
+                "<b>- ACTION ITEM 3 (Process Optimization):</b> Prioritize logistics and capacity expansion for top-ranking output nodes.<br/>"
+                "<b>- ACTION ITEM 4 (Cryptographic Integrity):</b> Maintain tamper-evident hash validation across all generated analytical reports."
+            )
+
         directives = [
             [
                 Paragraph(
-                    "<b>- ACTION ITEM 1 (Automated Verification):</b> Re-verify extracted sums against statutory primary records on scheduled intervals.<br/>"
-                    "<b>- ACTION ITEM 2 (Variance Containment):</b> Flag records exhibiting >5% discrepancy from budgeted operational quotas.<br/>"
-                    "<b>- ACTION ITEM 3 (Process Optimization):</b> Prioritize logistics and capacity expansion for top-ranking output nodes.<br/>"
-                    "<b>- ACTION ITEM 4 (Cryptographic Integrity):</b> Maintain tamper-evident hash validation across all generated analytical reports.",
+                    dir_text,
                     ParagraphStyle('Tpl_Dir', fontSize=7.2, leading=10.5, textColor=colors.HexColor("#0F172A"))
                 )
             ]
@@ -734,13 +800,25 @@ class DocumentGenerator:
             tpl_key = "executive_brief"
         tpl = TEMPLATE_CONFIGS[tpl_key]
 
-        metrics = get_active_dataset_metrics(user_records, document_title=document_title)
+        effective_report_id = job_id if (job_id and report_id == "REP-2026-B56D") else report_id
+        metrics = get_active_dataset_metrics(user_records, job_id=job_id, document_title=document_title)
         safe_title = re.sub(r'[^a-zA-Z0-9_-]', '_', metrics.get("document_title", "Report"))[:24]
 
         target_dir = (config.OUTPUTS_DIR / job_id) if job_id else self.output_dir
         target_dir.mkdir(parents=True, exist_ok=True)
         docx_path = target_dir / f"{safe_title}_{tpl_key}.docx"
         default_docx = self.output_dir / f"Ministry_of_Coal_{tpl_key}_2026.docx"
+
+        if (not summary_text or not summary_text.strip()) and job_id:
+            job_dir = config.OUTPUTS_DIR / job_id
+            for sf in ["04_final_systematic_report.md", "02_llama_analysis.md"]:
+                p = job_dir / sf
+                if p.exists():
+                    try:
+                        summary_text = p.read_text(encoding="utf-8")
+                        break
+                    except Exception:
+                        pass
 
         if Document is None:
             docx_path.write_text(f"DOCX engine unavailable.\n\nSummary:\n{summary_text}", encoding="utf-8")
@@ -766,7 +844,7 @@ class DocumentGenerator:
         r2.font.color.rgb = RGBColor(*tpl["rgb_primary"])
 
         p_meta = doc.add_paragraph()
-        p_meta.add_run(f"Report ID: {report_id} | Template: {tpl['name']} | Date: {datetime.date.today().strftime('%B %d, %Y')}\n")
+        p_meta.add_run(f"Report ID: {effective_report_id} | Template: {tpl['name']} | Date: {datetime.date.today().strftime('%B %d, %Y')}\n")
         p_meta.add_run("Classification: OFFICIAL / STATUTORY BRIEFING | Verification: 100% Deterministic AST")
         p_meta.runs[0].font.size = Pt(8.5)
         p_meta.runs[0].font.italic = True
@@ -819,18 +897,31 @@ class DocumentGenerator:
         self,
         template_name: str = "monthly_production",
         report_id: str = "REP-2026-B56D",
+        summary_text: Optional[str] = None,
         user_records: Optional[List[Dict[str, Any]]] = None,
         document_title: Optional[str] = None,
         job_id: Optional[str] = None
     ) -> Path:
         """Generates a complete multi-sheet Excel workbook."""
-        metrics = get_active_dataset_metrics(user_records, document_title=document_title)
+        effective_report_id = job_id if (job_id and report_id == "REP-2026-B56D") else report_id
+        metrics = get_active_dataset_metrics(user_records, job_id=job_id, document_title=document_title)
         safe_title = re.sub(r'[^a-zA-Z0-9_-]', '_', metrics.get("document_title", "Report"))[:24]
 
         target_dir = (config.OUTPUTS_DIR / job_id) if job_id else self.output_dir
         target_dir.mkdir(parents=True, exist_ok=True)
         xlsx_path = target_dir / f"{safe_title}_Report.xlsx"
         default_xlsx = self.output_dir / "Ministry_of_Coal_Report_2026.xlsx"
+
+        if (not summary_text or not summary_text.strip()) and job_id:
+            job_dir = config.OUTPUTS_DIR / job_id
+            for sf in ["04_final_systematic_report.md", "02_llama_analysis.md"]:
+                p = job_dir / sf
+                if p.exists():
+                    try:
+                        summary_text = p.read_text(encoding="utf-8")
+                        break
+                    except Exception:
+                        pass
 
         if Workbook is None:
             xlsx_path.write_text(f"OpenPyXL unavailable for Excel generation.", encoding="utf-8")
@@ -941,12 +1032,28 @@ class DocumentGenerator:
                 else:
                     cell.border = thin_border
 
+        # SHEET 5: Executive Intelligence Synthesis (if summary exists)
+        if summary_text and summary_text.strip():
+            ws_summary = wb.create_sheet(title="Executive Synthesis")
+            ws_summary["A1"] = f"{metrics.get('document_title', 'OPERATIONAL AUDIT').upper()} — EXECUTIVE SYNTHESIS"
+            ws_summary["A1"].font = title_font
+            ws_summary["A2"] = f"Dossier ID: {effective_report_id} | Synthesis: OpenRouter Sovereign Model | 100% AST Math Determinism"
+            ws_summary["A2"].font = Font(italic=True, size=10, color="64748B")
+
+            clean_lines = [l.strip() for l in summary_text.splitlines() if l.strip()]
+            for l_idx, line in enumerate(clean_lines[:150], start=4):
+                c = ws_summary.cell(row=l_idx, column=1, value=line)
+                if line.startswith("#"):
+                    c.font = bold_font
+                else:
+                    c.font = Font(name="Calibri", size=10)
+
         # Auto-adjust column widths
         for sheet in wb.worksheets:
             for col in sheet.columns:
                 max_len = max(len(str(cell.value or '')) for cell in col)
                 col_letter = get_column_letter(col[0].column)
-                sheet.column_dimensions[col_letter].width = max(max_len + 3, 12)
+                sheet.column_dimensions[col_letter].width = max(min(max_len + 3, 60), 12)
 
         wb.save(str(xlsx_path))
         try:
@@ -972,7 +1079,7 @@ class DocumentGenerator:
         effective_title = custom_title or document_title
         pdf_file = self.generate_pdf_report(template_name, report_id, summary_text, user_records, images=images, document_title=effective_title, job_id=job_id)
         docx_file = self.generate_docx_report(template_name, report_id, summary_text, user_records, images=images, document_title=effective_title, job_id=job_id)
-        xlsx_file = self.generate_excel_workbook(template_name, report_id, user_records, document_title=effective_title, job_id=job_id)
+        xlsx_file = self.generate_excel_workbook(template_name, report_id, summary_text=summary_text, user_records=user_records, document_title=effective_title, job_id=job_id)
 
         return {
             "success": True,

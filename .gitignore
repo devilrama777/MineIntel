@@ -25,6 +25,11 @@ reported_data/*
 outputs/job_*
 outputs/active_*
 
+# Node & Frontend Build
+node_modules/
+dist/
+.vercel/
+
 # OS specific
 .DS_Store
 Thumbs.db

@@ -45,7 +45,9 @@ from backend.main import (
     upload_file,
     validate_uploaded_file,
     verify_session_token,
+    add_report_history,
     LoginRequest,
+    RecordHistoryRequest,
     ReportPackageRequest,
     TemplateFillRequest,
 )
@@ -367,10 +369,13 @@ class TestRemediationSuite(unittest.TestCase):
         self.assertIn("Excavator-1", job_res["raw_markdown"])
 
     def test_10_history_manager_atomic_persistence(self):
-        """Verify history manager records reports atomically without duplicates."""
+        """Verify history manager records reports atomically without duplicates and supports job_id."""
         test_officer = os.environ.get("MINEINTEL_OFFICER_ID", "MOC-TEST-OFFICER-7890")
         test_id = f"REP-TEST-{int(time.time())}"
-        entry = record_report(
+        test_job_id = f"job_test_{int(time.time())}"
+
+        # 1. Test record_report without job_id (backward compatibility)
+        entry1 = record_report(
             report_id=test_id,
             title="Sovereign Audit Test",
             template_id="bento_grid",
@@ -380,11 +385,69 @@ class TestRemediationSuite(unittest.TestCase):
             records_count=5,
             summary_snippet="Test summary snippet."
         )
-        self.assertEqual(entry["id"], test_id)
+        self.assertEqual(entry1["id"], test_id)
+        self.assertEqual(entry1["job_id"], test_id)
 
-        # Retrieve and verify search
+        # 2. Test record_report with job_id
+        entry2 = record_report(
+            report_id=f"{test_id}_2",
+            title="Sovereign Audit Test with Job ID",
+            template_id="aurora_gradient",
+            template_name="Aurora Modern Presentation",
+            theme="Modern Aurora",
+            auditor_id=test_officer,
+            records_count=8,
+            summary_snippet="Test summary snippet with job isolation.",
+            job_id=test_job_id
+        )
+        self.assertEqual(entry2["id"], f"{test_id}_2")
+        self.assertEqual(entry2["job_id"], test_job_id)
+        self.assertIn(f"job_id={test_job_id}", entry2["pdf_url"])
+
+        # 3. Test add_report_history API endpoint with job_id
+        req_hist = RecordHistoryRequest(
+            id=f"{test_id}_api",
+            title="API Recorded Report",
+            template="bento_grid",
+            template_name="Bento Grid",
+            theme="Modern Grid",
+            auditor_id=test_officer,
+            records_count=10,
+            summary_snippet="API recorded snippet",
+            job_id=test_job_id
+        )
+        api_res = add_report_history(req_hist)
+        self.assertTrue(api_res["success"])
+        self.assertEqual(api_res["entry"]["job_id"], test_job_id)
+
+        # 4. Test fill_template_content doesn't fail on record_report(..., job_id=job_id)
+        test_job_dir = config.OUTPUTS_DIR / test_job_id
+        test_job_dir.mkdir(parents=True, exist_ok=True)
+        (test_job_dir / "active_dataset.json").write_text(
+            json.dumps([{"Entity": "Substation-1", "Output": 450.0}, {"Entity": "Substation-2", "Output": 320.0}]),
+            encoding="utf-8"
+        )
+        (test_job_dir / "04_final_systematic_report.md").write_text(
+            "## Executive Summary\nTest substation telemetry verified.",
+            encoding="utf-8"
+        )
+        fill_res = fill_template_content(
+            template_id="bento_grid",
+            req=TemplateFillRequest(job_id=test_job_id)
+        )
+        self.assertTrue(fill_res["success"])
+        self.assertEqual(fill_res["job_id"], test_job_id)
+
+        # 5. Test download_report_format dynamic generation with job_id
+        dl_res = download_report_format(fmt="pdf", template="bento_grid", job_id=test_job_id)
+        self.assertIsNotNone(dl_res)
+        self.assertEqual(dl_res.status_code, 200)
+
+        # Retrieve and verify search by title and by job_id
         history = get_history(search="Sovereign Audit Test")
         self.assertTrue(any(h["id"] == test_id for h in history))
+        hist_job = get_history(search=test_job_id)
+        self.assertTrue(any(h.get("job_id") == test_job_id for h in hist_job))
 
     def test_11_core_api_endpoints(self):
         """Verify core discovery and dataset endpoint functions respond successfully."""

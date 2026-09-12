@@ -64,7 +64,7 @@ def get_history(search: Optional[str] = None, auditor_id: Optional[str] = None) 
         q = search.strip().lower()
         filtered = []
         for i in items:
-            searchable_text = f"{i.get('title', '')} {i.get('template_name', '')} {i.get('template', '')} {i.get('id', '')} {i.get('summary_snippet', '')}".lower()
+            searchable_text = f"{i.get('title', '')} {i.get('template_name', '')} {i.get('template', '')} {i.get('id', '')} {i.get('job_id', '')} {i.get('summary_snippet', '')}".lower()
             if q in searchable_text:
                 filtered.append(i)
         return filtered
@@ -80,7 +80,8 @@ def record_report(
     theme: str,
     auditor_id: str = "MOC-7890",
     records_count: int = 18,
-    summary_snippet: str = ""
+    summary_snippet: str = "",
+    job_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """Records a newly generated report in the persistent history log."""
     history = get_history()
@@ -88,8 +89,11 @@ def record_report(
     # Deduplicate existing report_id if re-recording
     history = [h for h in history if h.get("id") != report_id]
 
+    effective_job_id = job_id or report_id
+
     new_entry = {
         "id": report_id,
+        "job_id": effective_job_id,
         "title": title or f"Intelligence Dossier ({template_name})",
         "template": template_id,
         "template_name": template_name,
@@ -98,9 +102,9 @@ def record_report(
         "timestamp": datetime.now().strftime("%d %b %Y, %I:%M %p"),
         "records_count": records_count,
         "summary_snippet": summary_snippet[:180] + ("..." if len(summary_snippet) > 180 else ""),
-        "pdf_url": f"/api/reports/download/pdf?template={template_id}&job_id={report_id}",
-        "docx_url": f"/api/reports/download/docx?template={template_id}&job_id={report_id}",
-        "csv_url": f"/api/reports/download/csv?job_id={report_id}"
+        "pdf_url": f"/api/reports/download/pdf?template={template_id}&job_id={effective_job_id}",
+        "docx_url": f"/api/reports/download/docx?template={template_id}&job_id={effective_job_id}",
+        "csv_url": f"/api/reports/download/csv?job_id={effective_job_id}"
     }
 
     history.insert(0, new_entry)

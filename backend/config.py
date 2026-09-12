@@ -7,6 +7,14 @@ BACKEND_DIR = Path(__file__).resolve().parent
 DATA_DIR = BACKEND_DIR / "data"
 PROMPTS_DIR = BACKEND_DIR / "prompts"
 
+# Load local workspace environment variables securely if .env is present
+try:
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=BASE_DIR / ".env")
+except ImportError:
+    pass
+
+
 IS_VERCEL = bool(os.getenv("VERCEL") == "1" or os.getenv("VERCEL_ENV"))
 
 if IS_VERCEL:
@@ -24,7 +32,6 @@ else:
     PROCESSED_OUTPUT_DIR = BASE_DIR / "processed_output"
 
 STATIC_REPORTS_DIR = OUTPUTS_DIR / "reports" if IS_VERCEL else (BASE_DIR / "outputs" / "reports")
-PUBLIC_REPORTS_DIR = BASE_DIR / "public" / "reports"
 
 for d in (UPLOADS_DIR, OUTPUTS_DIR, REPORTS_DIR, REPORTED_DATA_DIR, PROCESSED_OUTPUT_DIR, DATA_DIR):
     try:
@@ -40,11 +47,7 @@ def find_data_file(filename: str) -> Optional[Path]:
     candidates = [
         PROCESSED_OUTPUT_DIR / safe_name,
         OUTPUTS_DIR / safe_name,
-        DATA_DIR / safe_name,
-        REPORTED_DATA_DIR / safe_name,
-        BASE_DIR / "reported_data" / safe_name,
-        BASE_DIR / "default_data_backup" / safe_name,
-        BASE_DIR / "processed_output" / safe_name
+        DATA_DIR / safe_name
     ]
     for c in candidates:
         if c.exists() and c.is_file():
@@ -75,16 +78,32 @@ AUTH_SECRET_PASSWORD = os.getenv("MINEINTEL_AUTH_PASSWORD") or os.getenv("AUTH_S
 JWT_SECRET = os.getenv("JWT_SECRET", "sih-mining-enclave-secret-key-2026-secure")
 SESSION_EXPIRY_HOURS = int(os.getenv("SESSION_EXPIRY_HOURS", "24"))
 
+
+def get_auth_officer_id() -> str:
+    """Returns officer ID dynamically checking environment or configured default."""
+    return os.getenv("MINEINTEL_OFFICER_ID") or os.getenv("AUTH_OFFICER_ID") or AUTH_OFFICER_ID
+
+
+def get_auth_secret_password() -> str:
+    """Returns secret password dynamically checking environment or configured default."""
+    return os.getenv("MINEINTEL_AUTH_PASSWORD") or os.getenv("AUTH_SECRET_PASSWORD") or AUTH_SECRET_PASSWORD
+
+
 # Bounded chunking parameters for large documents
 MAX_CHUNK_CHARS = int(os.getenv("MAX_CHUNK_CHARS", "8000"))
 CHUNK_OVERLAP_CHARS = int(os.getenv("CHUNK_OVERLAP_CHARS", "500"))
 
-# Ollama & Model configurations
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-LLAMA_MODEL = os.getenv("LLAMA_MODEL", "llama3.1:latest")
-GEMMA_MODEL = os.getenv("GEMMA_MODEL", "gemma4:latest")
-GEMMA_FALLBACK_MODEL = os.getenv("GEMMA_FALLBACK_MODEL", "llama3.1:latest")
+# Single Cloud AI Model Configuration (OpenRouter)
+AI_PROVIDER = "openrouter"
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
+CLOUD_AI_TIMEOUT = int(os.getenv("CLOUD_AI_TIMEOUT", "30"))
 
-# Default Request Timeout for Local LLM (seconds)
-# In serverless/Vercel, timeout is set lower (e.g. 5s) to avoid gateway 504s
-LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "8" if IS_VERCEL else "120"))
+# Legacy model name aliases for backward-compatible pipeline invocations
+LLAMA_MODEL = OPENROUTER_MODEL
+GEMMA_MODEL = OPENROUTER_MODEL
+GEMMA_FALLBACK_MODEL = OPENROUTER_MODEL
+
+# Request timeout (seconds)
+LLM_TIMEOUT = CLOUD_AI_TIMEOUT
+

@@ -195,9 +195,24 @@ class MarkdownConverter:
             markdown_sections.append(f"# PDF Document: {file_path.name}\n\nNeither pdfplumber nor pypdf available for extraction.")
 
         full_md = "\n".join(markdown_sections)
+
+        pdf_records = []
+        for tbl in extracted_table_data:
+            if tbl and len(tbl) > 1:
+                headers = [str(c or "").strip() for c in tbl[0]]
+                for row in tbl[1:]:
+                    row_dict = {}
+                    for col_idx, h in enumerate(headers):
+                        if h and col_idx < len(row):
+                            val = row[col_idx]
+                            row_dict[h] = str(val or "").strip()
+                    if any(row_dict.values()):
+                        pdf_records.append(row_dict)
+
         return {
             "markdown": full_md,
             "file_type": "pdf",
+            "records": pdf_records,
             "extracted_images": extracted_images,
             "extracted_audio": extracted_audio,
             "has_multimedia": (len(extracted_images) > 0 or len(extracted_audio) > 0),
@@ -394,11 +409,24 @@ class MarkdownConverter:
                     extracted_tables.append(t_rows)
                     md_sections.append(f"\n### Table {t_idx}\n" + cls._table_to_markdown(t_rows))
 
+            docx_records = []
+            for tbl in extracted_tables:
+                if tbl and len(tbl) > 1:
+                    headers = [str(c or "").strip() for c in tbl[0]]
+                    for row in tbl[1:]:
+                        row_dict = {}
+                        for col_idx, h in enumerate(headers):
+                            if h and col_idx < len(row):
+                                val = row[col_idx]
+                                row_dict[h] = str(val or "").strip()
+                        if any(row_dict.values()):
+                            docx_records.append(row_dict)
+
             full_md = "\n".join(md_sections)
             return {
                 "markdown": full_md,
                 "file_type": "docx",
-                "records": [],
+                "records": docx_records,
                 "extracted_images": [],
                 "extracted_audio": [],
                 "has_multimedia": False,

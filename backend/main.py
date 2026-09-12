@@ -31,7 +31,7 @@ from backend.services.pipeline import DocumentPipeline
 
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
-    description="Multi-stage document processing backend converting CSV/PDF to Markdown, analyzing via local LLaMA 3.1, verifying mathematics, and synthesizing reports via Gemma.",
+    description="Multi-stage document processing backend converting CSV/PDF to Markdown, analyzing via OpenRouter single-model reasoning, verifying mathematics, and synthesizing executive reports.",
     version="1.0.0"
 )
 
@@ -162,13 +162,15 @@ class GemmaRequest(BaseModel):
 @app.post("/api/auth/login")
 def auth_login(req: LoginRequest):
     """Authenticates executive officers against sovereign credentials using constant-time comparison."""
-    if not config.AUTH_OFFICER_ID or not config.AUTH_SECRET_PASSWORD:
+    officer_id_configured = config.get_auth_officer_id()
+    secret_pw_configured = config.get_auth_secret_password()
+    if not officer_id_configured or not secret_pw_configured:
         raise HTTPException(
             status_code=503,
             detail="Authentication is unconfigured. Production credentials must be supplied via MINEINTEL_OFFICER_ID and MINEINTEL_AUTH_PASSWORD environment variables."
         )
-    valid_id = secrets.compare_digest(req.officer_id.strip(), config.AUTH_OFFICER_ID)
-    valid_pw = secrets.compare_digest(req.password.strip(), config.AUTH_SECRET_PASSWORD)
+    valid_id = secrets.compare_digest(req.officer_id.strip(), officer_id_configured)
+    valid_pw = secrets.compare_digest(req.password.strip(), secret_pw_configured)
     if not (valid_id and valid_pw):
         raise HTTPException(
             status_code=401,
@@ -235,17 +237,22 @@ def auth_logout():
 
 @app.get("/api/health")
 def health_check():
-    """Checks service health and local Ollama connectivity."""
-    ollama_ok = llama_client.is_available()
-    installed_models = llama_client.list_installed_models() if ollama_ok else []
+    """Checks service health and AI provider configuration."""
+    ai_available = llama_client.is_available()
+    cloud_active = llama_client.cloud_client.is_available()
+    active_cloud_model = llama_client.cloud_client.model if cloud_active else config.OPENROUTER_MODEL
+    installed_models = llama_client.list_installed_models() if ai_available else [active_cloud_model]
     return {
         "status": "healthy",
-        "ollama_connected": ollama_ok,
-        "ollama_url": config.OLLAMA_BASE_URL,
+        "ai_available": ai_available,
+        "ai_provider": config.AI_PROVIDER,
+        "cloud_ai_active": cloud_active,
+        "cloud_model": active_cloud_model,
         "installed_models": installed_models,
-        "default_llama_model": config.LLAMA_MODEL,
-        "default_gemma_model": config.GEMMA_MODEL
+        "default_llama_model": active_cloud_model,
+        "default_gemma_model": active_cloud_model
     }
+
 
 
 @app.post("/api/upload")
@@ -317,6 +324,7 @@ def run_gemma_report(req: GemmaRequest):
 @app.post("/api/pipeline/run")
 async def run_full_pipeline(
     file: UploadFile = File(...),
+    custom_command: Optional[str] = Form(None),
     custom_llama_command: Optional[str] = Form(None),
     custom_calculations_json: Optional[str] = Form(None),
     custom_report_command: Optional[str] = Form(None),
@@ -325,6 +333,7 @@ async def run_full_pipeline(
     route_media_to_gemma: bool = Form(True)
 ):
     """Executes the full end-to-end multi-stage pipeline on an uploaded file."""
+    effective_custom_cmd = custom_command or custom_llama_command
     # 1. Validate and save uploaded file
     validate_uploaded_file(file)
     safe_filename = "".join(c for c in file.filename if c.isalnum() or c in "._- ").strip()[:100]
@@ -344,7 +353,7 @@ async def run_full_pipeline(
     try:
         pipeline_output = pipeline_service.process_file(
             file_path=save_path,
-            custom_llama_cmd=custom_llama_command,
+            custom_llama_cmd=effective_custom_cmd,
             custom_calculations=custom_calcs,
             custom_report_cmd=custom_report_command,
             llama_model_override=llama_model,
@@ -580,29 +589,24 @@ async def revise_report_with_gemma(req: ReportRevisionRequest):
         "success": not result.get("fallback", True),
         "report_id": req.report_id or "REP-2026-REV",
         "template": req.template,
-        "model_used": result.get("model_used", "gemma-4"),
+        "model_used": result.get("model_used", config.OPENROUTER_MODEL),
         "revised_content": revised_text,
         "revision_prompt": req.revision_prompt,
         "fallback": result.get("fallback", True),
-        "message": "Report revised successfully by Gemma 4." if not result.get("fallback", True) else "Report revised using deterministic fallback. LLM was unavailable."
+        "message": "Report revised successfully via OpenRouter." if not result.get("fallback", True) else "Report revised using deterministic fallback. AI service was unavailable."
     }
 
 
 @app.get("/api/reports/latest-summary")
 def get_latest_summary():
-    """Returns the latest LLaMA 3.1 summary and converted Markdown with safe fallback resolution."""
-    summary_path = config.find_data_file("llama_summary.md")
-    md_path = config.find_data_file("converted_data.md")
-    
-    csv_files = set()
-    for d in [config.REPORTED_DATA_DIR, config.DATA_DIR, config.BASE_DIR / "reported_data", config.BASE_DIR / "default_data_backup"]:
-        if d and d.exists():
-            csv_files.update(f.name for f in d.glob("*.csv"))
+    """Returns the latest summary and converted Markdown with safe fallback resolution."""
+    summary_path = config.PROCESSED_OUTPUT_DIR / "llama_summary.md"
+    md_path = config.PROCESSED_OUTPUT_DIR / "converted_data.md"
 
     return {
-        "summary": summary_path.read_text(encoding="utf-8") if summary_path and summary_path.exists() else None,
-        "markdown": md_path.read_text(encoding="utf-8") if md_path and md_path.exists() else None,
-        "files": sorted(list(csv_files))
+        "summary": summary_path.read_text(encoding="utf-8") if summary_path.exists() else None,
+        "markdown": md_path.read_text(encoding="utf-8") if md_path.exists() else None,
+        "files": []
     }
 
 
@@ -611,7 +615,7 @@ def download_summary():
     summary_path = config.find_data_file("llama_summary.md")
     if not summary_path or not summary_path.exists():
         raise HTTPException(status_code=404, detail="Summary not found.")
-    return FileResponse(path=summary_path, filename="LLaMA_Coal_Summary.md", media_type="text/markdown")
+    return FileResponse(path=summary_path, filename="Report_Summary.md", media_type="text/markdown")
 
 
 
@@ -693,20 +697,20 @@ def fill_template_content(template_id: str, req: Optional[TemplateFillRequest] =
     if req and req.custom_focus:
         full_prompt += f"\n\nADDITIONAL FOCUS DIRECTIVE:\n{req.custom_focus}"
 
-    # Check if Ollama is accessible (skip on Vercel to respond instantly)
+    # Check if Cloud AI (OpenRouter) is accessible
     ai_generated_text = None
-    if not (os.getenv("VERCEL") == "1" or os.getenv("VERCEL_ENV")):
+    if llama_client.cloud_client.is_available():
         try:
-            ollama_model = req.model if req and req.model else config.LLAMA_MODEL
-            resp = requests.post(
-                f"{config.OLLAMA_BASE_URL}/api/generate",
-                json={"model": ollama_model, "prompt": full_prompt, "stream": False},
-                timeout=1.5
+            cloud_res = llama_client.cloud_client.generate(
+                prompt=f"Data Summary:\n{data_summary}\n\nPlease generate the template sections.",
+                system_instruction=system_prompt + (f"\n\nADDITIONAL FOCUS DIRECTIVE:\n{req.custom_focus}" if req and req.custom_focus else ""),
+                temperature=0.2,
+                model_override=req.model if req and req.model else None
             )
-            if resp.status_code == 200:
-                ai_generated_text = resp.json().get("response")
-        except Exception:
-            ai_generated_text = None
+            if cloud_res.get("success") and cloud_res.get("text"):
+                ai_generated_text = cloud_res["text"]
+        except Exception as e:
+            logger.debug(f"Cloud AI template fill error: {e}")
 
     sections = []
     if ai_generated_text and len(ai_generated_text.strip()) > 50:
@@ -964,22 +968,55 @@ def download_report_format(fmt: str, template: Optional[str] = None, job_id: Opt
 
     effective_job_id = job_id if isinstance(job_id, str) and job_id.strip() else None
 
-    # If job_id provided, look in job-isolated directory first
+    # 1. If job_id provided, look in job-isolated directory first
     if effective_job_id:
         job_dirs = [config.OUTPUTS_DIR / effective_job_id, config.REPORTS_DIR / effective_job_id]
         for jd in job_dirs:
             if jd.exists():
-                for f in jd.glob(f"*.{fmt}"):
-                    if f.stat().st_size > 0:
-                        return FileResponse(
-                            path=f,
-                            filename=f.name,
-                            media_type=media_type,
-                            headers={"Content-Disposition": f'attachment; filename="{f.name}"'}
-                        )
+                matching = [f for f in jd.glob(f"*.{fmt}") if tpl_key in f.name.lower() and f.stat().st_size > 0]
+                if matching:
+                    return FileResponse(
+                        path=matching[0],
+                        filename=matching[0].name,
+                        media_type=media_type,
+                        headers={"Content-Disposition": f'attachment; filename="{matching[0].name}"'}
+                    )
 
-    # Search candidates in standard report directories
-    search_dirs = [config.REPORTS_DIR, getattr(config, "PUBLIC_REPORTS_DIR", None), getattr(config, "STATIC_REPORTS_DIR", None)]
+        # If template not yet compiled for this job, attempt on-the-fly generation into job directory
+        job_dir = config.OUTPUTS_DIR / effective_job_id
+        if job_dir.exists():
+            try:
+                gen_path = None
+                if fmt == "pdf":
+                    gen_path = document_generator.generate_pdf_report(template_name=tpl_key, report_id=effective_job_id, job_id=effective_job_id)
+                elif fmt == "docx":
+                    gen_path = document_generator.generate_docx_report(template_name=tpl_key, report_id=effective_job_id, job_id=effective_job_id)
+                elif fmt == "xlsx":
+                    gen_path = document_generator.generate_excel_workbook(template_name=tpl_key, report_id=effective_job_id, job_id=effective_job_id)
+                if gen_path and Path(gen_path).exists() and Path(gen_path).stat().st_size > 0:
+                    return FileResponse(
+                        path=gen_path,
+                        filename=Path(gen_path).name,
+                        media_type=media_type,
+                        headers={"Content-Disposition": f'attachment; filename="{Path(gen_path).name}"'}
+                    )
+            except Exception as e:
+                logger.warning(f"On-the-fly report generation error for job {effective_job_id}: {e}")
+
+            # Fallback to any existing file of requested format in job directory
+            for jd in job_dirs:
+                if jd.exists():
+                    for f in jd.glob(f"*.{fmt}"):
+                        if f.stat().st_size > 0:
+                            return FileResponse(
+                                path=f,
+                                filename=f.name,
+                                media_type=media_type,
+                                headers={"Content-Disposition": f'attachment; filename="{f.name}"'}
+                            )
+
+    # 2. Search candidates in standard report directories
+    search_dirs = [config.REPORTS_DIR, getattr(config, "STATIC_REPORTS_DIR", None)]
     search_dirs = [d for d in search_dirs if d is not None and d.exists()]
 
     for d in search_dirs:
@@ -992,27 +1029,24 @@ def download_report_format(fmt: str, template: Optional[str] = None, job_id: Opt
                 headers={"Content-Disposition": f'attachment; filename="{target_fname}"'}
             )
 
-    # If specific template not found yet, attempt on-the-fly generation
+    # If specific template not found yet in standard directories, attempt on-the-fly generation
     try:
+        gen_path = None
         if fmt == "pdf":
-            document_generator.generate_pdf_report(template_name=tpl_key, job_id=effective_job_id)
+            gen_path = document_generator.generate_pdf_report(template_name=tpl_key)
         elif fmt == "docx":
-            document_generator.generate_docx_report(template_name=tpl_key, job_id=effective_job_id)
+            gen_path = document_generator.generate_docx_report(template_name=tpl_key)
         elif fmt == "xlsx":
-            document_generator.generate_excel_workbook(template_name=tpl_key, job_id=effective_job_id)
-    except Exception:
-        pass
-
-    # Check again after generation
-    for d in search_dirs:
-        candidate = d / target_fname
-        if candidate.exists() and candidate.stat().st_size > 0:
+            gen_path = document_generator.generate_excel_workbook(template_name=tpl_key)
+        if gen_path and Path(gen_path).exists() and Path(gen_path).stat().st_size > 0:
             return FileResponse(
-                path=candidate,
-                filename=target_fname,
+                path=gen_path,
+                filename=Path(gen_path).name,
                 media_type=media_type,
-                headers={"Content-Disposition": f'attachment; filename="{target_fname}"'}
+                headers={"Content-Disposition": f'attachment; filename="{Path(gen_path).name}"'}
             )
+    except Exception as e:
+        logger.warning(f"Default report generation error: {e}")
 
     # Fallback to default format file
     for d in search_dirs:
@@ -1071,19 +1105,12 @@ def download_final_report(job_id: str):
 
 @app.post("/api/pipeline/run-dataset-audit")
 def run_dataset_audit():
-    """Converts reported_data CSVs and triggers local LLaMA 3.1 analysis."""
-    import sys
-    from run_user_task import run as run_task
-    try:
-        run_task()
-        summary_path = config.PROCESSED_OUTPUT_DIR / "llama_summary.md"
-        return {
-            "success": True,
-            "message": "Dataset audit and LLaMA 3.1 summarization complete.",
-            "summary": summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Audit execution error: {str(e)}")
+    """Returns status of dataset audit processing."""
+    return {
+        "success": True,
+        "message": "Dataset audit is managed via /api/pipeline/run for user uploaded files.",
+        "summary": ""
+    }
 
 
 

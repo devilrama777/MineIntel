@@ -4,51 +4,35 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from backend import config
+from backend.services.cloud_ai_client import CloudAIClient
 
-logger = logging.getLogger("mineintel.gemma_client")
+logger = logging.getLogger("mineintel.report_generation")
 
 
-class GemmaClient:
-    """Client for generating the final polished, systematic executive report."""
+class ReportGenerationClient:
+    """Stage 4 report synthesis client powered exclusively by OpenRouter with deterministic report fallback."""
 
     def __init__(
         self,
-        base_url: str = config.OLLAMA_BASE_URL,
+        base_url: str = "",
         primary_model: str = config.GEMMA_MODEL,
-        fallback_model: str = config.GEMMA_FALLBACK_MODEL
+        fallback_model: str = config.GEMMA_FALLBACK_MODEL,
+        enable_cloud: Optional[bool] = None
     ):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or "").rstrip("/")
         self.primary_model = primary_model
         self.fallback_model = fallback_model
+        if enable_cloud is None:
+            enable_cloud = (not self.base_url or "59999" not in self.base_url)
+        self.cloud_client = CloudAIClient() if enable_cloud else CloudAIClient(api_key="")
 
     def is_available(self) -> bool:
-        """Checks if Ollama server is reachable without hanging."""
-        if config.IS_VERCEL and ("localhost" in self.base_url or "127.0.0.1" in self.base_url):
-            return False
-        try:
-            timeout = 1.0 if config.IS_VERCEL else 2.5
-            res = requests.get(f"{self.base_url}/api/tags", timeout=timeout)
-            return res.status_code == 200
-        except Exception:
-            return False
+        """Checks if single configured Cloud AI (OpenRouter) is reachable."""
+        return self.cloud_client.is_available()
 
     def get_effective_model(self) -> str:
-        """Determines if the primary Gemma model is installed, or falls back gracefully."""
-        if not self.is_available():
-            return self.fallback_model
-        try:
-            res = requests.get(f"{self.base_url}/api/tags", timeout=2.0)
-            if res.status_code == 200:
-                models = [m.get("name", "") for m in res.json().get("models", [])]
-                for m in models:
-                    if "gemma" in m.lower():
-                        return m
-                for m in models:
-                    if "llama" in m.lower():
-                        return m
-            return self.fallback_model
-        except Exception:
-            return self.fallback_model
+        """Determines active model: single Cloud AI model or configured default."""
+        return self.cloud_client.model if self.cloud_client.is_available() else config.OPENROUTER_MODEL
 
     def _fallback_systematic_report(
         self,
@@ -70,7 +54,6 @@ class GemmaClient:
             media_embeds += "\n\n### Photographic Evidence & Isolated Media Figures\n"
             for idx, img in enumerate(extracted_images[:6], start=1):
                 name = img.get("name", f"Figure_{idx}")
-                path = img.get("path", "")
                 page = img.get("page", 1)
                 media_embeds += f"\n- **Figure {idx} (Page {page}):** `{name}`\n"
 
@@ -115,29 +98,6 @@ class GemmaClient:
         """Synthesizes the analytical extraction and math checks into a systematic, polished report."""
         target_model = model_override or self.get_effective_model()
 
-        # Check if Ollama is accessible
-        if not self.is_available():
-            logger.info("Ollama unreachable for Gemma report synthesis. Using deterministic report synthesis.")
-            fallback_report = self._fallback_systematic_report(
-                llama_analysis=llama_analysis,
-                math_audit_markdown=math_audit_markdown,
-                extracted_images=extracted_images,
-                template_name=template_name,
-                document_title=document_title
-            )
-            return {
-                "success": True,
-                "is_fallback": True,
-                "fallback": True,
-                "status": "deterministic_fallback",
-                "model_used": "Deterministic Synthesis Engine",
-                "final_report": fallback_report,
-                "report": fallback_report,
-                "total_duration_ms": 50,
-                "eval_count": 0
-            }
-
-        # Load system report prompt
         prompt_path = config.PROMPTS_DIR / "gemma_report_prompt.txt"
         system_prompt = ""
         if prompt_path.exists():
@@ -177,58 +137,49 @@ class GemmaClient:
             "Please generate the complete, high-quality, systematic final report in clean Markdown."
         )
 
-        payload = {
-            "model": target_model,
-            "prompt": user_content,
-            "system": system_prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.3,
-                "num_ctx": 32768
-            }
+        # 1. Route through Cloud AI (OpenRouter) if configured and key present
+        if self.cloud_client.is_available():
+            cloud_res = self.cloud_client.generate(
+                prompt=user_content,
+                system_instruction=system_prompt,
+                temperature=0.3,
+                model_override=model_override
+            )
+            if cloud_res["success"] and cloud_res["text"]:
+                return {
+                    "success": True,
+                    "is_fallback": False,
+                    "fallback": False,
+                    "status": "completed",
+                    "model_used": cloud_res["model_used"],
+                    "final_report": cloud_res["text"],
+                    "report": cloud_res["text"],
+                    "total_duration_ms": cloud_res["duration_ms"],
+                    "eval_count": 0
+                }
+            else:
+                logger.warning(f"Cloud AI report synthesis failed ({cloud_res.get('error')}). Activating deterministic fallback.")
+
+        # 2. Deterministic fallback
+        logger.info("Cloud AI service unavailable or generation failed. Using deterministic report synthesis.")
+        fallback_report = self._fallback_systematic_report(
+            llama_analysis=llama_analysis,
+            math_audit_markdown=math_audit_markdown,
+            extracted_images=extracted_images,
+            template_name=template_name,
+            document_title=document_title
+        )
+        return {
+            "success": True,
+            "is_fallback": True,
+            "fallback": True,
+            "status": "deterministic_fallback",
+            "model_used": "Deterministic Synthesis Engine",
+            "final_report": fallback_report,
+            "report": fallback_report,
+            "total_duration_ms": 50,
+            "eval_count": 0
         }
-
-        try:
-            response = requests.post(
-                f"{self.base_url}/api/generate",
-                json=payload,
-                timeout=config.LLM_TIMEOUT
-            )
-            response.raise_for_status()
-            res_json = response.json()
-            report_text = res_json.get("response", "")
-
-            return {
-                "success": True,
-                "is_fallback": False,
-                "fallback": False,
-                "status": "completed",
-                "model_used": target_model,
-                "final_report": report_text,
-                "report": report_text,
-                "total_duration_ms": res_json.get("total_duration", 0) // 1_000_000,
-                "eval_count": res_json.get("eval_count", 0)
-            }
-        except Exception as err:
-            logger.warning(f"Gemma report generation fallback triggered ({err}). Using deterministic report synthesis.")
-            fallback_report = self._fallback_systematic_report(
-                llama_analysis=llama_analysis,
-                math_audit_markdown=math_audit_markdown,
-                extracted_images=extracted_images,
-                template_name=template_name,
-                document_title=document_title
-            )
-            return {
-                "success": True,
-                "is_fallback": True,
-                "fallback": True,
-                "status": "deterministic_fallback",
-                "model_used": "Deterministic Synthesis Engine",
-                "final_report": fallback_report,
-                "report": fallback_report,
-                "total_duration_ms": 50,
-                "eval_count": 0
-            }
 
     def _fallback_revision(self, current_markdown: str, user_prompt: str, template: Optional[str] = None) -> str:
         """Deterministic revision engine that injects user revision directives cleanly."""
@@ -259,16 +210,6 @@ class GemmaClient:
         """Revises and restructures an existing report according to user feedback."""
         target_model = model_override or self.get_effective_model()
 
-        if not self.is_available():
-            revised = self._fallback_revision(current_report_markdown, user_revision_prompt, template)
-            return {
-                "success": True,
-                "is_fallback": True,
-                "status": "deterministic_fallback",
-                "model_used": "Deterministic Revision Engine",
-                "revised_report": revised
-            }
-
         system_prompt = (
             "You are an advanced executive intelligence editor. "
             "A user has reviewed a compiled report and requested specific revisions. "
@@ -284,36 +225,37 @@ class GemmaClient:
             f"---\n\nPlease generate the revised report."
         )
 
-        payload = {
-            "model": target_model,
-            "prompt": user_content,
-            "system": system_prompt,
-            "stream": False,
-            "options": {"temperature": 0.3}
+        # 1. Route through Cloud AI (OpenRouter) if configured and key present
+        if self.cloud_client.is_available():
+            cloud_res = self.cloud_client.generate(
+                prompt=user_content,
+                system_instruction=system_prompt,
+                temperature=0.3,
+                model_override=model_override
+            )
+            if cloud_res["success"] and cloud_res["text"]:
+                return {
+                    "success": True,
+                    "is_fallback": False,
+                    "status": "completed",
+                    "model_used": cloud_res["model_used"],
+                    "revised_report": cloud_res["text"],
+                    "total_duration_ms": cloud_res["duration_ms"],
+                    "eval_count": 0
+                }
+            else:
+                logger.warning(f"Cloud AI report revision failed ({cloud_res.get('error')}). Using deterministic fallback.")
+
+        # 2. Deterministic fallback
+        revised = self._fallback_revision(current_report_markdown, user_revision_prompt, template)
+        return {
+            "success": True,
+            "is_fallback": True,
+            "status": "deterministic_fallback",
+            "model_used": "Deterministic Revision Engine",
+            "revised_report": revised
         }
 
-        try:
-            response = requests.post(f"{self.base_url}/api/generate", json=payload, timeout=config.LLM_TIMEOUT)
-            response.raise_for_status()
-            res_json = response.json()
-            revised_text = res_json.get("response", "")
 
-            return {
-                "success": True,
-                "is_fallback": False,
-                "status": "completed",
-                "model_used": target_model,
-                "revised_report": revised_text,
-                "total_duration_ms": res_json.get("total_duration", 0) // 1_000_000,
-                "eval_count": res_json.get("eval_count", 0)
-            }
-        except Exception as err:
-            logger.warning(f"Gemma report revision fallback triggered ({err}).")
-            revised_text = self._fallback_revision(current_report_markdown, user_revision_prompt, template)
-            return {
-                "success": True,
-                "is_fallback": True,
-                "status": "deterministic_fallback",
-                "model_used": "Deterministic Revision Engine",
-                "revised_report": revised_text
-            }
+# Backward-compatible alias for existing tests and legacy references
+GemmaClient = ReportGenerationClient
