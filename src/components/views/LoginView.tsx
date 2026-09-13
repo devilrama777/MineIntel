@@ -341,7 +341,7 @@ export const LoginView: React.FC = () => {
                     <RefreshCw className={`w-4 h-4 ${captchaLoading ? 'animate-spin' : ''}`} />
                   </button>
                 </div>
-                <input type="text" required value={captchaAnswer} onChange={(e) => setCaptchaAnswer(e.target.value.toUpperCase())} placeholder="Enter the characters shown" disabled={isLoading || captchaLoading} autoComplete="off" aria-label="CAPTCHA input" className={`mt-2 w-full px-3 py-2 rounded-lg text-xs font-mono border transition outline-none focus:ring-2 focus:ring-blue-500/40 ${isLight ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white' : 'bg-[#182133] border-[#25324a] text-slate-100 focus:border-blue-500/60'}`} />
+                <input type="text" required maxLength={6} value={captchaAnswer} onChange={(e) => setCaptchaAnswer(e.target.value.slice(0, 6).toUpperCase())} placeholder="Enter the characters shown" disabled={isLoading || captchaLoading} autoComplete="off" aria-label="CAPTCHA input" className={`mt-2 w-full px-3 py-2 rounded-lg text-xs font-mono border transition outline-none focus:ring-2 focus:ring-blue-500/40 ${isLight ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white' : 'bg-[#182133] border-[#25324a] text-slate-100 focus:border-blue-500/60'}`} />
               </div>
 
               <button

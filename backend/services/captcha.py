@@ -43,16 +43,26 @@ def _render_png(answer: str) -> str:
     image = Image.new("RGB", (260, 82), (238, 244, 252))
     draw = ImageDraw.Draw(image)
     draw.rectangle((0, 0, 259, 81), outline=(47, 79, 115), width=2)
-    for _ in range(9):
+    for _ in range(7):
         x1, y1 = secrets.randbelow(260), secrets.randbelow(82)
         x2, y2 = secrets.randbelow(260), secrets.randbelow(82)
-        color = (secrets.randbelow(100), secrets.randbelow(100), secrets.randbelow(100))
+        color = (secrets.randbelow(120), secrets.randbelow(120), secrets.randbelow(120))
         draw.line((x1, y1, x2, y2), fill=color, width=1)
-    font = _font(34)
+    for _ in range(42):
+        x, y = secrets.randbelow(256), secrets.randbelow(78)
+        draw.ellipse((x, y, x + 1, y + 1), fill=(130, 145, 165))
+
+    font = _font(43)
+    colors = ((20, 83, 150), (180, 54, 65), (20, 125, 92), (116, 67, 155), (190, 104, 25), (35, 105, 125))
     for index, char in enumerate(answer):
-        x = 22 + index * 36 + secrets.randbelow(7) - 3
-        y = 20 + secrets.randbelow(11) - 5
-        draw.text((x, y), char, font=font, fill=(18, 42, 75))
+        layer = Image.new("RGBA", (58, 66), (255, 255, 255, 0))
+        layer_draw = ImageDraw.Draw(layer)
+        layer_draw.text((8, 5), char, font=font, fill=colors[index], stroke_width=1, stroke_fill=(255, 255, 255, 220))
+        angle = secrets.randbelow(17) - 8
+        layer = layer.rotate(angle, resample=Image.Resampling.BICUBIC, expand=1)
+        x = 5 + index * 42 + secrets.randbelow(7) - 3
+        y = 8 + secrets.randbelow(9) - 4
+        image.paste(layer, (x, y), layer)
     output = io.BytesIO()
     image.save(output, format="PNG", optimize=True)
     return "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
