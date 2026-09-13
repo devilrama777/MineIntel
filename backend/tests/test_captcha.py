@@ -2,10 +2,10 @@ import re
 import unittest
 from unittest.mock import patch
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from backend import config
-from backend.main import LoginRequest, auth_login
+from backend.main import LoginRequest, auth_captcha, auth_login
 from backend.services import captcha as captcha_service
 
 
@@ -66,6 +66,13 @@ class TestCaptchaSecurity(unittest.TestCase):
                 captcha_answer=answer,
             ))
         self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_challenge_endpoint_disables_caching(self):
+        response = Response()
+        auth_captcha(response)
+        self.assertEqual(response.headers["cache-control"], "no-store, no-cache, must-revalidate, max-age=0")
+        self.assertEqual(response.headers["pragma"], "no-cache")
+
 
 
 if __name__ == "__main__":

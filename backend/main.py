@@ -15,7 +15,7 @@ import requests
 
 logger = logging.getLogger("mineintel")
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -205,8 +205,11 @@ class SystemOpenFileRequest(BaseModel):
 # AUTHENTICATION ENDPOINTS
 # -------------------------------------------------------------------------
 @app.get("/api/auth/captcha")
-def auth_captcha():
+def auth_captcha(response: Response):
     """Issues a short-lived, single-use login CAPTCHA challenge."""
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     return create_challenge()
 
 
