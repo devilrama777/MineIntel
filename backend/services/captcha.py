@@ -7,6 +7,7 @@ import string
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
@@ -14,6 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 CAPTCHA_LENGTH = 6
 CAPTCHA_TTL_SECONDS = 180
 CAPTCHA_ALPHABET = string.ascii_uppercase + string.digits
+CAPTCHA_FONT_PATH = Path(__file__).resolve().parents[1] / "assets" / "DejaVuSans-Bold.ttf"
 
 _lock = threading.Lock()
 _challenges: Dict[str, Tuple[str, float]] = {}
@@ -31,12 +33,9 @@ def _secure_answer() -> str:
 
 
 def _font(size: int):
-    for candidate in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "DejaVuSans-Bold.ttf"):
-        try:
-            return ImageFont.truetype(candidate, size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
+    if not CAPTCHA_FONT_PATH.is_file():
+        raise FileNotFoundError(f"Bundled CAPTCHA font is missing: {CAPTCHA_FONT_PATH}")
+    return ImageFont.truetype(str(CAPTCHA_FONT_PATH), size)
 
 
 def _render_png(answer: str) -> str:
@@ -52,17 +51,34 @@ def _render_png(answer: str) -> str:
         x, y = secrets.randbelow(256), secrets.randbelow(78)
         draw.ellipse((x, y, x + 1, y + 1), fill=(130, 145, 165))
 
-    font = _font(43)
+    font = _font(56)
     colors = ((20, 83, 150), (180, 54, 65), (20, 125, 92), (116, 67, 155), (190, 104, 25), (35, 105, 125))
+    glyphs = []
     for index, char in enumerate(answer):
-        layer = Image.new("RGBA", (58, 66), (255, 255, 255, 0))
+        layer = Image.new("RGBA", (64, 78), (255, 255, 255, 0))
         layer_draw = ImageDraw.Draw(layer)
-        layer_draw.text((8, 5), char, font=font, fill=colors[index], stroke_width=1, stroke_fill=(255, 255, 255, 220))
+        bounds = layer_draw.textbbox((0, 0), char, font=font, stroke_width=1)
+        text_width = bounds[2] - bounds[0]
+        text_height = bounds[3] - bounds[1]
+        text_x = (layer.width - text_width) // 2 - bounds[0]
+        text_y = (layer.height - text_height) // 2 - bounds[1] - 2
+        layer_draw.text((text_x, text_y), char, font=font, fill=colors[index], stroke_width=1, stroke_fill=(255, 255, 255, 220))
         angle = secrets.randbelow(17) - 8
-        layer = layer.rotate(angle, resample=Image.Resampling.BICUBIC, expand=1)
-        x = 5 + index * 42 + secrets.randbelow(7) - 3
-        y = 8 + secrets.randbelow(9) - 4
-        image.paste(layer, (x, y), layer)
+        glyphs.append(layer.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True))
+
+    gap = 2
+    available_width = image.width - 8
+    total_width = sum(glyph.width for glyph in glyphs) + gap * (len(glyphs) - 1)
+    if total_width > available_width:
+        scale = available_width / total_width
+        glyphs = [glyph.resize((max(1, int(glyph.width * scale)), max(1, int(glyph.height * scale))), Image.Resampling.LANCZOS) for glyph in glyphs]
+        total_width = sum(glyph.width for glyph in glyphs) + gap * (len(glyphs) - 1)
+
+    x = (image.width - total_width) // 2
+    for index, glyph in enumerate(glyphs):
+        y = max(0, min(image.height - glyph.height, (image.height - glyph.height) // 2 + secrets.randbelow(5) - 2))
+        image.paste(glyph, (x, y), glyph)
+        x += glyph.width + gap
     output = io.BytesIO()
     image.save(output, format="PNG", optimize=True)
     return "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
