@@ -143,19 +143,19 @@ class LocalDesktopService {
         if (Array.isArray(history)) {
           this.reports = history.map((r: any) => ({
             id: r.id || r.job_id || `rep-${Math.random().toString(36).slice(2, 8)}`,
-            name: r.title || r.name || 'Statutory Coal Audit Report',
-            organization: r.subsidiary || r.organization || 'Coal India Limited',
-            reportingPeriod: r.reporting_period || r.reportingPeriod || 'FY 2024-25',
+            name: r.title || r.name || '',
+            organization: r.subsidiary || r.organization || '',
+            reportingPeriod: r.reporting_period || r.reportingPeriod || '',
             description: r.summary_snippet || r.description || '',
             createdAt: r.timestamp || r.created_at || new Date().toISOString().slice(0, 16),
             lastModified: r.timestamp || r.updated_at || new Date().toISOString().slice(0, 16),
             status: (r.status as any) || 'Ready for Export',
-            sectionsCount: r.sections_count || 4,
-            wordCount: r.word_count || (r.records_count ? r.records_count * 120 : 1850),
-            sourcesLinkedCount: r.sources_count || 1,
-            validationScore: r.validation_score || 98,
+            sectionsCount: r.sections_count || 0,
+            wordCount: r.word_count || 0,
+            sourcesLinkedCount: r.sources_count || 0,
+            validationScore: r.validation_score || 0,
             referenceReportUsed: r.reference_report_path,
-            selectedModel: r.model_name || 'openrouter/free',
+            selectedModel: r.model_name || '',
           }));
           return [...this.reports];
         }
@@ -173,19 +173,19 @@ class LocalDesktopService {
         const r = await res.json();
         return {
           id: r.id || r.report_id || id,
-          name: r.title || r.name || 'Untitled Report',
-          organization: r.subsidiary || r.organization || 'Coal India Limited',
-          reportingPeriod: r.reporting_period || r.reportingPeriod || 'FY 2024-25',
+          name: r.title || r.name || '',
+          organization: r.subsidiary || r.organization || '',
+          reportingPeriod: r.reporting_period || r.reportingPeriod || '',
           description: r.description || '',
           createdAt: r.created_at || new Date().toISOString().slice(0, 16),
           lastModified: r.updated_at || r.lastModified || new Date().toISOString().slice(0, 16),
-          status: r.status || 'Draft',
+          status: r.status || 'In Progress',
           sectionsCount: r.sections_count || (r.sections ? r.sections.length : 0),
           wordCount: r.word_count || 0,
           sourcesLinkedCount: r.sources_count || 0,
           validationScore: r.validation_score || 0,
           referenceReportUsed: r.reference_report_path,
-          selectedModel: r.model_name || 'Local AI',
+          selectedModel: r.model_name || '',
         };
       }
     } catch {

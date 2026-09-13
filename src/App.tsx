@@ -51,7 +51,7 @@ function DesktopAppContent() {
 
   // Core desktop state
   const [reports, setReports] = useState<ReportItem[]>([]);
-  const [selectedReportId, setSelectedReportId] = useState<string>('rep-001');
+  const [selectedReportId, setSelectedReportId] = useState<string>('');
   const [dataSources, setDataSources] = useState<DataSourceItem[]>([]);
   const [jobs, setJobs] = useState<ProcessingJobItem[]>([]);
   const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
@@ -308,22 +308,7 @@ function DesktopAppContent() {
     );
   };
 
-  const activeReport =
-    reports.find((r) => r.id === selectedReportId) || reports[0] || {
-      id: 'rep-001',
-      name: 'Consolidated Operational Review (Q4 FY26 Pre-Filing)',
-      organization: 'MineIntel / Corporate Planning & Operations',
-      reportingPeriod: 'January 1, 2026 – March 31, 2026',
-      description: 'Quarterly institutional synthesis',
-      createdAt: '2026-03-01 09:00',
-      lastModified: '2026-03-06 14:22',
-      status: 'In Progress',
-      sectionsCount: 7,
-      wordCount: 14850,
-      sourcesLinkedCount: 5,
-      validationScore: 94,
-      selectedModel: 'openrouter/free',
-    };
+  const activeReport = reports.find((r) => r.id === selectedReportId) || reports[0];
 
   const unresolvedIssuesCount = validationIssues.filter(
     (i) => i.severity !== 'pass'
@@ -358,7 +343,7 @@ function DesktopAppContent() {
             setCurrentPlatform(p);
             desktopBridge.setPlatform(p);
           }}
-          activeReportTitle={activeReport.name}
+          activeReportTitle={activeReport?.name}
           isAirgapped={true}
           onNavigate={handleNavigate}
           onOpenAudit={() => setActiveView('security-audit')}
@@ -443,7 +428,7 @@ function DesktopAppContent() {
               />
             )}
 
-            {activeView === 'report-editor' && (
+            {activeView === 'report-editor' && activeReport && (
               <ReportEditorView
                 report={activeReport}
                 sections={sections}
@@ -480,18 +465,16 @@ function DesktopAppContent() {
             {activeView === 'preview' && (
               <ReportPreviewView
                 report={activeReport}
-                sections={sections}
-                blocks={blocks}
                 onNavigateToExport={() => handleNavigate('export')}
+                onCreateNewReport={() => handleNavigate('new-report')}
               />
             )}
 
             {activeView === 'export' && (
               <ExportView
                 report={activeReport}
-                validationIssues={validationIssues}
                 onOpenPreview={() => handleNavigate('preview')}
-                onOpenEditor={() => handleNavigate('report-editor')}
+                onCreateNewReport={() => handleNavigate('new-report')}
               />
             )}
 
