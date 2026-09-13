@@ -298,12 +298,15 @@ export interface AuthSession {
 export interface LoginCredentials {
   username: string;
   password: string;
+  captcha_challenge_id: string;
+  captcha_answer: string;
 }
 
 export interface FirstRunSetupData {
   username: string;
   display_name: string;
   password: string;
+  captcha_answer?: string;
 }
 
 export interface SetupStatus {
