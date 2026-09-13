@@ -35,7 +35,7 @@ scratch/
 node_modules/
 dist/
 .vercel/
-
+SIH_ps_2_test_1/
 # OS specific
 .DS_Store
 Thumbs.db

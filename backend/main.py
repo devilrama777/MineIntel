@@ -172,6 +172,18 @@ class GemmaRequest(BaseModel):
     model_override: Optional[str] = None
 
 
+class ReportExportRequest(BaseModel):
+    format: str = "pdf"
+    target_path: Optional[str] = None
+    report_title: Optional[str] = "MineIntel_Technical_Evaluation_ML-492"
+    report_data: Optional[Dict[str, Any]] = None
+
+
+class SystemOpenFileRequest(BaseModel):
+    path: str
+    reveal: bool = False
+
+
 # -------------------------------------------------------------------------
 # AUTHENTICATION ENDPOINTS
 # -------------------------------------------------------------------------
@@ -1173,6 +1185,57 @@ def download_report_format(fmt: str, template: Optional[str] = None, job_id: Opt
         status_code=404,
         detail=f"Report '{target_fname}' not found. Please generate the report first or try again later."
     )
+
+
+@app.post("/api/v1/reports/export")
+def export_report_v1(req: ReportExportRequest):
+    """Generates statutory report artifact for frontend export and returns download metadata."""
+    fmt = req.format.lower().lstrip(".")
+    if fmt == "word":
+        fmt = "docx"
+    if fmt not in ("pdf", "docx", "xlsx", "csv"):
+        fmt = "pdf"
+
+    title = req.report_title or "MineIntel_Technical_Evaluation_ML-492"
+
+    if fmt == "pdf":
+        gen_path = document_generator.generate_pdf_report(template_name="bento_grid")
+        filename = f"{title}.pdf"
+    elif fmt == "docx":
+        gen_path = document_generator.generate_docx_report(template_name="bento_grid")
+        filename = f"{title}.docx"
+    else:
+        gen_path = document_generator.generate_excel_workbook(template_name="bento_grid")
+        filename = f"{title}.xlsx"
+
+    saved_path = str(gen_path) if gen_path else ""
+    if req.target_path and gen_path and gen_path.exists():
+        try:
+            target = Path(req.target_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(gen_path, target)
+            saved_path = str(target)
+        except Exception:
+            pass
+
+    return {
+        "status": "success",
+        "filename": filename,
+        "saved_path": saved_path,
+        "download_url": f"/api/reports/download/{fmt}?template=bento_grid"
+    }
+
+
+@app.post("/api/v1/system/open-file")
+def system_open_file(req: SystemOpenFileRequest):
+    """Acknowledges system file inspection request safely."""
+    p = Path(req.path)
+    return {
+        "status": "success",
+        "path": str(p),
+        "exists": p.exists(),
+        "revealed": req.reveal
+    }
 
 
 @app.get("/api/reports/{job_id}")

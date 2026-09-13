@@ -23,6 +23,9 @@ interface NewReportWorkflowViewProps {
   previousReports: ReportItem[];
   onCreateReport: (newReport: any) => void;
   onCancel: () => void;
+  userName?: string;
+  aiProvider?: string;
+  aiModel?: string;
 }
 
 export const NewReportWorkflowView: React.FC<NewReportWorkflowViewProps> = ({
@@ -30,6 +33,9 @@ export const NewReportWorkflowView: React.FC<NewReportWorkflowViewProps> = ({
   previousReports,
   onCreateReport,
   onCancel,
+  userName,
+  aiProvider,
+  aiModel,
 }) => {
   const [currentStep, setCurrentStep] = useState<number>(1);
 
@@ -58,19 +64,21 @@ export const NewReportWorkflowView: React.FC<NewReportWorkflowViewProps> = ({
     tableMode: 'Lattice (Strict Border Detection)',
   });
 
-  // Step 5: AI Configuration (Single Model: openrouter/free)
-  const [availableModels] = useState([
+  // Step 5: AI Configuration (Dynamic Model from Backend)
+  const effectiveModel = aiModel || 'openrouter/free';
+  const effectiveProvider = aiProvider || 'OpenRouter';
+  const availableModels = [
     {
-      id: 'openrouter-free',
-      name: 'openrouter/free',
-      vendor: 'OpenRouter Cloud Inference',
-      vram: 'Cloud Hosted',
-      latency: '~1.8s',
+      id: 'backend-ai-model',
+      name: effectiveModel,
+      vendor: `${effectiveProvider} Sovereign Inference`,
+      vram: 'Cloud Enclave',
+      latency: 'HTTPS',
       context: '128,000',
-      description: 'Single sovereign production AI model for statutory report generation, mathematical verification, and operational synthesis.',
+      description: `Active backend configured AI model (${effectiveModel}) via ${effectiveProvider} for statutory report generation and operational synthesis.`,
     },
-  ]);
-  const [selectedModel, setSelectedModel] = useState('openrouter/free');
+  ];
+  const [selectedModel, setSelectedModel] = useState(effectiveModel);
   const [temperature, setTemperature] = useState(0.2);
   const [strictVerification, setStrictVerification] = useState(true);
 
@@ -467,7 +475,7 @@ export const NewReportWorkflowView: React.FC<NewReportWorkflowViewProps> = ({
                 Sovereign AI Inference Configuration
               </h2>
               <p className="text-xs text-slate-400">
-                Single production model: openrouter/free. Coupled directly with deterministic MathEngine for 100% verified arithmetic.
+                Active production model: {effectiveModel} via {effectiveProvider}. Coupled directly with deterministic MathEngine for 100% verified arithmetic.
               </p>
             </div>
 

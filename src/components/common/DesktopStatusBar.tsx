@@ -1,9 +1,9 @@
-import React from 'react';
 import {
   Monitor,
   Database,
   ShieldCheck,
   CheckCircle2,
+  Cpu,
 } from 'lucide-react';
 import { DesktopPlatform } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
@@ -13,12 +13,16 @@ interface DesktopStatusBarProps {
   onChangePlatform: (platform: DesktopPlatform) => void;
   onOpenAudit: () => void;
   onOpenSettings: () => void;
+  aiProvider?: string;
+  aiModel?: string;
 }
 
 export const DesktopStatusBar: React.FC<DesktopStatusBarProps> = ({
   currentPlatform,
   onChangePlatform,
   onOpenAudit,
+  aiProvider,
+  aiModel,
 }) => {
   const { isLight } = useTheme();
 
@@ -67,6 +71,13 @@ export const DesktopStatusBar: React.FC<DesktopStatusBarProps> = ({
           <CheckCircle2 className="w-2.5 h-2.5 text-emerald-500" />
           <span>API: Connected (/api)</span>
         </div>
+
+        {aiModel && (
+          <div className={`flex items-center gap-1 ${isLight ? 'text-indigo-600 font-medium' : 'text-cyan-400'}`} title={`Active AI Model: ${aiModel}`}>
+            <Cpu className={`w-2.5 h-2.5 ${isLight ? 'text-indigo-600' : 'text-cyan-400'}`} />
+            <span>AI: {aiProvider ? `${aiProvider} / ` : ''}{aiModel}</span>
+          </div>
+        )}
 
         <div className="flex items-center gap-1">
           <Database className="w-2.5 h-2.5 opacity-60" />

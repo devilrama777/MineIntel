@@ -1,7 +1,6 @@
 export type AppView =
   | 'dashboard'
   | 'new-report'
-  | 'data-sources'
   | 'processing-jobs'
   | 'evidence-search'
   | 'report-planner'

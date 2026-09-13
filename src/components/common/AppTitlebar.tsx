@@ -41,6 +41,8 @@ interface AppTitlebarProps {
   currentView?: AppView;
   onOpenCommandPalette?: () => void;
   onRefreshData?: () => void;
+  aiProvider?: string;
+  aiModel?: string;
 }
 
 const getViewTitle = (view?: AppView): string => {
@@ -49,8 +51,6 @@ const getViewTitle = (view?: AppView): string => {
       return 'Executive Operations Dashboard';
     case 'new-report':
       return 'New Report Generation Wizard';
-    case 'data-sources':
-      return 'Local Data Repository & Ingestion';
     case 'processing-jobs':
       return 'Extraction, OCR & Embedding Queue';
     case 'evidence-search':
@@ -87,6 +87,8 @@ export const AppTitlebar: React.FC<AppTitlebarProps> = ({
   currentView = 'dashboard',
   onOpenCommandPalette,
   onRefreshData,
+  aiProvider,
+  aiModel,
 }) => {
   const { theme, toggleTheme, isLight } = useTheme();
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -221,22 +223,6 @@ export const AppTitlebar: React.FC<AppTitlebarProps> = ({
                     <span>New Report Wizard</span>
                   </span>
                   <span className="text-[10px] opacity-70">{shortcutKey}N</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onNavigate('data-sources');
-                    setActiveMenu(null);
-                  }}
-                  className={`w-full text-left px-3 py-1.5 flex items-center justify-between cursor-pointer ${
-                    isLight ? 'hover:bg-blue-50 hover:text-blue-700' : 'hover:bg-blue-600 hover:text-white'
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    <FolderOpen className="w-3.5 h-3.5" />
-                    <span>Ingest Data Source...</span>
-                  </span>
-                  <span className="text-[10px] opacity-70">{shortcutKey}O</span>
                 </button>
                 <button
                   type="button"
@@ -664,6 +650,21 @@ export const AppTitlebar: React.FC<AppTitlebarProps> = ({
             </>
           )}
         </button>
+
+        {aiModel && (
+          <div
+            className={`hidden md:flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-mono border ${
+              isLight
+                ? 'bg-slate-100 border-slate-200 text-slate-700'
+                : 'bg-[#121824] border-[#223145] text-slate-300'
+            }`}
+            title={`Backend AI Provider: ${aiProvider || 'openrouter'} | Model: ${aiModel}`}
+          >
+            <Cpu className="w-3.5 h-3.5 text-blue-400" />
+            <span className="text-slate-400">{aiProvider || 'AI'}:</span>
+            <span className="font-semibold text-blue-400 truncate max-w-[140px]">{aiModel}</span>
+          </div>
+        )}
 
         <button
           type="button"

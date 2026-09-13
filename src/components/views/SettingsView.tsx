@@ -17,9 +17,11 @@ import { SystemHealthComponent } from '../../types';
 
 interface SettingsViewProps {
   healthComponents: SystemHealthComponent[];
+  aiProvider?: string;
+  aiModel?: string;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents, aiProvider, aiModel }) => {
   const [activeTab, setActiveTab] = useState<
     | 'General'
     | 'AI Models'
@@ -146,16 +148,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 mb-1">SOVEREIGN AI MODEL (ENFORCED)</label>
-                  <select
-                    value={defaultModel}
-                    disabled
-                    className="w-full bg-[#182333] border border-slate-700 rounded px-3 py-1.5 text-slate-100 opacity-90 cursor-not-allowed"
-                  >
-                    <option value="openrouter/free">openrouter/free (Single Production Model)</option>
-                  </select>
-                  <span className="text-[10px] text-blue-400 font-mono mt-1 block">
-                    Strict single-model architecture enforced: OpenRouter (openrouter/free).
+                  <label className="block text-slate-300 mb-1">SOVEREIGN AI MODEL (CONFIGURED)</label>
+                  <div className="w-full bg-[#182333] border border-slate-700 rounded px-3 py-1.5 text-slate-100 font-mono flex items-center justify-between">
+                    <span className="font-semibold text-blue-400">{aiModel || defaultModel}</span>
+                    <span className="text-[10px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
+                      {(aiProvider || 'openrouter').toUpperCase()}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-cyan-400 font-mono mt-1 block">
+                    Active backend inference provider: {aiProvider || 'openrouter'} | Model: {aiModel || defaultModel}
                   </span>
                 </div>
 

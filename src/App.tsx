@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   AppView,
   ReportItem,
@@ -27,7 +27,6 @@ import { SourceViewerModal } from './components/common/SourceViewerModal';
 // Views
 import { DashboardView } from './components/views/DashboardView';
 import { NewReportWorkflowView } from './components/views/NewReportWorkflowView';
-import { DataSourcesView } from './components/views/DataSourcesView';
 import { ProcessingJobsView } from './components/views/ProcessingJobsView';
 import { EvidenceSearchView } from './components/views/EvidenceSearchView';
 import { ReportPlannerView } from './components/views/ReportPlannerView';
@@ -82,6 +81,28 @@ function DesktopAppContent() {
     sourcePath: '',
     pageOrSheet: '',
   });
+
+  // Derive active AI provider and model from health components
+  const aiComponent = useMemo(
+    () => healthComponents.find((c) => c.id === 'srv-ai-inference'),
+    [healthComponents]
+  );
+
+  const aiModel = useMemo(() => {
+    if (aiComponent?.detail) {
+      const match = aiComponent.detail.match(/Model:\s*([^|\s]+)/);
+      if (match) return match[1];
+    }
+    return 'openrouter/free';
+  }, [aiComponent]);
+
+  const aiProvider = useMemo(() => {
+    if (aiComponent?.detail) {
+      const match = aiComponent.detail.match(/Provider:\s*([^|\s]+)/);
+      if (match) return match[1];
+    }
+    return 'openrouter';
+  }, [aiComponent]);
 
   // Load and refresh data from local service when authenticated
   const refreshAllData = useCallback(async () => {
@@ -225,26 +246,6 @@ function DesktopAppContent() {
     setActiveView('report-planner');
   };
 
-  const handleAddSource = async (fileData: Partial<DataSourceItem>) => {
-    const doc = await desktopService.addDataSource(fileData);
-    setDataSources((prev) => [doc, ...prev]);
-    const updatedJobs = await desktopService.getProcessingJobs();
-    setJobs(updatedJobs);
-  };
-
-  const handleRemoveSource = async (id: string) => {
-    await desktopService.removeDataSource(id);
-    setDataSources((prev) => prev.filter((d) => d.id !== id));
-  };
-
-  const handleReprocessSource = async (id: string) => {
-    await desktopService.reprocessDataSource(id);
-    const updatedDocs = await desktopService.getDataSources();
-    setDataSources(updatedDocs);
-    const updatedJobs = await desktopService.getProcessingJobs();
-    setJobs(updatedJobs);
-  };
-
   const handleUpdateJobStatus = async (
     id: string,
     status: 'running' | 'paused' | 'completed' | 'failed'
@@ -365,6 +366,8 @@ function DesktopAppContent() {
           currentView={activeView}
           onOpenCommandPalette={() => setCommandPaletteOpen(true)}
           onRefreshData={refreshAllData}
+          aiProvider={aiProvider}
+          aiModel={aiModel}
         />
       </div>
 
@@ -409,16 +412,8 @@ function DesktopAppContent() {
                 previousReports={reports}
                 onCreateReport={handleCreateReport}
                 onCancel={() => handleNavigate('dashboard')}
-              />
-            )}
-
-            {activeView === 'data-sources' && (
-              <DataSourcesView
-                dataSources={dataSources}
-                onAddSource={handleAddSource}
-                onRemoveSource={handleRemoveSource}
-                onReprocessSource={handleReprocessSource}
-                onViewSource={handleInspectDataSource}
+                aiProvider={aiProvider}
+                aiModel={aiModel}
               />
             )}
 
@@ -504,7 +499,7 @@ function DesktopAppContent() {
             )}
 
             {activeView === 'settings' && (
-              <SettingsView healthComponents={healthComponents} />
+              <SettingsView healthComponents={healthComponents} aiProvider={aiProvider} aiModel={aiModel} />
             )}
           </main>
         </div>
@@ -541,6 +536,8 @@ function DesktopAppContent() {
         }}
         onOpenAudit={() => setActiveView('security-audit')}
         onOpenSettings={() => setActiveView('settings')}
+        aiProvider={aiProvider}
+        aiModel={aiModel}
       />
 
       {/* About MineIntel Desktop Modal */}

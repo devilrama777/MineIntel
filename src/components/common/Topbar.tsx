@@ -36,8 +36,6 @@ export const Topbar: React.FC<TopbarProps> = ({
         return 'Executive Operations Dashboard';
       case 'new-report':
         return 'New Report Generation Wizard';
-      case 'data-sources':
-        return 'Local Data Repository & Document Ingestion';
       case 'processing-jobs':
         return 'Extraction, OCR & Embedding Queue';
       case 'evidence-search':

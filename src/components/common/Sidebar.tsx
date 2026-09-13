@@ -2,7 +2,6 @@ import React from 'react';
 import {
   LayoutDashboard,
   FilePlus2,
-  FolderArchive,
   Cpu,
   SearchCode,
   GitFork,
@@ -75,7 +74,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'new-report', label: 'New Report', icon: FilePlus2, section: 'PRIMARY' },
     
     // Core Document Production Pipeline
-    { id: 'data-sources', label: 'Data Sources', icon: FolderArchive, badge: safeBadgeCounts.dataSourcesCount > 0 ? safeBadgeCounts.dataSourcesCount : undefined, section: 'WORKFLOW' },
     { id: 'processing-jobs', label: 'Processing Jobs', icon: Cpu, section: 'WORKFLOW' },
     { id: 'evidence-search', label: 'Evidence Search', icon: SearchCode, section: 'WORKFLOW' },
     { id: 'report-planner', label: 'Report Planner', icon: GitFork, section: 'WORKFLOW' },
