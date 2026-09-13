@@ -1,8 +1,11 @@
 import re
+import base64
+import io
 import unittest
 from unittest.mock import patch
 
 from fastapi import HTTPException, Response
+from PIL import Image, ImageFont
 
 from backend import config
 from backend.main import LoginRequest, auth_captcha, auth_login
@@ -72,6 +75,16 @@ class TestCaptchaSecurity(unittest.TestCase):
         auth_captcha(response)
         self.assertEqual(response.headers["cache-control"], "no-store, no-cache, must-revalidate, max-age=0")
         self.assertEqual(response.headers["pragma"], "no-cache")
+
+    def test_bundled_scalable_font_and_rendered_dimensions(self):
+        font = captcha_service._font(56)
+        self.assertIsInstance(font, ImageFont.FreeTypeFont)
+        self.assertTrue(captcha_service.CAPTCHA_FONT_PATH.is_file())
+        for answer in ("AB12CD", "ZX98YU", "69X3SI", "8OAOHQ", "PA3Z8Z"):
+            payload = captcha_service._render_png(answer)
+            image = Image.open(io.BytesIO(base64.b64decode(payload.split(",", 1)[1])))
+            self.assertEqual(image.size, (260, 82))
+            self.assertEqual(len(answer), captcha_service.CAPTCHA_LENGTH)
 
 
 
