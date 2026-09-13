@@ -28,6 +28,7 @@ from backend.services.history_manager import get_history, record_report
 from backend.services.llama_client import LlamaClient
 from backend.services.math_engine import MathEngine
 from backend.services.pipeline import DocumentPipeline
+from backend.services.captcha import create_challenge, verify_challenge
 
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
@@ -62,6 +63,8 @@ document_generator = DocumentGenerator()
 class LoginRequest(BaseModel):
     officer_id: str
     password: str
+    captcha_challenge_id: str
+    captcha_answer: str
     remember_device: Optional[bool] = True
 
 
@@ -201,9 +204,17 @@ class SystemOpenFileRequest(BaseModel):
 # -------------------------------------------------------------------------
 # AUTHENTICATION ENDPOINTS
 # -------------------------------------------------------------------------
+@app.get("/api/auth/captcha")
+def auth_captcha():
+    """Issues a short-lived, single-use login CAPTCHA challenge."""
+    return create_challenge()
+
+
 @app.post("/api/auth/login")
 def auth_login(req: LoginRequest):
     """Authenticates executive master officers and registered members against secure credential store."""
+    if not req.captcha_challenge_id.strip() or not req.captcha_answer.strip() or not verify_challenge(req.captcha_challenge_id, req.captcha_answer):
+        raise HTTPException(status_code=400, detail="CAPTCHA is missing, incorrect, expired, or already used.")
     officer_id = req.officer_id.strip()
     password = req.password.strip()
 

@@ -116,10 +116,20 @@ class AuthService {
    * are provisioned exclusively via host environment variables.
    */
   public async firstRunSetup(data: FirstRunSetupData): Promise<AuthSession> {
+    const captcha = await this.getCaptcha();
     return this.login({
       username: data.username,
       password: data.password,
+      captcha_challenge_id: captcha.challenge_id,
+      captcha_answer: data.captcha_answer || '',
     });
+  }
+
+  public async getCaptcha(): Promise<{ challenge_id: string; image: string; expires_in: number }> {
+    const resp = await fetch(`${API_BASE}/api/auth/captcha`);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || 'Unable to load CAPTCHA.');
+    return data;
   }
 
   /**
@@ -129,6 +139,8 @@ class AuthService {
     const payload = {
       officer_id: credentials.username.trim(),
       password: credentials.password.trim(),
+      captcha_challenge_id: credentials.captcha_challenge_id,
+      captcha_answer: credentials.captcha_answer.trim(),
     };
 
     let resp: Response;

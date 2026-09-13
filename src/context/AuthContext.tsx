@@ -99,6 +99,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await login({
       username: data.username,
       password: data.password,
+      captcha_challenge_id: '',
+      captcha_answer: '',
     });
   };
 
