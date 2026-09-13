@@ -282,6 +282,8 @@ export interface UserProfile {
   display_name: string;
   status: string;
   role: string;
+  phone?: string;
+  email?: string;
   created_at: number;
   updated_at?: number;
   last_login_at?: number;
@@ -322,4 +324,3 @@ export interface AuthConfigStatus {
   reachable: boolean;
   message?: string;
 }
-

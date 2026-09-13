@@ -81,9 +81,20 @@ class MasterUserActionRequest(BaseModel):
     is_active: bool
 
 
+class ProfileUpdateRequest(BaseModel):
+    display_name: str
+    phone: str = ""
+    email: str = ""
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 def create_session_token(officer_id: str, role: str = "Senior Operational Auditor") -> str:
     """Creates a cryptographically signed session token with timestamp."""
-    timestamp = int(time.time())
+    timestamp = int(time.time() * 1000)
     payload = f"{officer_id}:{timestamp}:{role}"
     sig = hmac.new(config.JWT_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{payload}:{sig}"
@@ -97,7 +108,10 @@ def verify_session_token(token: str) -> Optional[Dict[str, Any]]:
             return None
         officer_id, timestamp_str, role, sig = parts
         timestamp = int(timestamp_str)
-        if time.time() - timestamp > 86400:  # 24 hours expiry
+        if (time.time() * 1000) - timestamp > 86400 * 1000:  # 24 hours expiry
+            return None
+        stored_user = auth_store.get_user_by_id(officer_id)
+        if stored_user and timestamp <= int(stored_user.get("session_invalidated_at", 0) or 0):
             return None
         payload = f"{officer_id}:{timestamp}:{role}"
         expected_sig = hmac.new(config.JWT_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -340,6 +354,45 @@ def require_auth(
     if not session:
         raise HTTPException(status_code=401, detail="Session token invalid, tampered, or expired.")
     return session
+
+
+@app.get("/api/auth/profile")
+def auth_profile(auth: Dict[str, Any] = Depends(require_auth)):
+    """Returns the authenticated normal user's safe profile."""
+    if auth.get("role") == "Senior Operational Auditor":
+        return {"officer_id": auth["officer_id"], "display_name": "Executive Master Auditor", "phone": "", "email": "", "role": auth["role"], "is_master": True}
+    user = auth_store.get_user_by_id(auth["officer_id"])
+    if not user:
+        raise HTTPException(status_code=404, detail="User profile not found.")
+    return {"officer_id": user["officer_id"], "display_name": user.get("display_name", user["officer_id"]), "phone": user.get("phone", ""), "email": user.get("email", ""), "role": user.get("role", "Operational Auditor"), "created_at": user.get("created_at"), "updated_at": user.get("updated_at"), "is_master": False}
+
+
+@app.patch("/api/auth/profile")
+def auth_update_profile(req: ProfileUpdateRequest, auth: Dict[str, Any] = Depends(require_auth)):
+    """Updates only the current user's permitted profile fields."""
+    if auth.get("role") == "Senior Operational Auditor":
+        raise HTTPException(status_code=403, detail="The provisioned master profile is managed by server configuration.")
+    try:
+        user = auth_store.update_user_profile(auth["officer_id"], req.display_name, req.phone, req.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not user:
+        raise HTTPException(status_code=404, detail="User profile not found.")
+    return {"success": True, "profile": {"officer_id": user["officer_id"], "display_name": user["display_name"], "phone": user.get("phone", ""), "email": user.get("email", ""), "role": user.get("role", "Operational Auditor"), "updated_at": user.get("updated_at")}}
+
+
+@app.post("/api/auth/password")
+def auth_change_password(req: PasswordChangeRequest, auth: Dict[str, Any] = Depends(require_auth)):
+    """Changes a normal user's password and invalidates sessions issued before the change."""
+    if auth.get("role") == "Senior Operational Auditor":
+        raise HTTPException(status_code=403, detail="The master password is managed by server configuration.")
+    try:
+        changed = auth_store.change_user_password(auth["officer_id"], req.current_password, req.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not changed:
+        raise HTTPException(status_code=401, detail="Current password is incorrect.")
+    return {"success": True, "session_invalidated": True, "message": "Password changed. Please sign in again."}
 
 
 @app.get("/api/auth/users")
@@ -1499,6 +1552,3 @@ if not static_dir.exists():
 if not config.IS_VERCEL and static_dir.exists():
     from starlette.staticfiles import StaticFiles
     app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
-
-
-

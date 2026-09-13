@@ -228,6 +228,35 @@ class AuthService {
     return null;
   }
 
+  public async getProfile(): Promise<UserProfile> {
+    const resp = await fetch(`${API_BASE}/api/auth/profile`, { headers: this.getAuthHeader() });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || 'Unable to load profile.');
+    const profile = data.profile || data;
+    const user: UserProfile = {
+      id: profile.officer_id, username: profile.officer_id, display_name: profile.display_name,
+      phone: profile.phone || '', email: profile.email || '', status: 'Active Sovereign Enclave',
+      role: profile.role || 'Operational Auditor', created_at: profile.created_at || Date.now(), updated_at: profile.updated_at,
+    };
+    this.currentUser = user;
+    try { sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user)); localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user)); } catch { /* non-blocking */ }
+    return user;
+  }
+
+  public async updateProfile(data: { display_name: string; phone: string; email: string }): Promise<UserProfile> {
+    const resp = await fetch(`${API_BASE}/api/auth/profile`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...this.getAuthHeader() }, body: JSON.stringify(data) });
+    const result = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(result.detail || 'Unable to save profile.');
+    return this.getProfile();
+  }
+
+  public async changePassword(current_password: string, new_password: string): Promise<void> {
+    const resp = await fetch(`${API_BASE}/api/auth/password`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...this.getAuthHeader() }, body: JSON.stringify({ current_password, new_password }) });
+    const result = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(result.detail || 'Unable to change password.');
+    this.clearSession();
+  }
+
   /**
    * Sign out and revoke active enclave session.
    */
