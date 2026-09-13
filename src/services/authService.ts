@@ -126,7 +126,7 @@ class AuthService {
   }
 
   public async getCaptcha(): Promise<{ challenge_id: string; image: string; expires_in: number }> {
-    const resp = await fetch(`${API_BASE}/api/auth/captcha`);
+    const resp = await fetch(`${API_BASE}/api/auth/captcha`, { cache: 'no-store' });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.detail || 'Unable to load CAPTCHA.');
     return data;
