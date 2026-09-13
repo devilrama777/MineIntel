@@ -14,13 +14,18 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { SystemHealthComponent } from '../../types';
+import { useAuth } from '../../context/AuthContext';
 
 interface SettingsViewProps {
   healthComponents: SystemHealthComponent[];
+  aiProvider?: string;
+  aiModel?: string;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents, aiProvider, aiModel }) => {
+  const { user, updateProfile, changePassword } = useAuth();
   const [activeTab, setActiveTab] = useState<
+    | 'Profile'
     | 'General'
     | 'AI Models'
     | 'Processing'
@@ -29,7 +34,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
     | 'Storage'
     | 'Security'
     | 'Performance'
-  >('AI Models');
+  >('Profile');
 
   const [savedNotice, setSavedNotice] = useState(false);
 
@@ -43,13 +48,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
   const [ocrDpi, setOcrDpi] = useState(300);
   const [vectorDimensions, setVectorDimensions] = useState(1024);
   const [strictAirgap, setStrictAirgap] = useState(true);
+  const [displayName, setDisplayName] = useState(user?.display_name || '');
+  const [phone, setPhone] = useState(user?.phone || '');
+  const [email, setEmail] = useState(user?.email || '');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [profileMessage, setProfileMessage] = useState('');
+  const [profileError, setProfileError] = useState('');
 
   const handleSave = () => {
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 2000);
   };
 
+  const saveProfile = async () => {
+    setProfileError('');
+    try { await updateProfile({ display_name: displayName, phone, email }); setProfileMessage('Profile saved successfully.'); }
+    catch (err: any) { setProfileError(err.message || 'Unable to save profile.'); }
+  };
+
+  const savePassword = async () => {
+    setProfileError('');
+    if (newPassword.length < 8) { setProfileError('New password must be at least 8 characters.'); return; }
+    try { await changePassword(currentPassword, newPassword); setProfileMessage('Password changed. Please sign in again.'); }
+    catch (err: any) { setProfileError(err.message || 'Unable to change password.'); }
+  };
+
   const tabs = [
+    { id: 'Profile', label: 'My Profile' },
     { id: 'General', label: 'General' },
     { id: 'AI Models', label: 'AI Engine & Models' },
     { id: 'Processing', label: 'Processing Pipelines' },
@@ -120,6 +146,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
 
         {/* Right Configuration Forms */}
         <div className="flex-1 bg-[#111722] border border-[#1e2a3b] rounded-md p-6 overflow-y-auto space-y-6 font-mono text-xs">
+          {activeTab === 'Profile' && (
+            <div className="space-y-5 max-w-2xl">
+              <div><h2 className="text-sm font-semibold text-slate-100 font-sans">Authenticated User Profile</h2><p className="text-xs text-slate-400 font-sans">Update permitted personal information. Officer ID is immutable.</p></div>
+              {profileMessage && <div className="text-xs text-emerald-400">{profileMessage}</div>}
+              {profileError && <div className="text-xs text-red-400">{profileError}</div>}
+              <label className="block text-slate-300">OFFICER ID<input value={user?.username || ''} readOnly className="mt-1 w-full bg-[#0e1521] border border-slate-700 rounded px-3 py-2 text-slate-500 cursor-not-allowed" /></label>
+              <label className="block text-slate-300">FULL NAME<input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className="mt-1 w-full bg-[#182333] border border-slate-700 rounded px-3 py-2 text-slate-100" /></label>
+              <label className="block text-slate-300">PHONE NUMBER<input value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-1 w-full bg-[#182333] border border-slate-700 rounded px-3 py-2 text-slate-100" /></label>
+              <label className="block text-slate-300">EMAIL ADDRESS<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full bg-[#182333] border border-slate-700 rounded px-3 py-2 text-slate-100" /></label>
+              <button type="button" onClick={saveProfile} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded text-xs">Save Profile</button>
+              <div className="border-t border-[#233145] pt-5 space-y-3"><h3 className="text-sm font-semibold text-slate-100 font-sans">Change Password</h3><p className="text-xs text-slate-400 font-sans">The current session is invalidated after a successful change.</p>
+                <input type="password" placeholder="Current password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className="w-full bg-[#182333] border border-slate-700 rounded px-3 py-2 text-slate-100" />
+                <input type="password" placeholder="New password (minimum 8 characters)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full bg-[#182333] border border-slate-700 rounded px-3 py-2 text-slate-100" />
+                <button type="button" onClick={savePassword} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded text-xs">Change Password</button>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'AI Models' && (
             <div className="space-y-4 max-w-2xl">
               <div>
@@ -146,16 +190,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 mb-1">SOVEREIGN AI MODEL (ENFORCED)</label>
-                  <select
-                    value={defaultModel}
-                    disabled
-                    className="w-full bg-[#182333] border border-slate-700 rounded px-3 py-1.5 text-slate-100 opacity-90 cursor-not-allowed"
-                  >
-                    <option value="openrouter/free">openrouter/free (Single Production Model)</option>
-                  </select>
-                  <span className="text-[10px] text-blue-400 font-mono mt-1 block">
-                    Strict single-model architecture enforced: OpenRouter (openrouter/free).
+                  <label className="block text-slate-300 mb-1">SOVEREIGN AI MODEL (CONFIGURED)</label>
+                  <div className="w-full bg-[#182333] border border-slate-700 rounded px-3 py-1.5 text-slate-100 font-mono flex items-center justify-between">
+                    <span className="font-semibold text-blue-400">{aiModel || defaultModel}</span>
+                    <span className="text-[10px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
+                      {(aiProvider || 'openrouter').toUpperCase()}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-cyan-400 font-mono mt-1 block">
+                    Active backend inference provider: {aiProvider || 'openrouter'} | Model: {aiModel || defaultModel}
                   </span>
                 </div>
 
@@ -270,7 +313,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents }) 
             </div>
           )}
 
-          {activeTab !== 'AI Models' && activeTab !== 'OCR' && activeTab !== 'Security' && (
+          {activeTab !== 'Profile' && activeTab !== 'AI Models' && activeTab !== 'OCR' && activeTab !== 'Security' && (
             <div className="space-y-4 max-w-2xl">
               <h2 className="text-sm font-semibold text-slate-100 font-sans mb-1">
                 {activeTab} Configurations

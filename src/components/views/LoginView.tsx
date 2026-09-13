@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Lock,
   User,
@@ -14,7 +14,8 @@ import {
   UserPlus,
   ChevronLeft,
   CheckCircle2,
-  ShieldAlert
+  ShieldAlert,
+  RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -30,6 +31,10 @@ export const LoginView: React.FC = () => {
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [captchaChallengeId, setCaptchaChallengeId] = useState('');
+  const [captchaImage, setCaptchaImage] = useState('');
+  const [captchaAnswer, setCaptchaAnswer] = useState('');
+  const [captchaLoading, setCaptchaLoading] = useState(false);
 
   // "Create New User" workflow state
   const [isCreateMode, setIsCreateMode] = useState<boolean>(false);
@@ -51,6 +56,22 @@ export const LoginView: React.FC = () => {
 
   const isUnreachable = authConfigStatus.reachable === false;
   const isUnconfigured = authConfigStatus.configured === false;
+
+  const refreshCaptcha = async () => {
+    setCaptchaLoading(true);
+    try {
+      const challenge = await authService.getCaptcha();
+      setCaptchaChallengeId(challenge.challenge_id);
+      setCaptchaImage(challenge.image);
+      setCaptchaAnswer('');
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Unable to load CAPTCHA challenge.');
+    } finally { setCaptchaLoading(false); }
+  };
+
+  useEffect(() => {
+    if (!isCreateMode) void refreshCaptcha();
+  }, [isCreateMode]);
 
   const resetCreateState = () => {
     setIsCreateMode(false);
@@ -77,15 +98,22 @@ export const LoginView: React.FC = () => {
       setErrorMessage('Please enter your password.');
       return;
     }
+    if (!captchaAnswer.trim()) {
+      setErrorMessage('Please enter the CAPTCHA code.');
+      return;
+    }
 
     setIsLoading(true);
     try {
       await login({
         username: cleanUsername,
         password: password.trim(),
+        captcha_challenge_id: captchaChallengeId,
+        captcha_answer: captchaAnswer,
       });
     } catch (err: any) {
       setErrorMessage(err.message || 'Authentication failed. Please verify your credentials.');
+      void refreshCaptcha();
     } finally {
       setIsLoading(false);
     }
@@ -303,6 +331,17 @@ export const LoginView: React.FC = () => {
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1.5">CAPTCHA CHALLENGE</label>
+                <div className="flex items-center gap-2">
+                  {captchaImage ? <img src={captchaImage} alt="CAPTCHA challenge" className="h-[52px] w-[166px] rounded border border-slate-600 bg-slate-100" /> : <div className="h-[52px] w-[166px] rounded border border-slate-700 flex items-center justify-center text-[10px] text-slate-500">Loading challenge…</div>}
+                  <button type="button" onClick={() => void refreshCaptcha()} disabled={captchaLoading || isLoading} aria-label="Refresh CAPTCHA" className="p-2 rounded border border-slate-700 text-slate-400 hover:text-blue-400 hover:border-blue-500 disabled:opacity-50">
+                    <RefreshCw className={`w-4 h-4 ${captchaLoading ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+                <input type="text" required maxLength={6} value={captchaAnswer} onChange={(e) => setCaptchaAnswer(e.target.value.slice(0, 6).toUpperCase())} placeholder="Enter the characters shown" disabled={isLoading || captchaLoading} autoComplete="off" aria-label="CAPTCHA input" className={`mt-2 w-full px-3 py-2 rounded-lg text-xs font-mono border transition outline-none focus:ring-2 focus:ring-blue-500/40 ${isLight ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white' : 'bg-[#182133] border-[#25324a] text-slate-100 focus:border-blue-500/60'}`} />
               </div>
 
               <button

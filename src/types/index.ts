@@ -1,7 +1,6 @@
 export type AppView =
   | 'dashboard'
   | 'new-report'
-  | 'data-sources'
   | 'processing-jobs'
   | 'evidence-search'
   | 'report-planner'
@@ -283,6 +282,8 @@ export interface UserProfile {
   display_name: string;
   status: string;
   role: string;
+  phone?: string;
+  email?: string;
   created_at: number;
   updated_at?: number;
   last_login_at?: number;
@@ -296,12 +297,15 @@ export interface AuthSession {
 export interface LoginCredentials {
   username: string;
   password: string;
+  captcha_challenge_id: string;
+  captcha_answer: string;
 }
 
 export interface FirstRunSetupData {
   username: string;
   display_name: string;
   password: string;
+  captcha_answer?: string;
 }
 
 export interface SetupStatus {
@@ -323,4 +327,3 @@ export interface AuthConfigStatus {
   reachable: boolean;
   message?: string;
 }
-

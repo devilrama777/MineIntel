@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 # Set up test environment with secure test-only credentials (NOT hardcoded production values)
@@ -20,6 +21,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from fastapi import HTTPException, UploadFile
 from backend import config
+from backend.services import captcha as captcha_service
 from backend.main import (
     app,
     auth_login,
@@ -59,6 +61,12 @@ from backend.services.llama_client import LlamaClient
 from backend.services.math_engine import MathEngine, safe_eval_expr
 from backend.services.pipeline import DocumentPipeline
 
+
+
+def make_login_request(officer_id, password):
+    with patch.object(captcha_service, "_secure_answer", return_value="AB12CD"):
+        challenge = captcha_service.create_challenge()
+    return LoginRequest(officer_id=officer_id, password=password, captcha_challenge_id=challenge["challenge_id"], captcha_answer="AB12CD")
 
 class TestRemediationSuite(unittest.TestCase):
     """
@@ -112,7 +120,7 @@ class TestRemediationSuite(unittest.TestCase):
         test_pwd = os.environ.get("MINEINTEL_AUTH_PASSWORD", "TestEnclaveSecret2026!")
 
         # 1. Valid login using environment credentials
-        req = LoginRequest(officer_id=test_officer, password=test_pwd)
+        req = make_login_request(test_officer, test_pwd)
         data = auth_login(req)
         self.assertTrue(data["success"])
         self.assertTrue(data["authenticated"])
@@ -125,7 +133,7 @@ class TestRemediationSuite(unittest.TestCase):
         self.assertEqual(verify_res["officer_id"], test_officer)
 
         # 3. Invalid credentials
-        bad_req = LoginRequest(officer_id=test_officer, password="WrongPassword!")
+        bad_req = make_login_request(test_officer, "WrongPassword!")
         with self.assertRaises(HTTPException) as ctx:
             auth_login(bad_req)
         self.assertEqual(ctx.exception.status_code, 401)

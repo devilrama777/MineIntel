@@ -4,12 +4,17 @@ Tests all logic directly via FastAPI app endpoints and auth_store functions.
 """
 import os
 import unittest
+from unittest.mock import patch
 
 # Ensure test credentials are active in environment matching test suite
-from backend import config
+# Ensure test credentials are active in environment matching test suite
+os.environ["MINEINTEL_OFFICER_ID"] = "MOC-TEST-OFFICER-7890"
+os.environ["MINEINTEL_AUTH_PASSWORD"] = "TestEnclaveSecret2026!"
 
-TEST_OFFICER_ID = config.get_auth_officer_id() or "MOC-TEST-OFFICER-7890"
-TEST_OFFICER_PW = config.get_auth_secret_password() or "TestEnclaveSecret2026!"
+TEST_OFFICER_ID = "MOC-TEST-OFFICER-7890"
+TEST_OFFICER_PW = "TestEnclaveSecret2026!"
+
+from backend import config
 
 from backend.main import (
     app,
@@ -21,7 +26,14 @@ from backend.main import (
     MasterUserActionRequest
 )
 from backend import auth_store
+from backend.services import captcha as captcha_service
 from fastapi import HTTPException
+
+
+def make_login_request(officer_id, password):
+    with patch.object(captcha_service, "_secure_answer", return_value="AB12CD"):
+        challenge = captcha_service.create_challenge()
+    return LoginRequest(officer_id=officer_id, password=password, captcha_challenge_id=challenge["challenge_id"], captcha_answer="AB12CD")
 
 class TestOptionBAuthentication(unittest.TestCase):
     @classmethod
@@ -35,7 +47,7 @@ class TestOptionBAuthentication(unittest.TestCase):
 
     def test_01_master_login(self):
         """Test Master credentials authenticate and return Senior Operational Auditor role."""
-        req = LoginRequest(officer_id=TEST_OFFICER_ID, password=TEST_OFFICER_PW)
+        req = make_login_request(TEST_OFFICER_ID, TEST_OFFICER_PW)
         resp = auth_login(req)
         self.assertTrue(resp["authenticated"])
         self.assertEqual(resp["role"], "Senior Operational Auditor")
@@ -73,7 +85,7 @@ class TestOptionBAuthentication(unittest.TestCase):
 
     def test_04_normal_user_login(self):
         """Test newly created normal user logs in successfully via common auth_login endpoint."""
-        req = LoginRequest(officer_id="field_auditor_1", password="auditor_pass_123")
+        req = make_login_request("field_auditor_1", "auditor_pass_123")
         resp = auth_login(req)
         self.assertTrue(resp["authenticated"])
         self.assertEqual(resp["officer_id"], "field_auditor_1")
@@ -85,13 +97,13 @@ class TestOptionBAuthentication(unittest.TestCase):
     def test_05_invalid_credentials_rejected(self):
         """Test login with wrong password for both master and normal user."""
         # Wrong master pass
-        req1 = LoginRequest(officer_id=TEST_OFFICER_ID, password="WrongPassword!")
+        req1 = make_login_request(TEST_OFFICER_ID, "WrongPassword!")
         with self.assertRaises(HTTPException) as ctx1:
             auth_login(req1)
         self.assertEqual(ctx1.exception.status_code, 401)
 
         # Wrong normal user pass
-        req2 = LoginRequest(officer_id="field_auditor_1", password="WrongPassword!")
+        req2 = make_login_request("field_auditor_1", "WrongPassword!")
         with self.assertRaises(HTTPException) as ctx2:
             auth_login(req2)
         self.assertEqual(ctx2.exception.status_code, 401)
@@ -109,7 +121,7 @@ class TestOptionBAuthentication(unittest.TestCase):
         self.assertTrue(resp_disable["success"])
 
         # Attempt login with disabled account
-        req_login = LoginRequest(officer_id="field_auditor_1", password="auditor_pass_123")
+        req_login = make_login_request("field_auditor_1", "auditor_pass_123")
         with self.assertRaises(HTTPException) as ctx_login:
             auth_login(req_login)
         self.assertEqual(ctx_login.exception.status_code, 403)
@@ -126,7 +138,7 @@ class TestOptionBAuthentication(unittest.TestCase):
         self.assertTrue(resp_enable["success"])
 
         # Confirm user can log in again
-        resp_login_again = auth_login(req_login)
+        resp_login_again = auth_login(make_login_request("field_auditor_1", "auditor_pass_123"))
         self.assertTrue(resp_login_again["authenticated"])
 
     def test_07_cold_start_persistence(self):

@@ -15,7 +15,7 @@ import requests
 
 logger = logging.getLogger("mineintel")
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -28,6 +28,7 @@ from backend.services.history_manager import get_history, record_report
 from backend.services.llama_client import LlamaClient
 from backend.services.math_engine import MathEngine
 from backend.services.pipeline import DocumentPipeline
+from backend.services.captcha import create_challenge, verify_challenge
 
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
@@ -62,6 +63,8 @@ document_generator = DocumentGenerator()
 class LoginRequest(BaseModel):
     officer_id: str
     password: str
+    captcha_challenge_id: str
+    captcha_answer: str
     remember_device: Optional[bool] = True
 
 
@@ -81,9 +84,20 @@ class MasterUserActionRequest(BaseModel):
     is_active: bool
 
 
+class ProfileUpdateRequest(BaseModel):
+    display_name: str
+    phone: str = ""
+    email: str = ""
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 def create_session_token(officer_id: str, role: str = "Senior Operational Auditor") -> str:
     """Creates a cryptographically signed session token with timestamp."""
-    timestamp = int(time.time())
+    timestamp = int(time.time() * 1000)
     payload = f"{officer_id}:{timestamp}:{role}"
     sig = hmac.new(config.JWT_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{payload}:{sig}"
@@ -97,7 +111,10 @@ def verify_session_token(token: str) -> Optional[Dict[str, Any]]:
             return None
         officer_id, timestamp_str, role, sig = parts
         timestamp = int(timestamp_str)
-        if time.time() - timestamp > 86400:  # 24 hours expiry
+        if (time.time() * 1000) - timestamp > 86400 * 1000:  # 24 hours expiry
+            return None
+        stored_user = auth_store.get_user_by_id(officer_id)
+        if stored_user and timestamp <= int(stored_user.get("session_invalidated_at", 0) or 0):
             return None
         payload = f"{officer_id}:{timestamp}:{role}"
         expected_sig = hmac.new(config.JWT_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -172,12 +189,35 @@ class GemmaRequest(BaseModel):
     model_override: Optional[str] = None
 
 
+class ReportExportRequest(BaseModel):
+    format: str = "pdf"
+    target_path: Optional[str] = None
+    report_title: Optional[str] = "MineIntel_Technical_Evaluation_ML-492"
+    report_data: Optional[Dict[str, Any]] = None
+
+
+class SystemOpenFileRequest(BaseModel):
+    path: str
+    reveal: bool = False
+
+
 # -------------------------------------------------------------------------
 # AUTHENTICATION ENDPOINTS
 # -------------------------------------------------------------------------
+@app.get("/api/auth/captcha")
+def auth_captcha(response: Response):
+    """Issues a short-lived, single-use login CAPTCHA challenge."""
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return create_challenge()
+
+
 @app.post("/api/auth/login")
 def auth_login(req: LoginRequest):
     """Authenticates executive master officers and registered members against secure credential store."""
+    if not req.captcha_challenge_id.strip() or not req.captcha_answer.strip() or not verify_challenge(req.captcha_challenge_id, req.captcha_answer):
+        raise HTTPException(status_code=400, detail="CAPTCHA is missing, incorrect, expired, or already used.")
     officer_id = req.officer_id.strip()
     password = req.password.strip()
 
@@ -328,6 +368,45 @@ def require_auth(
     if not session:
         raise HTTPException(status_code=401, detail="Session token invalid, tampered, or expired.")
     return session
+
+
+@app.get("/api/auth/profile")
+def auth_profile(auth: Dict[str, Any] = Depends(require_auth)):
+    """Returns the authenticated normal user's safe profile."""
+    if auth.get("role") == "Senior Operational Auditor":
+        return {"officer_id": auth["officer_id"], "display_name": "Executive Master Auditor", "phone": "", "email": "", "role": auth["role"], "is_master": True}
+    user = auth_store.get_user_by_id(auth["officer_id"])
+    if not user:
+        raise HTTPException(status_code=404, detail="User profile not found.")
+    return {"officer_id": user["officer_id"], "display_name": user.get("display_name", user["officer_id"]), "phone": user.get("phone", ""), "email": user.get("email", ""), "role": user.get("role", "Operational Auditor"), "created_at": user.get("created_at"), "updated_at": user.get("updated_at"), "is_master": False}
+
+
+@app.patch("/api/auth/profile")
+def auth_update_profile(req: ProfileUpdateRequest, auth: Dict[str, Any] = Depends(require_auth)):
+    """Updates only the current user's permitted profile fields."""
+    if auth.get("role") == "Senior Operational Auditor":
+        raise HTTPException(status_code=403, detail="The provisioned master profile is managed by server configuration.")
+    try:
+        user = auth_store.update_user_profile(auth["officer_id"], req.display_name, req.phone, req.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not user:
+        raise HTTPException(status_code=404, detail="User profile not found.")
+    return {"success": True, "profile": {"officer_id": user["officer_id"], "display_name": user["display_name"], "phone": user.get("phone", ""), "email": user.get("email", ""), "role": user.get("role", "Operational Auditor"), "updated_at": user.get("updated_at")}}
+
+
+@app.post("/api/auth/password")
+def auth_change_password(req: PasswordChangeRequest, auth: Dict[str, Any] = Depends(require_auth)):
+    """Changes a normal user's password and invalidates sessions issued before the change."""
+    if auth.get("role") == "Senior Operational Auditor":
+        raise HTTPException(status_code=403, detail="The master password is managed by server configuration.")
+    try:
+        changed = auth_store.change_user_password(auth["officer_id"], req.current_password, req.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not changed:
+        raise HTTPException(status_code=401, detail="Current password is incorrect.")
+    return {"success": True, "session_invalidated": True, "message": "Password changed. Please sign in again."}
 
 
 @app.get("/api/auth/users")
@@ -1175,6 +1254,57 @@ def download_report_format(fmt: str, template: Optional[str] = None, job_id: Opt
     )
 
 
+@app.post("/api/v1/reports/export")
+def export_report_v1(req: ReportExportRequest):
+    """Generates statutory report artifact for frontend export and returns download metadata."""
+    fmt = req.format.lower().lstrip(".")
+    if fmt == "word":
+        fmt = "docx"
+    if fmt not in ("pdf", "docx", "xlsx", "csv"):
+        fmt = "pdf"
+
+    title = req.report_title or "MineIntel_Technical_Evaluation_ML-492"
+
+    if fmt == "pdf":
+        gen_path = document_generator.generate_pdf_report(template_name="bento_grid")
+        filename = f"{title}.pdf"
+    elif fmt == "docx":
+        gen_path = document_generator.generate_docx_report(template_name="bento_grid")
+        filename = f"{title}.docx"
+    else:
+        gen_path = document_generator.generate_excel_workbook(template_name="bento_grid")
+        filename = f"{title}.xlsx"
+
+    saved_path = str(gen_path) if gen_path else ""
+    if req.target_path and gen_path and gen_path.exists():
+        try:
+            target = Path(req.target_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(gen_path, target)
+            saved_path = str(target)
+        except Exception:
+            pass
+
+    return {
+        "status": "success",
+        "filename": filename,
+        "saved_path": saved_path,
+        "download_url": f"/api/reports/download/{fmt}?template=bento_grid"
+    }
+
+
+@app.post("/api/v1/system/open-file")
+def system_open_file(req: SystemOpenFileRequest):
+    """Acknowledges system file inspection request safely."""
+    p = Path(req.path)
+    return {
+        "status": "success",
+        "path": str(p),
+        "exists": p.exists(),
+        "revealed": req.reveal
+    }
+
+
 @app.get("/api/reports/{job_id}")
 def get_report(job_id: str):
     """Retrieves all generated artifacts and reports for a given job."""
@@ -1436,6 +1566,3 @@ if not static_dir.exists():
 if not config.IS_VERCEL and static_dir.exists():
     from starlette.staticfiles import StaticFiles
     app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
-
-
-

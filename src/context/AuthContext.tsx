@@ -17,6 +17,9 @@ interface AuthContextType {
   logout: () => Promise<void>;
   checkSession: () => Promise<void>;
   refreshAuthConfig: () => Promise<AuthConfigStatus>;
+  refreshProfile: () => Promise<UserProfile>;
+  updateProfile: (data: { display_name: string; phone: string; email: string }) => Promise<UserProfile>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -96,7 +99,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await login({
       username: data.username,
       password: data.password,
+      captcha_challenge_id: '',
+      captcha_answer: '',
     });
+  };
+
+  const refreshProfile = async () => {
+    const profile = await authService.getProfile();
+    setUser(profile);
+    return profile;
+  };
+
+  const updateProfile = async (data: { display_name: string; phone: string; email: string }) => {
+    const profile = await authService.updateProfile(data);
+    setUser(profile);
+    return profile;
+  };
+
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    await authService.changePassword(currentPassword, newPassword);
+    setUser(null);
+    setSessionToken(null);
+    setAuthState('IDLE');
   };
 
   const logout = async () => {
@@ -120,6 +144,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         checkSession,
         refreshAuthConfig,
+        refreshProfile,
+        updateProfile,
+        changePassword,
       }}
     >
       {children}

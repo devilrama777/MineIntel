@@ -60,7 +60,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     { id: 'report-editor', label: 'Open Active Report Editor', icon: FileText, category: 'Navigation' },
     { id: 'report-planner', label: 'Inspect Report Structure Plan', icon: GitFork, category: 'Navigation' },
     { id: 'validation', label: 'Run Full Validation Audit', icon: CheckCircle2, category: 'Actions' },
-    { id: 'data-sources', label: 'Manage Local Data Repositories', icon: FolderArchive, category: 'Navigation' },
     { id: 'processing-jobs', label: 'Inspect Background OCR/Embedding Jobs', icon: Cpu, category: 'Navigation' },
     { id: 'security-audit', label: 'Review Tamper-Proof Audit Log', icon: ShieldCheck, category: 'Security' },
   ];
@@ -143,7 +142,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     key={doc.id}
                     type="button"
                     onClick={() => {
-                      onNavigate('data-sources');
+                      if (onSelectDataSource) {
+                        onSelectDataSource(doc);
+                      }
                       onClose();
                     }}
                     className="w-full flex items-center justify-between px-3 py-2 rounded hover:bg-slate-800 text-slate-300 transition text-left cursor-pointer"
