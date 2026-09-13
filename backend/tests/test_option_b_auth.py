@@ -7,10 +7,14 @@ import unittest
 from unittest.mock import patch
 
 # Ensure test credentials are active in environment matching test suite
-from backend import config
+# Ensure test credentials are active in environment matching test suite
+os.environ["MINEINTEL_OFFICER_ID"] = "MOC-TEST-OFFICER-7890"
+os.environ["MINEINTEL_AUTH_PASSWORD"] = "TestEnclaveSecret2026!"
 
-TEST_OFFICER_ID = config.get_auth_officer_id() or "MOC-TEST-OFFICER-7890"
-TEST_OFFICER_PW = config.get_auth_secret_password() or "TestEnclaveSecret2026!"
+TEST_OFFICER_ID = "MOC-TEST-OFFICER-7890"
+TEST_OFFICER_PW = "TestEnclaveSecret2026!"
+
+from backend import config
 
 from backend.main import (
     app,
