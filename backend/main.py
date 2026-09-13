@@ -194,6 +194,7 @@ class ReportExportRequest(BaseModel):
     target_path: Optional[str] = None
     report_title: Optional[str] = "MineIntel_Technical_Evaluation_ML-492"
     report_data: Optional[Dict[str, Any]] = None
+    job_id: Optional[str] = None
 
 
 class SystemOpenFileRequest(BaseModel):
@@ -1264,15 +1265,16 @@ def export_report_v1(req: ReportExportRequest):
         fmt = "pdf"
 
     title = req.report_title or "MineIntel_Technical_Evaluation_ML-492"
+    job_id = req.job_id.strip() if isinstance(req.job_id, str) and req.job_id.strip() else None
 
     if fmt == "pdf":
-        gen_path = document_generator.generate_pdf_report(template_name="bento_grid")
+        gen_path = document_generator.generate_pdf_report(template_name="bento_grid", job_id=job_id)
         filename = f"{title}.pdf"
     elif fmt == "docx":
-        gen_path = document_generator.generate_docx_report(template_name="bento_grid")
+        gen_path = document_generator.generate_docx_report(template_name="bento_grid", job_id=job_id)
         filename = f"{title}.docx"
     else:
-        gen_path = document_generator.generate_excel_workbook(template_name="bento_grid")
+        gen_path = document_generator.generate_excel_workbook(template_name="bento_grid", job_id=job_id)
         filename = f"{title}.xlsx"
 
     saved_path = str(gen_path) if gen_path else ""
@@ -1289,7 +1291,7 @@ def export_report_v1(req: ReportExportRequest):
         "status": "success",
         "filename": filename,
         "saved_path": saved_path,
-        "download_url": f"/api/reports/download/{fmt}?template=bento_grid"
+        "download_url": f"/api/reports/download/{fmt}?template=bento_grid" + (f"&job_id={job_id}" if job_id else "")
     }
 
 
