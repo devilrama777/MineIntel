@@ -7,7 +7,7 @@ import string
 import threading
 import time
 import uuid
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
