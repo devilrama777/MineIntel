@@ -58,6 +58,56 @@ def _render_png(answer: str) -> str:
     return "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
 
 
+def _pg_save_challenge(challenge_id: str, answer_hash: str, expires_at: float) -> None:
+    try:
+        from backend import config
+        if config.get_database_url():
+            from backend.auth_store import _get_pg_connection
+            with _get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS mineintel_captcha_challenges (
+                            challenge_id VARCHAR(64) PRIMARY KEY,
+                            answer_hash VARCHAR(64) NOT NULL,
+                            expires_at DOUBLE PRECISION NOT NULL,
+                            used BOOLEAN NOT NULL DEFAULT FALSE
+                        );
+                        UPDATE mineintel_captcha_challenges SET used = TRUE WHERE used = FALSE;
+                        INSERT INTO mineintel_captcha_challenges (challenge_id, answer_hash, expires_at, used)
+                        VALUES (%s, %s, %s, FALSE);
+                    """, (challenge_id, answer_hash, expires_at))
+                conn.commit()
+    except Exception:
+        pass
+
+
+def _pg_verify_challenge(challenge_id: str, answer: str) -> Optional[bool]:
+    try:
+        from backend import config
+        if config.get_database_url():
+            from backend.auth_store import _get_pg_connection
+            with _get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT answer_hash, expires_at, used 
+                        FROM mineintel_captcha_challenges 
+                        WHERE challenge_id = %s
+                    """, (challenge_id,))
+                    row = cur.fetchone()
+                    if not row:
+                        return None
+                    answer_hash, expires_at, used = row
+                    if used or time.time() > expires_at:
+                        return False
+                    cur.execute("UPDATE mineintel_captcha_challenges SET used = TRUE WHERE challenge_id = %s", (challenge_id,))
+                    conn.commit()
+                    candidate_hash = hashlib.sha256(answer.strip().upper().encode("utf-8")).hexdigest()
+                    return secrets.compare_digest(candidate_hash, answer_hash)
+    except Exception:
+        pass
+    return None
+
+
 def create_challenge() -> Dict[str, str | int]:
     """Creates a new challenge and invalidates the previously issued challenge."""
     answer = _secure_answer()
@@ -67,11 +117,17 @@ def create_challenge() -> Dict[str, str | int]:
     with _lock:
         _challenges.clear()
         _challenges[challenge_id] = (answer_hash, expires_at)
+    _pg_save_challenge(challenge_id, answer_hash, expires_at)
     return {"challenge_id": challenge_id, "image": _render_png(answer), "expires_in": CAPTCHA_TTL_SECONDS}
 
 
 def verify_challenge(challenge_id: str, answer: str) -> bool:
     """Atomically verifies, consumes, and invalidates one challenge."""
+    pg_res = _pg_verify_challenge(challenge_id, answer)
+    if pg_res is not None:
+        with _lock:
+            _challenges.pop(challenge_id, None)
+        return pg_res
     with _lock:
         record = _challenges.pop(challenge_id, None)
     if not record:
