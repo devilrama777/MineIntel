@@ -84,12 +84,20 @@ def _init_pg_schema() -> None:
                     CREATE TABLE IF NOT EXISTS mineintel_users (
                         officer_id VARCHAR(128) PRIMARY KEY,
                         display_name VARCHAR(255) NOT NULL,
+                        phone VARCHAR(64),
+                        email VARCHAR(320),
                         password_hash VARCHAR(255) NOT NULL,
                         salt VARCHAR(64) NOT NULL,
                         role VARCHAR(128) NOT NULL DEFAULT 'Operational Auditor',
                         is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                        created_at BIGINT NOT NULL
+                        created_at BIGINT NOT NULL,
+                        updated_at BIGINT,
+                        session_invalidated_at BIGINT
                     );
+                    ALTER TABLE mineintel_users ADD COLUMN IF NOT EXISTS phone VARCHAR(64);
+                    ALTER TABLE mineintel_users ADD COLUMN IF NOT EXISTS email VARCHAR(320);
+                    ALTER TABLE mineintel_users ADD COLUMN IF NOT EXISTS updated_at BIGINT;
+                    ALTER TABLE mineintel_users ADD COLUMN IF NOT EXISTS session_invalidated_at BIGINT;
                     CREATE INDEX IF NOT EXISTS idx_mineintel_users_lower_id 
                     ON mineintel_users (LOWER(officer_id));
                 """)
@@ -139,19 +147,23 @@ def load_users() -> Dict[str, Dict[str, Any]]:
             _init_pg_schema()
             with _get_pg_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT officer_id, display_name, password_hash, salt, role, is_active, created_at FROM mineintel_users")
+                    cur.execute("SELECT officer_id, display_name, phone, email, password_hash, salt, role, is_active, created_at, updated_at, session_invalidated_at FROM mineintel_users")
                     rows = cur.fetchall()
                     users = {}
                     for row in rows:
-                        oid, dname, phash, salt, role, active, created = row
+                        oid, dname, phone, email, phash, salt, role, active, created, updated, invalidated = row
                         users[oid.strip().lower()] = {
                             "officer_id": oid,
                             "display_name": dname,
+                            "phone": phone or "",
+                            "email": email or "",
                             "password_hash": phash,
                             "salt": salt,
                             "role": role,
                             "is_active": active,
-                            "created_at": created
+                            "created_at": created,
+                            "updated_at": updated or created,
+                            "session_invalidated_at": invalidated or 0
                         }
                     return users
         except Exception as e:
@@ -172,21 +184,25 @@ def get_user_by_id(officer_id: str) -> Optional[Dict[str, Any]]:
             with _get_pg_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT officer_id, display_name, password_hash, salt, role, is_active, created_at "
+                        "SELECT officer_id, display_name, phone, email, password_hash, salt, role, is_active, created_at, updated_at, session_invalidated_at "
                         "FROM mineintel_users WHERE LOWER(officer_id) = LOWER(%s) LIMIT 1",
                         (clean_id,)
                     )
                     row = cur.fetchone()
                     if row:
-                        oid, dname, phash, salt, role, active, created = row
+                        oid, dname, phone, email, phash, salt, role, active, created, updated, invalidated = row
                         return {
                             "officer_id": oid,
                             "display_name": dname,
+                            "phone": phone or "",
+                            "email": email or "",
                             "password_hash": phash,
                             "salt": salt,
                             "role": role,
                             "is_active": active,
-                            "created_at": created
+                            "created_at": created,
+                            "updated_at": updated or created,
+                            "session_invalidated_at": invalidated or 0
                         }
                     return None
         except Exception as e:
@@ -204,6 +220,8 @@ def get_all_users_safe() -> List[Dict[str, Any]]:
         safe_list.append({
             "officer_id": u["officer_id"],
             "display_name": u.get("display_name", u["officer_id"]),
+            "phone": u.get("phone", ""),
+            "email": u.get("email", ""),
             "role": u.get("role", "Operational Auditor"),
             "is_active": u.get("is_active", True),
             "created_at": u.get("created_at", int(time.time()))
@@ -215,7 +233,9 @@ def create_user(
     officer_id: str,
     password: str,
     display_name: Optional[str] = None,
-    role: str = "Operational Auditor"
+    role: str = "Operational Auditor",
+    phone: str = "",
+    email: str = ""
 ) -> Dict[str, Any]:
     """Creates a new normal user with salted PBKDF2 hash in PostgreSQL or local file."""
     clean_id = officer_id.strip()
@@ -244,14 +264,16 @@ def create_user(
             with _get_pg_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "INSERT INTO mineintel_users (officer_id, display_name, password_hash, salt, role, is_active, created_at) "
-                        "VALUES (%s, %s, %s, %s, %s, TRUE, %s)",
-                        (clean_id, display_val, pwd_hash, salt, role_val, created_ts)
+                        "INSERT INTO mineintel_users (officer_id, display_name, phone, email, password_hash, salt, role, is_active, created_at, updated_at, session_invalidated_at) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s, 0)",
+                        (clean_id, display_val, phone.strip(), email.strip(), pwd_hash, salt, role_val, created_ts, created_ts)
                     )
                 conn.commit()
             return {
                 "officer_id": clean_id,
                 "display_name": display_val,
+                "phone": phone.strip(),
+                "email": email.strip(),
                 "role": role_val,
                 "is_active": True,
                 "created_at": created_ts
@@ -265,11 +287,15 @@ def create_user(
     new_user = {
         "officer_id": clean_id,
         "display_name": display_val,
+        "phone": phone.strip(),
+        "email": email.strip(),
         "password_hash": pwd_hash,
         "salt": salt,
         "role": role_val,
         "is_active": True,
-        "created_at": created_ts
+        "created_at": created_ts,
+        "updated_at": created_ts,
+        "session_invalidated_at": 0
     }
     local_users[clean_id.lower()] = new_user
     _atomic_write_local_users(local_users)
@@ -279,7 +305,8 @@ def create_user(
         "display_name": new_user["display_name"],
         "role": new_user["role"],
         "is_active": new_user["is_active"],
-        "created_at": new_user["created_at"]
+        "created_at": new_user["created_at"],
+        "updated_at": new_user["updated_at"]
     }
 
 
@@ -311,6 +338,68 @@ def set_user_status(officer_id: str, is_active: bool) -> bool:
         return False
     local_users[key]["is_active"] = is_active
     _atomic_write_local_users(local_users)
+    return True
+
+
+def update_user_profile(officer_id: str, display_name: str, phone: str, email: str) -> Optional[Dict[str, Any]]:
+    """Updates only permitted profile fields for the identified normal user."""
+    clean_id = officer_id.strip()
+    display_val = display_name.strip()
+    if not clean_id or not display_val:
+        raise ValueError("Display name cannot be empty.")
+    updated_ts = int(time.time())
+    if is_postgres_configured():
+        try:
+            _init_pg_schema()
+            with _get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE mineintel_users SET display_name = %s, phone = %s, email = %s, updated_at = %s WHERE LOWER(officer_id) = LOWER(%s)",
+                        (display_val, phone.strip(), email.strip(), updated_ts, clean_id)
+                    )
+                    if cur.rowcount == 0:
+                        return None
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"PostgreSQL profile update failed: {e}")
+            raise RuntimeError("Database write error while updating profile.")
+    else:
+        local_users = _load_local_users()
+        key = clean_id.lower()
+        if key not in local_users:
+            return None
+        local_users[key].update({"display_name": display_val, "phone": phone.strip(), "email": email.strip(), "updated_at": updated_ts})
+        _atomic_write_local_users(local_users)
+    return get_user_by_id(clean_id)
+
+
+def change_user_password(officer_id: str, current_password: str, new_password: str) -> bool:
+    """Verifies and replaces a normal user's password, invalidating prior sessions."""
+    if len(new_password.strip()) < 8:
+        raise ValueError("New password must be at least 8 characters.")
+    user = get_user_by_id(officer_id)
+    if not user or not verify_password(current_password.strip(), user["password_hash"], user["salt"]):
+        return False
+    new_hash, new_salt = hash_password(new_password.strip())
+    invalidated_ts = int(time.time() * 1000)
+    if is_postgres_configured():
+        try:
+            _init_pg_schema()
+            with _get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE mineintel_users SET password_hash = %s, salt = %s, updated_at = %s, session_invalidated_at = %s WHERE LOWER(officer_id) = LOWER(%s)",
+                        (new_hash, new_salt, invalidated_ts, invalidated_ts, officer_id.strip())
+                    )
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"PostgreSQL password update failed: {e}")
+            raise RuntimeError("Database write error while changing password.")
+    else:
+        local_users = _load_local_users()
+        key = officer_id.strip().lower()
+        local_users[key].update({"password_hash": new_hash, "salt": new_salt, "updated_at": invalidated_ts, "session_invalidated_at": invalidated_ts})
+        _atomic_write_local_users(local_users)
     return True
 
 
