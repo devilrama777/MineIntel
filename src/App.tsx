@@ -42,7 +42,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { Loader2 } from 'lucide-react';
 
 function DesktopAppContent() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const [activeView, setActiveView] = useState<AppView>('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -410,6 +410,7 @@ function DesktopAppContent() {
               <NewReportWorkflowView
                 dataSources={dataSources}
                 previousReports={reports}
+                userName={user?.display_name || user?.username || 'Authorized Officer'}
                 onCreateReport={handleCreateReport}
                 onCancel={() => handleNavigate('dashboard')}
                 aiProvider={aiProvider}
