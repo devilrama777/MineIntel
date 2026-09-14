@@ -213,7 +213,7 @@ export const MineIntelLogo: React.FC<MineIntelLogoProps> = ({
           <span className="text-slate-900 dark:text-white transition-colors">
             Mine
           </span>
-          <span className="bg-gradient-to-r from-amber-400 via-amber-500 to-orange-500 bg-clip-text text-transparent">
+          <span className="bg-gradient-to-r from-amber-500 via-amber-600 to-orange-600 dark:from-amber-400 dark:via-amber-500 dark:to-orange-500 bg-clip-text text-transparent">
             Intel
           </span>
         </span>

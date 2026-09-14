@@ -141,8 +141,8 @@ export const LoginView: React.FC = () => {
 
   const fieldClass = `w-full rounded-xl border px-4 py-3 text-sm font-medium outline-none transition focus:ring-2 focus:ring-blue-500/25 ${
     isLight
-      ? 'border-slate-300 bg-white text-slate-900 placeholder:text-slate-400'
-      : 'border-slate-800 bg-[#0c1424] text-slate-100 placeholder:text-slate-500'
+      ? 'border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-500 shadow-xs'
+      : 'border-slate-800 bg-[#0c1424] text-slate-100 placeholder:text-slate-500 focus:border-blue-500/60'
   }`;
 
   return (
@@ -167,7 +167,7 @@ export const LoginView: React.FC = () => {
           onClick={toggleTheme}
           title={isLight ? 'Switch to Dark mode' : 'Switch to Light mode'}
           aria-label={isLight ? 'Switch to Dark mode' : 'Switch to Light mode'}
-          className="rounded-2xl border border-slate-200 bg-white/80 p-2.5 text-slate-600 shadow-sm backdrop-blur-md transition hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:text-cyan-400"
+          className="rounded-2xl border border-slate-300/80 bg-white/90 p-2.5 text-slate-700 shadow-sm backdrop-blur-md transition hover:border-blue-400 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:text-cyan-400"
         >
           {isLight ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4 text-amber-400" />}
         </button>
@@ -176,41 +176,41 @@ export const LoginView: React.FC = () => {
       <main className="relative z-10 flex flex-1 items-center justify-center px-4 py-8 sm:py-10">
         <div className="w-full max-w-[460px] animate-fadeIn">
           <div className="group relative">
-            <div className="absolute -inset-0.5 rounded-3xl bg-gradient-to-r from-cyan-500/30 via-blue-500/20 to-amber-500/30 opacity-70 blur-sm transition-opacity duration-500 group-hover:opacity-100" />
-            <div className="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white/95 p-7 shadow-2xl shadow-slate-900/10 backdrop-blur-xl dark:border-slate-800/80 dark:bg-[#0c1424]/95 dark:shadow-black/70 sm:p-9">
+            <div className="absolute -inset-0.5 rounded-3xl bg-gradient-to-r from-cyan-500/30 via-blue-500/20 to-amber-500/30 opacity-60 dark:opacity-70 blur-sm transition-opacity duration-500 group-hover:opacity-100" />
+            <div className="relative overflow-hidden rounded-3xl border border-slate-200/90 bg-white/95 p-7 shadow-xl shadow-slate-900/5 backdrop-blur-xl dark:border-slate-800/80 dark:bg-[#0c1424]/95 dark:shadow-2xl dark:shadow-black/70 sm:p-9">
               {isLoading && <div className="animate-auth-progress absolute left-0 right-0 top-0 z-20 h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-400" role="progressbar" aria-label="Authenticating credentials" aria-busy="true" />}
 
               <div className="mb-6 flex items-start justify-between gap-3">
                 <div>
                   <div className="mb-1.5 flex items-center gap-3">
-                    {isCreateMode ? <UserPlus className="h-5 w-5 text-blue-500 dark:text-cyan-400" /> : <KeyRound className="h-5 w-5 text-blue-500 dark:text-cyan-400" />}
-                    <h1 className="text-xl font-bold tracking-tight sm:text-2xl">{isCreateMode ? 'Create New User' : 'Sign In to MineIntel'}</h1>
+                    {isCreateMode ? <UserPlus className="h-5 w-5 text-blue-600 dark:text-cyan-400" /> : <KeyRound className="h-5 w-5 text-blue-600 dark:text-cyan-400" />}
+                    <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-2xl">{isCreateMode ? 'Create New User' : 'Sign In to MineIntel'}</h1>
                   </div>
-                  <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400 sm:text-sm">
+                  <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400 sm:text-sm">
                     {isCreateMode
                       ? createStep === 'master_auth' ? 'Master Officer authorization is required to provision a new account.' : 'Specify account parameters and access role for the new member.'
                       : 'Enter your authorized credentials to access the MineIntel report generator.'}
                   </p>
                 </div>
                 {isCreateMode && (
-                  <button type="button" onClick={resetCreateState} className="inline-flex shrink-0 items-center gap-1 text-xs text-slate-500 transition hover:text-blue-500 dark:text-slate-400 dark:hover:text-cyan-400">
+                  <button type="button" onClick={resetCreateState} className="inline-flex shrink-0 items-center gap-1 text-xs text-slate-600 transition hover:text-blue-600 dark:text-slate-400 dark:hover:text-cyan-400">
                     <ChevronLeft className="h-3.5 w-3.5" /> Back
                   </button>
                 )}
               </div>
 
               {isUnreachable && (
-                <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3.5 text-xs text-rose-500 animate-fadeIn" role="alert">
+                <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3.5 text-xs text-rose-700 dark:text-rose-400 animate-fadeIn" role="alert">
                   <WifiOff className="mt-0.5 h-4 w-4 shrink-0" /><span>Unable to connect to the MineIntel backend server.</span>
                 </div>
               )}
               {createSuccessMsg && (
-                <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-500 animate-fadeIn" role="status">
+                <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-700 dark:text-emerald-400 animate-fadeIn" role="status">
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span>{createSuccessMsg}</span>
                 </div>
               )}
               {errorMessage && (
-                <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-xs text-red-500 animate-fadeIn" role="alert">
+                <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-xs text-red-700 dark:text-red-400 animate-fadeIn" role="alert">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{errorMessage}</span>
                 </div>
               )}
@@ -222,13 +222,21 @@ export const LoginView: React.FC = () => {
 
                   <div className="space-y-2 pt-1" id="captcha-challenge-section">
                     <div className="flex items-center justify-between">
-                      <label htmlFor="captcha-input" className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">CAPTCHA Challenge</label>
-                      <button type="button" onClick={() => void refreshCaptcha()} disabled={captchaLoading || isLoading} aria-label="Refresh CAPTCHA" className="rounded-lg p-1.5 text-slate-400 transition hover:text-blue-500 disabled:opacity-50 dark:hover:text-cyan-400"><RefreshCw className={`h-4 w-4 ${captchaLoading ? 'animate-spin' : ''}`} /></button>
+                      <label htmlFor="captcha-input" className="text-xs font-semibold uppercase tracking-wider text-slate-800 dark:text-slate-200">CAPTCHA Challenge</label>
+                      <button type="button" onClick={() => void refreshCaptcha()} disabled={captchaLoading || isLoading} aria-label="Refresh CAPTCHA" className="rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-blue-600 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-cyan-400"><RefreshCw className={`h-4 w-4 ${captchaLoading ? 'animate-spin' : ''}`} /></button>
                     </div>
-                    <div className="overflow-hidden rounded-xl border border-slate-300 bg-slate-100 dark:border-slate-800 dark:bg-slate-900/90">
-                      {captchaImage ? <img src={captchaImage} alt="CAPTCHA challenge" className="h-14 w-full object-cover" /> : <div className="flex h-14 items-center justify-center text-xs text-slate-500">Loading challenge…</div>}
+                    <div className="flex h-14 w-full items-center justify-center overflow-hidden rounded-xl border border-slate-300 bg-slate-100/90 shadow-inner dark:border-slate-800 dark:bg-slate-900/90">
+                      {captchaImage ? (
+                        <img
+                          src={captchaImage}
+                          alt="CAPTCHA challenge"
+                          className="h-8 max-w-[60%] object-contain select-none transition-transform duration-200"
+                        />
+                      ) : (
+                        <div className="flex h-14 items-center justify-center text-xs text-slate-500 dark:text-slate-400">Loading challenge…</div>
+                      )}
                     </div>
-                    <input id="captcha-input" type="text" required maxLength={6} value={captchaAnswer} onChange={(e) => setCaptchaAnswer(e.target.value.toUpperCase().slice(0, 6))} placeholder="Enter the 6 characters shown" disabled={isLoading || captchaLoading} autoComplete="off" spellCheck={false} aria-label="CAPTCHA input" className={`${fieldClass} font-mono uppercase tracking-[0.35em]`} />
+                    <input id="captcha-input" type="text" required maxLength={6} value={captchaAnswer} onChange={(e) => setCaptchaAnswer(e.target.value.toUpperCase().slice(0, 6))} placeholder="Enter the 6 characters shown" disabled={isLoading || captchaLoading} autoComplete="off" spellCheck={false} aria-label="CAPTCHA input" className={`${fieldClass} font-mono uppercase tracking-[0.3em] text-center`} />
                   </div>
 
                   <button type="submit" disabled={isLoading || isUnreachable} className="group relative mt-2 flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-blue-600 via-blue-600 to-cyan-600 text-sm font-semibold text-white shadow-lg shadow-blue-600/25 transition-all hover:from-blue-500 hover:to-cyan-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70">
@@ -240,7 +248,7 @@ export const LoginView: React.FC = () => {
 
               {isCreateMode && createStep === 'master_auth' && (
                 <form onSubmit={handleMasterAuthStep} className="space-y-4" id="master-auth-form">
-                  <div className="flex items-start gap-2.5 rounded-xl border border-blue-500/20 bg-blue-500/10 p-3.5 text-xs text-blue-500 dark:text-cyan-400"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" /><span>Only authorized Master Officers can provision new accounts.</span></div>
+                  <div className="flex items-start gap-2.5 rounded-xl border border-blue-500/20 bg-blue-500/10 p-3.5 text-xs text-blue-700 dark:text-cyan-400"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" /><span>Only authorized Master Officers can provision new accounts.</span></div>
                   <AuthInput id="master-officer-id" label="Master Officer ID" value={masterOfficerId} onChange={(e) => setMasterOfficerId(e.target.value)} placeholder="Enter Master Officer ID" icon={<User className="h-4 w-4" />} autoFocus required />
                   <AuthInput id="master-password" label="Master Enclave Password" type="password" value={masterPassword} onChange={(e) => setMasterPassword(e.target.value)} placeholder="Enter Master Password" icon={<Lock className="h-4 w-4" />} required />
                   <button type="submit" className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:from-blue-500 hover:to-cyan-500">Authorize &amp; Proceed <ArrowRight className="h-4 w-4" /></button>
@@ -252,12 +260,12 @@ export const LoginView: React.FC = () => {
                   <AuthInput id="new-officer-id" label="New Officer ID / Username" value={newOfficerId} onChange={(e) => setNewOfficerId(e.target.value)} placeholder="e.g. analyst_roy or MOC-1042" required />
                   <AuthInput id="new-display-name" label="Full Display Name (Optional)" value={newDisplayName} onChange={(e) => setNewDisplayName(e.target.value)} placeholder="e.g. Inspector R. Sharma" />
                   <AuthInput id="new-member-password" label="Initial Password" type="password" value={newMemberPassword} onChange={(e) => setNewMemberPassword(e.target.value)} placeholder="Minimum 4 characters" required />
-                  <div className="space-y-1.5"><label htmlFor="new-role" className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">Assigned Enclave Role</label><select id="new-role" value={newRole} onChange={(e) => setNewRole(e.target.value)} className={fieldClass}><option value="Operational Auditor">Operational Auditor (Standard)</option><option value="Senior Compliance Analyst">Senior Compliance Analyst</option><option value="Field Inspector">Field Inspector</option><option value="Enclave Viewer">Enclave Viewer</option></select></div>
-                  <div className="flex gap-3 pt-2"><button type="button" onClick={() => setCreateStep('master_auth')} disabled={isLoading} className="h-12 w-1/3 rounded-xl border border-slate-300 text-sm font-medium text-slate-500 transition hover:border-blue-400 dark:border-slate-700 dark:text-slate-300">Back</button><button type="submit" disabled={isLoading} className="flex h-12 w-2/3 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:from-blue-500 hover:to-cyan-500 disabled:opacity-60">{isLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating...</> : <>Provision Account <CheckCircle2 className="h-4 w-4" /></>}</button></div>
+                  <div className="space-y-1.5"><label htmlFor="new-role" className="text-xs font-semibold uppercase tracking-wider text-slate-800 dark:text-slate-200">Assigned Enclave Role</label><select id="new-role" value={newRole} onChange={(e) => setNewRole(e.target.value)} className={fieldClass}><option value="Operational Auditor">Operational Auditor (Standard)</option><option value="Senior Compliance Analyst">Senior Compliance Analyst</option><option value="Field Inspector">Field Inspector</option><option value="Enclave Viewer">Enclave Viewer</option></select></div>
+                  <div className="flex gap-3 pt-2"><button type="button" onClick={() => setCreateStep('master_auth')} disabled={isLoading} className="h-12 w-1/3 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:border-slate-400 dark:border-slate-700 dark:bg-transparent dark:text-slate-300 dark:hover:bg-slate-800/50">Back</button><button type="submit" disabled={isLoading} className="flex h-12 w-2/3 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:from-blue-500 hover:to-cyan-500 disabled:opacity-60">{isLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating...</> : <>Provision Account <CheckCircle2 className="h-4 w-4" /></>}</button></div>
                 </form>
               )}
 
-              {!isCreateMode && <div className="pt-2 text-center"><button type="button" onClick={() => { setIsCreateMode(true); setCreateSuccessMsg(null); setErrorMessage(null); }} className="group inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-blue-500/10 hover:text-blue-500 dark:text-slate-400 dark:hover:text-cyan-400">Create New User <Sparkles className="h-3.5 w-3.5 text-blue-500 transition group-hover:rotate-12 dark:text-cyan-400" /></button></div>}
+              {!isCreateMode && <div className="pt-2 text-center"><button type="button" onClick={() => { setIsCreateMode(true); setCreateSuccessMsg(null); setErrorMessage(null); }} className="group inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-blue-500/10 hover:text-blue-600 dark:text-slate-400 dark:hover:text-cyan-400">Create New User <Sparkles className="h-3.5 w-3.5 text-blue-600 transition group-hover:rotate-12 dark:text-cyan-400" /></button></div>}
             </div>
           </div>
         </div>

@@ -58,7 +58,7 @@ export const AuthInput: React.FC<AuthInputProps> = ({
       <div className="flex items-center justify-between">
         <label
           htmlFor={id}
-          className="text-xs font-semibold tracking-wider text-slate-700 dark:text-slate-300 uppercase select-none flex items-center gap-1.5"
+          className="text-xs font-semibold tracking-wider text-slate-800 dark:text-slate-200 uppercase select-none flex items-center gap-1.5"
         >
           {label}
         </label>
@@ -88,7 +88,7 @@ export const AuthInput: React.FC<AuthInputProps> = ({
             error
               ? 'bg-red-500 shadow-md shadow-red-500/10'
               : isFocused
-              ? 'bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-500 dark:from-cyan-400 dark:via-blue-500 dark:to-amber-400 animate-border-gradient shadow-md shadow-blue-500/20'
+              ? 'bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 dark:from-cyan-400 dark:via-blue-500 dark:to-amber-400 animate-border-gradient shadow-md shadow-blue-500/20'
               : 'bg-slate-300 dark:bg-slate-800 hover:bg-slate-400 dark:hover:bg-slate-700'
           }`}
         >
@@ -99,7 +99,7 @@ export const AuthInput: React.FC<AuthInputProps> = ({
               className={`absolute left-3.5 top-1/2 -translate-y-1/2 transition-colors duration-200 pointer-events-none ${
                 isFocused
                   ? 'text-blue-600 dark:text-cyan-400'
-                  : 'text-slate-400 dark:text-slate-500'
+                  : 'text-slate-500 dark:text-slate-400'
               }`}
             >
               {icon}
@@ -133,7 +133,7 @@ export const AuthInput: React.FC<AuthInputProps> = ({
                 onClick={() => setShowPassword((prev) => !prev)}
                 onMouseDown={(e) => e.preventDefault()}
                 id={`toggle-password-${id}`}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60 focus:outline-none focus:text-blue-600 dark:focus:text-cyan-400 transition-colors cursor-pointer"
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60 focus:outline-none focus:text-blue-600 dark:focus:text-cyan-400 transition-colors cursor-pointer"
                 title={showPassword ? 'Hide password' : 'Show password'}
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
                 tabIndex={-1}
