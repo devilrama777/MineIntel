@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   Lock,
   User,
-  ShieldCheck,
   AlertCircle,
   AlertTriangle,
   Loader2,
@@ -180,23 +179,17 @@ export const LoginView: React.FC = () => {
       <div className="pt-8 pb-4 flex flex-col items-center justify-center">
         <div className="flex items-center gap-3">
           <div
-            className={`w-11 h-11 rounded-xl flex items-center justify-center p-1.5 shadow-lg border ${
+            className={`w-12 h-12 rounded-xl flex items-center justify-center p-1.5 shadow-lg border ${
               isLight
                 ? 'bg-white border-slate-200 shadow-slate-200/50'
                 : 'bg-[#111726] border-[#233145] shadow-black/40'
             }`}
           >
-            <img src="/logo.png" alt="MineIntel" className="w-8 h-8 object-contain" />
+            <img src="/logo.png" alt="MineIntel" className="w-9 h-9 object-contain" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xl font-bold tracking-tight">MineIntel</span>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-blue-500/10 text-blue-500 border border-blue-500/20">
-                ENTERPRISE ENCLAVE
-              </span>
-            </div>
-            <div className="text-[11px] text-slate-400 font-mono">
-              Enterprise Statutory Report Intelligence
+              <span className="text-2xl font-bold tracking-tight">MineIntel</span>
             </div>
           </div>
         </div>
@@ -571,17 +564,6 @@ export const LoginView: React.FC = () => {
         </div>
       </div>
 
-      {/* Footer Security Badges */}
-      <div className="py-4 text-center text-[11px] text-slate-500 font-mono flex items-center justify-center gap-6">
-        <span className="flex items-center gap-1.5">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-          PBKDF2-HMAC-SHA256 Encrypted Session
-        </span>
-        <span>•</span>
-        <span>Sovereign Enclave Active</span>
-        <span>•</span>
-        <span>Statutory Intelligence Engine</span>
-      </div>
     </div>
   );
 };
