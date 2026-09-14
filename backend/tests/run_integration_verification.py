@@ -14,7 +14,7 @@ os.environ["MINEINTEL_OFFICER_ID"] = "MOC-TEST-INTEGRATION-99"
 os.environ["MINEINTEL_AUTH_PASSWORD"] = "IntegrationSecret2026!"
 os.environ["MINEINTEL_JWT_SECRET"] = "integration-jwt-secret-2026"
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from backend.main import (
     health_check,
     auth_captcha,
@@ -44,13 +44,13 @@ def run_integration_verification():
     print(f"PASS: health_check returned provider='{h_data.get('ai_provider')}', model='{h_data.get('cloud_model')}'")
 
     # 2. CAPTCHA generation
-    c1_data = auth_captcha()
+    c1_data = auth_captcha(Response())
     assert "challenge_id" in c1_data and "image" in c1_data
     c1_id = c1_data["challenge_id"]
     print(f"PASS: CAPTCHA 1 generated challenge_id={c1_id}")
 
     # 3. CAPTCHA refresh
-    c2_data = auth_captcha()
+    c2_data = auth_captcha(Response())
     c2_id = c2_data["challenge_id"]
     assert c1_id != c2_id, "Refreshed captcha returned identical challenge ID"
     print(f"PASS: CAPTCHA refresh generated new challenge_id={c2_id}")

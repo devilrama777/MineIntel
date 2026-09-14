@@ -3,58 +3,51 @@ import {
   Lock,
   User,
   AlertCircle,
-  AlertTriangle,
   Loader2,
   ArrowRight,
   KeyRound,
-  Eye,
-  EyeOff,
   WifiOff,
   UserPlus,
   ChevronLeft,
   CheckCircle2,
   ShieldAlert,
-  RefreshCw
+  RefreshCw,
+  Sun,
+  Moon,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { authService } from '../../services/authService';
+import { MineIntelLogo } from '../auth/MineIntelLogo';
+import { AuthInput } from '../auth/AuthInput';
+import { ParticleBackground } from '../auth/ParticleBackground';
+import { AnimatedCursor } from '../auth/AnimatedCursor';
 
 export const LoginView: React.FC = () => {
-  const { isLight } = useTheme();
+  const { isLight, toggleTheme } = useTheme();
   const { authConfigStatus, login } = useAuth();
 
-  // Login form state
-  const [username, setUsername] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
-  const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [captchaChallengeId, setCaptchaChallengeId] = useState('');
   const [captchaImage, setCaptchaImage] = useState('');
   const [captchaAnswer, setCaptchaAnswer] = useState('');
   const [captchaLoading, setCaptchaLoading] = useState(false);
 
-  // "Create New User" workflow state
-  const [isCreateMode, setIsCreateMode] = useState<boolean>(false);
+  const [isCreateMode, setIsCreateMode] = useState(false);
   const [createStep, setCreateStep] = useState<'master_auth' | 'user_details'>('master_auth');
-  
-  // Master credentials for authorization
-  const [masterOfficerId, setMasterOfficerId] = useState<string>('');
-  const [masterPassword, setMasterPassword] = useState<string>('');
-  const [showMasterPassword, setShowMasterPassword] = useState<boolean>(false);
-
-  // New member fields
-  const [newOfficerId, setNewOfficerId] = useState<string>('');
-  const [newDisplayName, setNewDisplayName] = useState<string>('');
-  const [newMemberPassword, setNewMemberPassword] = useState<string>('');
-  const [showMemberPassword, setShowMemberPassword] = useState<boolean>(false);
-  const [newRole, setNewRole] = useState<string>('Operational Auditor');
-
+  const [masterOfficerId, setMasterOfficerId] = useState('');
+  const [masterPassword, setMasterPassword] = useState('');
+  const [newOfficerId, setNewOfficerId] = useState('');
+  const [newDisplayName, setNewDisplayName] = useState('');
+  const [newMemberPassword, setNewMemberPassword] = useState('');
+  const [newRole, setNewRole] = useState('Operational Auditor');
   const [createSuccessMsg, setCreateSuccessMsg] = useState<string | null>(null);
 
-  const isUnreachable = authConfigStatus.reachable === false;
-  const isUnconfigured = authConfigStatus.configured === false;
+  const isUnreachable = authConfigStatus?.reachable === false;
 
   const refreshCaptcha = async () => {
     setCaptchaLoading(true);
@@ -65,7 +58,9 @@ export const LoginView: React.FC = () => {
       setCaptchaAnswer('');
     } catch (err: any) {
       setErrorMessage(err.message || 'Unable to load CAPTCHA challenge.');
-    } finally { setCaptchaLoading(false); }
+    } finally {
+      setCaptchaLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -87,20 +82,11 @@ export const LoginView: React.FC = () => {
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-
     const cleanUsername = username.trim();
-    if (!cleanUsername) {
-      setErrorMessage('Please enter Officer ID / Username.');
-      return;
-    }
-    if (!password) {
-      setErrorMessage('Please enter your password.');
-      return;
-    }
-    if (!captchaAnswer.trim()) {
-      setErrorMessage('Please enter the CAPTCHA code.');
-      return;
-    }
+    if (!cleanUsername) return setErrorMessage('Please enter Officer ID / Username.');
+    if (!password) return setErrorMessage('Please enter your password.');
+    if (!captchaAnswer.trim()) return setErrorMessage('Please enter the CAPTCHA code.');
+    if (!captchaChallengeId) return setErrorMessage('CAPTCHA is still loading. Please try again.');
 
     setIsLoading(true);
     try {
@@ -108,7 +94,7 @@ export const LoginView: React.FC = () => {
         username: cleanUsername,
         password: password.trim(),
         captcha_challenge_id: captchaChallengeId,
-        captcha_answer: captchaAnswer,
+        captcha_answer: captchaAnswer.slice(0, 6).toUpperCase(),
       });
     } catch (err: any) {
       setErrorMessage(err.message || 'Authentication failed. Please verify your credentials.');
@@ -121,30 +107,16 @@ export const LoginView: React.FC = () => {
   const handleMasterAuthStep = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-    if (!masterOfficerId.trim()) {
-      setErrorMessage('Please enter the Master Officer ID.');
-      return;
-    }
-    if (!masterPassword.trim()) {
-      setErrorMessage('Please enter the Master Enclave Password.');
-      return;
-    }
-    // Proceed to details step where master credentials will be transmitted together securely
+    if (!masterOfficerId.trim()) return setErrorMessage('Please enter the Master Officer ID.');
+    if (!masterPassword.trim()) return setErrorMessage('Please enter the Master Enclave Password.');
     setCreateStep('user_details');
   };
 
   const handleCreateUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-
-    if (!newOfficerId.trim()) {
-      setErrorMessage('Please enter Member Officer ID / Username.');
-      return;
-    }
-    if (newMemberPassword.trim().length < 4) {
-      setErrorMessage('Member password must be at least 4 characters.');
-      return;
-    }
+    if (!newOfficerId.trim()) return setErrorMessage('Please enter Member Officer ID / Username.');
+    if (newMemberPassword.trim().length < 4) return setErrorMessage('Member password must be at least 4 characters.');
 
     setIsLoading(true);
     try {
@@ -156,9 +128,7 @@ export const LoginView: React.FC = () => {
         display_name: newDisplayName.trim() || newOfficerId.trim(),
         role: newRole,
       });
-
       setCreateSuccessMsg(res.message || `Member '${newOfficerId}' successfully created.`);
-      // Pre-fill login username
       setUsername(newOfficerId.trim());
       setPassword('');
       resetCreateState();
@@ -169,401 +139,130 @@ export const LoginView: React.FC = () => {
     }
   };
 
+  const fieldClass = `w-full rounded-xl border px-4 py-3 text-sm font-medium outline-none transition focus:ring-2 focus:ring-blue-500/25 ${
+    isLight
+      ? 'border-slate-300 bg-white text-slate-900 placeholder:text-slate-400'
+      : 'border-slate-800 bg-[#0c1424] text-slate-100 placeholder:text-slate-500'
+  }`;
+
   return (
     <div
-      className={`min-h-screen w-full flex flex-col justify-between select-none transition-colors ${
-        isLight ? 'bg-slate-100 text-slate-800' : 'bg-[#0a0e17] text-slate-100'
+      id="mineintel-login-page"
+      className={`relative flex min-h-screen w-full flex-col overflow-hidden transition-colors duration-500 ${
+        isLight ? 'bg-slate-50 text-slate-900' : 'bg-[#060a12] text-slate-100'
       }`}
     >
-      {/* Top Brand Banner */}
-      <div className="pt-8 pb-4 flex flex-col items-center justify-center">
-        <div className="flex items-center gap-3">
-          <div
-            className={`w-12 h-12 rounded-xl flex items-center justify-center p-1.5 shadow-lg border ${
-              isLight
-                ? 'bg-white border-slate-200 shadow-slate-200/50'
-                : 'bg-[#111726] border-[#233145] shadow-black/40'
-            }`}
-          >
-            <img src="/logo.png" alt="MineIntel" className="w-9 h-9 object-contain" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-2xl font-bold tracking-tight">MineIntel</span>
-            </div>
-          </div>
-        </div>
+      <AnimatedCursor isDark={!isLight} />
+      <ParticleBackground isDark={!isLight} />
+      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+        <div className="animate-float-slow absolute -left-20 -top-32 h-[550px] w-[550px] rounded-full bg-gradient-to-br from-cyan-500/15 to-blue-600/10 blur-3xl" />
+        <div className="animate-float-reverse absolute -bottom-32 -right-20 h-[500px] w-[500px] rounded-full bg-gradient-to-tr from-amber-500/10 to-indigo-600/15 blur-3xl" />
       </div>
 
-      {/* Center Auth Card */}
-      <div className="flex-1 flex items-center justify-center px-4">
-        <div
-          className={`w-full max-w-md rounded-2xl border p-7 shadow-2xl transition-colors ${
-            isLight
-              ? 'bg-white border-slate-200 shadow-slate-200/50'
-              : 'bg-[#111726] border-[#1e293b] shadow-black/40'
-          }`}
+      <header className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-6 pt-8 sm:pt-12">
+        <div className="hidden h-10 w-10 sm:block" />
+        <div className="flex flex-1 justify-center"><MineIntelLogo size="md" /></div>
+        <button
+          type="button"
+          onClick={toggleTheme}
+          title={isLight ? 'Switch to Dark mode' : 'Switch to Light mode'}
+          aria-label={isLight ? 'Switch to Dark mode' : 'Switch to Light mode'}
+          className="rounded-2xl border border-slate-200 bg-white/80 p-2.5 text-slate-600 shadow-sm backdrop-blur-md transition hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:text-cyan-400"
         >
-          {/* Card Header */}
-          {!isCreateMode ? (
-            <div className="mb-6">
-              <h1 className="text-lg font-bold tracking-tight flex items-center gap-2">
-                <KeyRound className="w-5 h-5 text-blue-500" />
-                <span>Sign In to MineIntel</span>
-              </h1>
-              <p className="text-xs text-slate-400 mt-1">
-                Enter your authorized credentials to access the sovereign intelligence platform.
-              </p>
-            </div>
-          ) : (
-            <div className="mb-6">
-              <div className="flex items-center justify-between">
-                <h1 className="text-lg font-bold tracking-tight flex items-center gap-2">
-                  <UserPlus className="w-5 h-5 text-blue-500" />
-                  <span>Create New User</span>
-                </h1>
-                <button
-                  type="button"
-                  onClick={resetCreateState}
-                  className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1 transition"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                  <span>Back to Login</span>
-                </button>
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                {createStep === 'master_auth'
-                  ? 'Master Officer credentials are required to authorize user provisioning.'
-                  : 'Specify account parameters and access role for the new member.'}
-              </p>
-            </div>
-          )}
+          {isLight ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4 text-amber-400" />}
+        </button>
+      </header>
 
-          {/* Backend Service Unreachable Notice */}
-          {isUnreachable && (
-            <div className="mb-5 p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-start gap-2 animate-fadeIn">
-              <WifiOff className="w-4 h-4 shrink-0 mt-0.5" />
-              <div>
-                <div className="font-semibold">Backend Service Unreachable</div>
-                <div className="mt-0.5 text-[11px] opacity-90">
-                  Unable to connect to the MineIntel backend server. Please verify the backend is running.
+      <main className="relative z-10 flex flex-1 items-center justify-center px-4 py-8 sm:py-10">
+        <div className="w-full max-w-[460px] animate-fadeIn">
+          <div className="group relative">
+            <div className="absolute -inset-0.5 rounded-3xl bg-gradient-to-r from-cyan-500/30 via-blue-500/20 to-amber-500/30 opacity-70 blur-sm transition-opacity duration-500 group-hover:opacity-100" />
+            <div className="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white/95 p-7 shadow-2xl shadow-slate-900/10 backdrop-blur-xl dark:border-slate-800/80 dark:bg-[#0c1424]/95 dark:shadow-black/70 sm:p-9">
+              {isLoading && <div className="animate-auth-progress absolute left-0 right-0 top-0 z-20 h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-400" role="progressbar" aria-label="Authenticating credentials" aria-busy="true" />}
+
+              <div className="mb-6 flex items-start justify-between gap-3">
+                <div>
+                  <div className="mb-1.5 flex items-center gap-3">
+                    {isCreateMode ? <UserPlus className="h-5 w-5 text-blue-500 dark:text-cyan-400" /> : <KeyRound className="h-5 w-5 text-blue-500 dark:text-cyan-400" />}
+                    <h1 className="text-xl font-bold tracking-tight sm:text-2xl">{isCreateMode ? 'Create New User' : 'Sign In to MineIntel'}</h1>
+                  </div>
+                  <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400 sm:text-sm">
+                    {isCreateMode
+                      ? createStep === 'master_auth' ? 'Master Officer authorization is required to provision a new account.' : 'Specify account parameters and access role for the new member.'
+                      : 'Enter your authorized credentials to access the MineIntel report generator.'}
+                  </p>
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* Success Notification */}
-          {createSuccessMsg && (
-            <div className="mb-5 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-start gap-2 animate-fadeIn">
-              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{createSuccessMsg}</span>
-            </div>
-          )}
-
-          {/* Dynamic Error Banner */}
-          {errorMessage && (
-            <div className="mb-5 p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-start gap-2 animate-fadeIn">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          {/* MAIN LOGIN FORM */}
-          {!isCreateMode && (
-            <form onSubmit={handleLoginSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  Officer ID / Username
-                </label>
-                <div className="relative">
-                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="text"
-                    required
-                    autoFocus
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Enter Officer ID or Username"
-                    disabled={isLoading}
-                    autoComplete="username"
-                    className={`w-full pl-9 pr-3 py-2 rounded-lg text-xs font-mono border transition outline-none focus:ring-2 focus:ring-blue-500/40 ${
-                      isLight
-                        ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white'
-                        : 'bg-[#182133] border-[#25324a] text-slate-100 focus:border-blue-500/60'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  Enclave Password
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter Enclave Password"
-                    disabled={isLoading}
-                    autoComplete="current-password"
-                    className={`w-full pl-9 pr-10 py-2 rounded-lg text-xs font-mono border transition outline-none focus:ring-2 focus:ring-blue-500/40 ${
-                      isLight
-                        ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white'
-                        : 'bg-[#182133] border-[#25324a] text-slate-100 focus:border-blue-500/60'
-                    }`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-300 cursor-pointer"
-                    tabIndex={-1}
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                {isCreateMode && (
+                  <button type="button" onClick={resetCreateState} className="inline-flex shrink-0 items-center gap-1 text-xs text-slate-500 transition hover:text-blue-500 dark:text-slate-400 dark:hover:text-cyan-400">
+                    <ChevronLeft className="h-3.5 w-3.5" /> Back
                   </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">CAPTCHA CHALLENGE</label>
-                <div className="flex items-center gap-2">
-                  {captchaImage ? <img src={captchaImage} alt="CAPTCHA challenge" className="h-[52px] w-[166px] rounded border border-slate-600 bg-slate-100" /> : <div className="h-[52px] w-[166px] rounded border border-slate-700 flex items-center justify-center text-[10px] text-slate-500">Loading challenge…</div>}
-                  <button type="button" onClick={() => void refreshCaptcha()} disabled={captchaLoading || isLoading} aria-label="Refresh CAPTCHA" className="p-2 rounded border border-slate-700 text-slate-400 hover:text-blue-400 hover:border-blue-500 disabled:opacity-50">
-                    <RefreshCw className={`w-4 h-4 ${captchaLoading ? 'animate-spin' : ''}`} />
-                  </button>
-                </div>
-                <input type="text" required maxLength={6} value={captchaAnswer} onChange={(e) => setCaptchaAnswer(e.target.value.slice(0, 6).toUpperCase())} placeholder="Enter the characters shown" disabled={isLoading || captchaLoading} autoComplete="off" aria-label="CAPTCHA input" className={`mt-2 w-full px-3 py-2 rounded-lg text-xs font-mono border transition outline-none focus:ring-2 focus:ring-blue-500/40 ${isLight ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white' : 'bg-[#182133] border-[#25324a] text-slate-100 focus:border-blue-500/60'}`} />
-              </div>
-
-              <button
-                type="submit"
-                disabled={isLoading || isUnreachable}
-                className="w-full mt-2 py-2.5 px-4 rounded-lg font-medium text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-md bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Authenticating...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Sign In</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
                 )}
-              </button>
-
-              {/* Create New User Prompt */}
-              <div className="pt-2 text-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsCreateMode(true);
-                    setCreateSuccessMsg(null);
-                    setErrorMessage(null);
-                  }}
-                  className="text-xs text-blue-400 hover:text-blue-300 font-medium transition cursor-pointer"
-                >
-                  Create New User
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* CREATE NEW USER FLOW: STEP 1 - MASTER AUTHENTICATION */}
-          {isCreateMode && createStep === 'master_auth' && (
-            <form onSubmit={handleMasterAuthStep} className="space-y-4">
-              <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs flex items-start gap-2">
-                <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>Only authorized Master Officers can provision new accounts.</span>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  Master Officer ID
-                </label>
-                <div className="relative">
-                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="text"
-                    required
-                    autoFocus
-                    value={masterOfficerId}
-                    onChange={(e) => setMasterOfficerId(e.target.value)}
-                    placeholder="Enter Master Officer ID"
-                    className={`w-full pl-9 pr-3 py-2 rounded-lg text-xs font-mono border transition outline-none focus:ring-2 focus:ring-blue-500/40 ${
-                      isLight
-                        ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white'
-                        : 'bg-[#182133] border-[#25324a] text-slate-100 focus:border-blue-500/60'
-                    }`}
-                  />
+              {isUnreachable && (
+                <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3.5 text-xs text-rose-500 animate-fadeIn" role="alert">
+                  <WifiOff className="mt-0.5 h-4 w-4 shrink-0" /><span>Unable to connect to the MineIntel backend server.</span>
                 </div>
-              </div>
+              )}
+              {createSuccessMsg && (
+                <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-500 animate-fadeIn" role="status">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span>{createSuccessMsg}</span>
+                </div>
+              )}
+              {errorMessage && (
+                <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-xs text-red-500 animate-fadeIn" role="alert">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{errorMessage}</span>
+                </div>
+              )}
 
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  Master Enclave Password
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type={showMasterPassword ? 'text' : 'password'}
-                    required
-                    value={masterPassword}
-                    onChange={(e) => setMasterPassword(e.target.value)}
-                    placeholder="Enter Master Password"
-                    className={`w-full pl-9 pr-10 py-2 rounded-lg text-xs font-mono border transition outline-none focus:ring-2 focus:ring-blue-500/40 ${
-                      isLight
-                        ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white'
-                        : 'bg-[#182133] border-[#25324a] text-slate-100 focus:border-blue-500/60'
-                    }`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowMasterPassword(!showMasterPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-300 cursor-pointer"
-                    tabIndex={-1}
-                  >
-                    {showMasterPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {!isCreateMode && (
+                <form onSubmit={handleLoginSubmit} className="space-y-4" id="signin-form">
+                  <AuthInput id="officer-id-input" label="Officer ID / Username" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Enter username or officer ID" icon={<User className="h-4 w-4" />} autoComplete="username" autoFocus required />
+                  <AuthInput id="enclave-password-input" label="Enclave Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter enclave password" icon={<Lock className="h-4 w-4" />} autoComplete="current-password" required />
+
+                  <div className="space-y-2 pt-1" id="captcha-challenge-section">
+                    <div className="flex items-center justify-between">
+                      <label htmlFor="captcha-input" className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">CAPTCHA Challenge</label>
+                      <button type="button" onClick={() => void refreshCaptcha()} disabled={captchaLoading || isLoading} aria-label="Refresh CAPTCHA" className="rounded-lg p-1.5 text-slate-400 transition hover:text-blue-500 disabled:opacity-50 dark:hover:text-cyan-400"><RefreshCw className={`h-4 w-4 ${captchaLoading ? 'animate-spin' : ''}`} /></button>
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-slate-300 bg-slate-100 dark:border-slate-800 dark:bg-slate-900/90">
+                      {captchaImage ? <img src={captchaImage} alt="CAPTCHA challenge" className="h-14 w-full object-cover" /> : <div className="flex h-14 items-center justify-center text-xs text-slate-500">Loading challenge…</div>}
+                    </div>
+                    <input id="captcha-input" type="text" required maxLength={6} value={captchaAnswer} onChange={(e) => setCaptchaAnswer(e.target.value.toUpperCase().slice(0, 6))} placeholder="Enter the 6 characters shown" disabled={isLoading || captchaLoading} autoComplete="off" spellCheck={false} aria-label="CAPTCHA input" className={`${fieldClass} font-mono uppercase tracking-[0.35em]`} />
+                  </div>
+
+                  <button type="submit" disabled={isLoading || isUnreachable} className="group relative mt-2 flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-blue-600 via-blue-600 to-cyan-600 text-sm font-semibold text-white shadow-lg shadow-blue-600/25 transition-all hover:from-blue-500 hover:to-cyan-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70">
+                    {!isLoading && <span className="animate-shimmer pointer-events-none absolute inset-0 h-full w-1/2 skew-x-12 bg-gradient-to-r from-transparent via-white/20 to-transparent" />}
+                    {isLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Signing in...</> : <>Sign In <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></>}
                   </button>
-                </div>
-              </div>
+                </form>
+              )}
 
-              <button
-                type="submit"
-                className="w-full mt-2 py-2.5 px-4 rounded-lg font-medium text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-md bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/20"
-              >
-                <span>Authorize & Proceed</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </form>
-          )}
+              {isCreateMode && createStep === 'master_auth' && (
+                <form onSubmit={handleMasterAuthStep} className="space-y-4" id="master-auth-form">
+                  <div className="flex items-start gap-2.5 rounded-xl border border-blue-500/20 bg-blue-500/10 p-3.5 text-xs text-blue-500 dark:text-cyan-400"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" /><span>Only authorized Master Officers can provision new accounts.</span></div>
+                  <AuthInput id="master-officer-id" label="Master Officer ID" value={masterOfficerId} onChange={(e) => setMasterOfficerId(e.target.value)} placeholder="Enter Master Officer ID" icon={<User className="h-4 w-4" />} autoFocus required />
+                  <AuthInput id="master-password" label="Master Enclave Password" type="password" value={masterPassword} onChange={(e) => setMasterPassword(e.target.value)} placeholder="Enter Master Password" icon={<Lock className="h-4 w-4" />} required />
+                  <button type="submit" className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:from-blue-500 hover:to-cyan-500">Authorize &amp; Proceed <ArrowRight className="h-4 w-4" /></button>
+                </form>
+              )}
 
-          {/* CREATE NEW USER FLOW: STEP 2 - MEMBER DETAILS */}
-          {isCreateMode && createStep === 'user_details' && (
-            <form onSubmit={handleCreateUserSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  New Officer ID / Username
-                </label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  value={newOfficerId}
-                  onChange={(e) => setNewOfficerId(e.target.value)}
-                  placeholder="e.g. analyst_roy or MOC-1042"
-                  disabled={isLoading}
-                  className={`w-full px-3 py-2 rounded-lg text-xs font-mono border transition outline-none focus:ring-2 focus:ring-blue-500/40 ${
-                    isLight
-                      ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white'
-                      : 'bg-[#182133] border-[#25324a] text-slate-100 focus:border-blue-500/60'
-                  }`}
-                />
-              </div>
+              {isCreateMode && createStep === 'user_details' && (
+                <form onSubmit={handleCreateUserSubmit} className="space-y-4" id="create-user-form">
+                  <AuthInput id="new-officer-id" label="New Officer ID / Username" value={newOfficerId} onChange={(e) => setNewOfficerId(e.target.value)} placeholder="e.g. analyst_roy or MOC-1042" required />
+                  <AuthInput id="new-display-name" label="Full Display Name (Optional)" value={newDisplayName} onChange={(e) => setNewDisplayName(e.target.value)} placeholder="e.g. Inspector R. Sharma" />
+                  <AuthInput id="new-member-password" label="Initial Password" type="password" value={newMemberPassword} onChange={(e) => setNewMemberPassword(e.target.value)} placeholder="Minimum 4 characters" required />
+                  <div className="space-y-1.5"><label htmlFor="new-role" className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">Assigned Enclave Role</label><select id="new-role" value={newRole} onChange={(e) => setNewRole(e.target.value)} className={fieldClass}><option value="Operational Auditor">Operational Auditor (Standard)</option><option value="Senior Compliance Analyst">Senior Compliance Analyst</option><option value="Field Inspector">Field Inspector</option><option value="Enclave Viewer">Enclave Viewer</option></select></div>
+                  <div className="flex gap-3 pt-2"><button type="button" onClick={() => setCreateStep('master_auth')} disabled={isLoading} className="h-12 w-1/3 rounded-xl border border-slate-300 text-sm font-medium text-slate-500 transition hover:border-blue-400 dark:border-slate-700 dark:text-slate-300">Back</button><button type="submit" disabled={isLoading} className="flex h-12 w-2/3 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:from-blue-500 hover:to-cyan-500 disabled:opacity-60">{isLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating...</> : <>Provision Account <CheckCircle2 className="h-4 w-4" /></>}</button></div>
+                </form>
+              )}
 
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  Full Display Name (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={newDisplayName}
-                  onChange={(e) => setNewDisplayName(e.target.value)}
-                  placeholder="e.g. Inspector R. Sharma"
-                  disabled={isLoading}
-                  className={`w-full px-3 py-2 rounded-lg text-xs font-mono border transition outline-none focus:ring-2 focus:ring-blue-500/40 ${
-                    isLight
-                      ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white'
-                      : 'bg-[#182133] border-[#25324a] text-slate-100 focus:border-blue-500/60'
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  Initial Password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showMemberPassword ? 'text' : 'password'}
-                    required
-                    value={newMemberPassword}
-                    onChange={(e) => setNewMemberPassword(e.target.value)}
-                    placeholder="Minimum 4 characters"
-                    disabled={isLoading}
-                    className={`w-full pl-3 pr-10 py-2 rounded-lg text-xs font-mono border transition outline-none focus:ring-2 focus:ring-blue-500/40 ${
-                      isLight
-                        ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white'
-                        : 'bg-[#182133] border-[#25324a] text-slate-100 focus:border-blue-500/60'
-                    }`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowMemberPassword(!showMemberPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-300 cursor-pointer"
-                    tabIndex={-1}
-                  >
-                    {showMemberPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  Assigned Enclave Role
-                </label>
-                <select
-                  value={newRole}
-                  onChange={(e) => setNewRole(e.target.value)}
-                  disabled={isLoading}
-                  className={`w-full px-3 py-2 rounded-lg text-xs font-mono border transition outline-none focus:ring-2 focus:ring-blue-500/40 ${
-                    isLight
-                      ? 'bg-slate-50 border-slate-300 text-slate-900'
-                      : 'bg-[#182133] border-[#25324a] text-slate-100'
-                  }`}
-                >
-                  <option value="Operational Auditor">Operational Auditor (Standard)</option>
-                  <option value="Senior Compliance Analyst">Senior Compliance Analyst</option>
-                  <option value="Field Inspector">Field Inspector</option>
-                  <option value="Enclave Viewer">Enclave Viewer</option>
-                </select>
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setCreateStep('master_auth')}
-                  disabled={isLoading}
-                  className="w-1/3 py-2.5 px-3 rounded-lg font-medium text-xs border border-slate-700 hover:bg-slate-800 text-slate-300 transition cursor-pointer"
-                >
-                  Back
-                </button>
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-2/3 py-2.5 px-4 rounded-lg font-medium text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-md bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/20 disabled:opacity-50"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Creating...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Provision Account</span>
-                      <CheckCircle2 className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          )}
+              {!isCreateMode && <div className="pt-2 text-center"><button type="button" onClick={() => { setIsCreateMode(true); setCreateSuccessMsg(null); setErrorMessage(null); }} className="group inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-blue-500/10 hover:text-blue-500 dark:text-slate-400 dark:hover:text-cyan-400">Create New User <Sparkles className="h-3.5 w-3.5 text-blue-500 transition group-hover:rotate-12 dark:text-cyan-400" /></button></div>}
+            </div>
+          </div>
         </div>
-      </div>
-
+      </main>
+      <footer className="relative z-10 h-4" />
     </div>
   );
 };
