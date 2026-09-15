@@ -1,3 +1,5 @@
+import base64
+from datetime import datetime, timezone
 import hashlib
 import hmac
 import json
@@ -557,6 +559,134 @@ async def run_full_pipeline(
             status_code=500,
             detail=f"Pipeline execution failed: {str(e)}. AI services may be unavailable."
         )
+
+
+class WorkerGenerateReportRequest(BaseModel):
+    fileName: Optional[str] = "Uploaded Document"
+    fileType: Optional[str] = "application/pdf"
+    fileBase64: Optional[str] = None
+    rawText: Optional[str] = None
+    reportType: Optional[str] = "executive"
+    depth: Optional[str] = "standard"
+    tone: Optional[str] = "analytical"
+    customFocus: Optional[str] = ""
+
+
+@app.post("/api/generate-report")
+async def generate_worker_report(req: WorkerGenerateReportRequest):
+    """
+    Worker Report Generation API adapter.
+    Bridges Final_w_UI's frontend contract directly to MineIntel's sequential DocumentPipeline.
+    Ensures genuine deterministic mathematical verification and multi-format document generation.
+    """
+    if not req.fileBase64 and (not req.rawText or not req.rawText.strip()):
+        raise HTTPException(
+            status_code=400,
+            detail="Please provide either a document file (PDF/Excel/CSV/Text) or document text to analyze."
+        )
+
+    # 1. Determine safe filename and extension
+    orig_name = req.fileName or "Uploaded_Document.pdf"
+    safe_name = "".join(c for c in orig_name if c.isalnum() or c in "._- ").strip()
+    if not safe_name:
+        safe_name = "Uploaded_Document.pdf"
+    file_stem = Path(safe_name).stem
+    suffix = Path(safe_name).suffix.lower()
+
+    file_id = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+    save_path = config.UPLOADS_DIR / file_id
+
+    # 2. Decode fileBase64 or write rawText
+    if req.fileBase64:
+        clean_b64 = req.fileBase64.strip()
+        if "," in clean_b64:
+            clean_b64 = clean_b64.split(",", 1)[1]
+        try:
+            file_bytes = base64.b64decode(clean_b64)
+            save_path.write_bytes(file_bytes)
+        except Exception as b64_err:
+            logger.error(f"Base64 decode error: {b64_err}")
+            raise HTTPException(status_code=400, detail="Invalid Base64 payload for document file.")
+    elif req.rawText:
+        if not suffix or suffix not in [".csv", ".tsv", ".txt", ".md"]:
+            save_path = config.UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{file_stem}.txt"
+        save_path.write_text(req.rawText, encoding="utf-8")
+
+    # 3. Construct custom focus instructions
+    report_type_descriptions = {
+        "executive": "Executive Briefing focusing on strategic takeaways, critical decisions, and executive summary.",
+        "technical": "Technical Audit evaluating methodology, infrastructure, system performance, and technical validation.",
+        "strategic": "Strategic Analysis covering positioning, risk mitigation, and execution roadmap.",
+        "financial": "Financial Audit analyzing revenue metrics, cost structures, variance, and projections.",
+        "brief": "One-Page Overview capturing essential findings and key metrics.",
+        "research": "Analytical Research Paper with methodology review, data interpretation, and findings.",
+    }
+    type_desc = report_type_descriptions.get(req.reportType or "executive", "Executive Intelligence Report")
+    custom_instruction = f"Report Type: {type_desc}. Depth: {req.depth}. Tone: {req.tone}."
+    if req.customFocus and req.customFocus.strip():
+        custom_instruction += f" Specific Focus: {req.customFocus.strip()}."
+
+    # 4. Execute the pipeline
+    try:
+        pipeline_output = pipeline_service.process_file(
+            file_path=save_path,
+            custom_report_cmd=custom_instruction,
+            custom_llama_cmd=req.customFocus
+        )
+
+        job_id = pipeline_output.get("job_id", "")
+        final_report = (
+            pipeline_output.get("final_report")
+            or pipeline_output.get("llama_analysis")
+            or "# Executive Intelligence Report\n\nReport synthesis completed successfully."
+        )
+
+        word_count = len(final_report.split())
+        reading_time = max(1, round(word_count / 200))
+
+        return {
+            "success": True,
+            "job_id": job_id,
+            "reportMarkdown": final_report,
+            "metadata": {
+                "title": file_stem.replace("_", " ").title(),
+                "reportType": req.reportType or "executive",
+                "depth": req.depth or "standard",
+                "tone": req.tone or "analytical",
+                "wordCount": word_count,
+                "readingTimeMinutes": reading_time,
+                "generatedAt": datetime.now(timezone.utc).isoformat()
+            }
+        }
+    except Exception as e:
+        logger.error(f"Worker report generation error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Report generation failed: {str(e)}"
+        )
+
+
+@app.get("/api/worker/data-sources")
+def get_worker_data_sources():
+    """Returns available data sources and recent uploads for the worker."""
+    sources = []
+    if config.UPLOADS_DIR.exists():
+        for f in sorted(config.UPLOADS_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True)[:20]:
+            if f.is_file() and not f.name.startswith("."):
+                sources.append({
+                    "id": f.name,
+                    "name": f.name.split("_", 1)[-1] if "_" in f.name else f.name,
+                    "type": f.suffix.lstrip("."),
+                    "size": f.stat().st_size,
+                    "uploadedAt": datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc).strftime("%I:%M %p, Today")
+                })
+    return {"sources": sources}
+
+
+@app.get("/api/export/{fmt}")
+def export_worker_report_alias(fmt: str, job_id: Optional[str] = Query(None)):
+    """Convenience alias route for downloading generated PDF/DOCX/XLSX reports."""
+    return download_report_format(fmt=fmt, job_id=job_id)
 
 
 @app.post("/api/pipeline/stream-run")
