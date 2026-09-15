@@ -282,6 +282,7 @@ export interface UserProfile {
   display_name: string;
   status: string;
   role: string;
+  is_master?: boolean;
   phone?: string;
   email?: string;
   created_at: number;

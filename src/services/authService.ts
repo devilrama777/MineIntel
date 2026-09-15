@@ -181,12 +181,14 @@ class AuthService {
     }
 
     const data = await resp.json();
+    const isMaster = data.is_master !== undefined ? Boolean(data.is_master) : (data.role === 'Senior Operational Auditor');
     const user: UserProfile = {
       id: data.officer_id || credentials.username,
       username: data.officer_id || credentials.username,
       display_name: data.name || data.officer_id || credentials.username,
       status: 'Active Sovereign Enclave',
-      role: data.role || 'Senior Operational Auditor',
+      role: data.role || (isMaster ? 'Senior Operational Auditor' : 'Operational Auditor'),
+      is_master: isMaster,
       created_at: Date.now(),
       last_login_at: Date.now(),
     };
@@ -218,12 +220,18 @@ class AuthService {
       if (resp.ok) {
         const data = await resp.json();
         if (data.authenticated) {
-          const user: UserProfile = this.currentUser || {
+          const isMaster = data.is_master !== undefined ? Boolean(data.is_master) : (data.role === 'Senior Operational Auditor');
+          const user: UserProfile = this.currentUser ? {
+            ...this.currentUser,
+            role: data.role || this.currentUser.role,
+            is_master: isMaster,
+          } : {
             id: data.officer_id || 'officer',
             username: data.officer_id || 'officer',
             display_name: data.officer_id || 'Authorized Officer',
             status: 'Active Sovereign Enclave',
-            role: data.role || 'Senior Operational Auditor',
+            role: data.role || (isMaster ? 'Senior Operational Auditor' : 'Operational Auditor'),
+            is_master: isMaster,
             created_at: Date.now(),
             last_login_at: Date.now(),
           };
