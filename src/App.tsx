@@ -38,6 +38,7 @@ import { ExportView } from './components/views/ExportView';
 import { SecurityAuditView } from './components/views/SecurityAuditView';
 import { SettingsView } from './components/views/SettingsView';
 import { LoginView } from './components/views/LoginView';
+import { WorkerApp } from './components/worker/WorkerApp';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Loader2 } from 'lucide-react';
 
@@ -340,6 +341,12 @@ function DesktopAppContent() {
 
   if (!isAuthenticated) {
     return <LoginView />;
+  }
+
+  // Dual application routing: Normal Worker -> Final_w_UI WorkerApp; Master -> Existing MineIntel
+  const isMasterUser = user?.role === 'Senior Operational Auditor' || user?.is_master === true;
+  if (!isMasterUser) {
+    return <WorkerApp />;
   }
 
   return (

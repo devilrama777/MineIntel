@@ -242,8 +242,27 @@ class MarkdownConverter:
                 continue
 
         if df is None:
-            # Fallback simple read
-            df = pd.read_csv(file_path, sep=None, engine="python")
+            try:
+                text_content = file_path.read_text(encoding="utf-8", errors="replace")
+                return {
+                    "markdown": f"# Document: {file_path.name}\n\n{text_content}",
+                    "file_type": "text",
+                    "records": [],
+                    "dataframe": pd.DataFrame(),
+                    "extracted_images": [],
+                    "extracted_audio": [],
+                    "has_multimedia": False,
+                    "metadata": {
+                        "filename": file_path.name,
+                        "row_count": 0,
+                        "column_count": 0,
+                        "numeric_columns": [],
+                        "char_count": len(text_content)
+                    }
+                }
+            except Exception:
+                # Fallback simple read
+                df = pd.read_csv(file_path, sep=None, engine="python")
 
         row_count, col_count = df.shape
         md_sections: List[str] = []
@@ -455,11 +474,11 @@ class MarkdownConverter:
         suffix = file_path.suffix.lower()
         if suffix == ".pdf":
             return cls.convert_pdf_to_markdown(file_path, output_media_dir=output_media_dir)
-        elif suffix in [".csv", ".tsv", ".txt"]:
+        elif suffix in [".csv", ".tsv", ".txt", ".md"]:
             return cls.convert_csv_to_markdown(file_path)
         elif suffix in [".xlsx", ".xls"]:
             return cls.convert_excel_to_markdown(file_path)
         elif suffix == ".docx":
             return cls.convert_docx_to_markdown(file_path)
         else:
-            raise ValueError(f"Unsupported file format: '{suffix}'. Supported: .pdf, .csv, .tsv, .txt, .xlsx, .xls, .docx")
+            raise ValueError(f"Unsupported file format: '{suffix}'. Supported: .pdf, .csv, .tsv, .txt, .md, .xlsx, .xls, .docx")
