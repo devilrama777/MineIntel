@@ -531,6 +531,7 @@ export function WorkerApp() {
             onSelectDataSource={handleSelectDataSource}
             onPreview={handlePreviewReport}
             onExport={handleExportReport}
+            onNavigateProfile={handleSelectProfile}
             activeView={activeView}
             hasReport={Boolean(currentReport || reportsHistory.length > 0)}
             hasDataSource={Boolean(fileName || rawText.trim().length > 0)}
@@ -553,6 +554,10 @@ export function WorkerApp() {
                 onSelectDataSource={handleSelectDataSource}
                 onPreview={handlePreviewReport}
                 onExport={handleExportReport}
+                onNavigateProfile={() => {
+                  handleSelectProfile();
+                  setIsMobileSidebarOpen(false);
+                }}
                 activeView={activeView}
                 hasReport={Boolean(currentReport || reportsHistory.length > 0)}
                 hasDataSource={Boolean(fileName || rawText.trim().length > 0)}

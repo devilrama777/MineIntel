@@ -1,4 +1,3 @@
-import React from 'react';
 import { 
   FilePlus2, 
   Database, 
@@ -6,8 +5,12 @@ import {
   Download, 
   ChevronLeft, 
   ChevronRight,
-  Layers
+  Layers,
+  Settings as SettingsIcon,
+  User,
+  LogOut
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -16,6 +19,7 @@ interface SidebarProps {
   onSelectDataSource: () => void;
   onPreview: () => void;
   onExport: () => void;
+  onNavigateProfile?: () => void;
   activeView: 'generator' | 'preview' | 'export' | 'report' | 'editor' | 'datasource' | 'profile';
   hasReport: boolean;
   hasDataSource: boolean;
@@ -29,11 +33,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectDataSource,
   onPreview,
   onExport,
+  onNavigateProfile,
   activeView,
   hasReport,
   hasDataSource,
   dataSourceName,
 }) => {
+  const { user, logout } = useAuth();
+  const displayName = user?.display_name || user?.username || 'Officer';
+  const roleName = user?.role || 'Operational Auditor';
+  const avatarLetter = (displayName[0] || 'O').toUpperCase();
   return (
     <aside
       className={`relative flex flex-col border-r transition-all duration-300 z-30 shrink-0 select-none ${
@@ -218,6 +227,70 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
         </button>
+      </div>
+
+      {/* Bottom Pinned Section: Settings & Profile/User Menu */}
+      <div className="p-3 border-t border-blue-900/15 dark:border-blue-500/15 space-y-2 shrink-0 bg-white/50 dark:bg-[#070e1c]/50">
+        {/* Settings Button */}
+        <button
+          id="btn-sidebar-settings"
+          type="button"
+          onClick={onNavigateProfile}
+          className={`w-full group flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-semibold text-xs transition-all duration-150 cursor-pointer text-left border ${
+            isCollapsed ? 'justify-center px-2' : ''
+          } ${
+            activeView === 'profile'
+              ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-900 dark:text-blue-100 border-blue-200 dark:border-blue-800/60 shadow-2xs'
+              : 'text-neutral-700 dark:text-blue-100 hover:bg-neutral-100 dark:hover:bg-blue-950/40 border-transparent'
+          }`}
+          title="Settings & System Configuration"
+        >
+          <SettingsIcon className="w-4 h-4 text-neutral-500 dark:text-blue-400 group-hover:rotate-45 transition-transform" />
+          {!isCollapsed && (
+            <div className="flex-1 min-w-0">
+              <span className="truncate font-semibold">Settings</span>
+            </div>
+          )}
+        </button>
+
+        {/* Profile / User Option Card */}
+        <div
+          id="sidebar-user-card"
+          onClick={onNavigateProfile}
+          className={`group flex items-center gap-2.5 p-2 rounded-xl border border-neutral-200/80 dark:border-blue-900/50 bg-neutral-50 dark:bg-[#0b162a] hover:border-blue-500/40 transition cursor-pointer ${
+            isCollapsed ? 'justify-center p-1.5' : ''
+          }`}
+          title={`Signed in as ${displayName}`}
+        >
+          <div className="relative flex items-center justify-center w-7 h-7 rounded-full bg-blue-600 text-white font-bold text-xs shrink-0 shadow-xs">
+            {avatarLetter}
+            <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-emerald-500 border border-white dark:border-[#0b162a] rounded-full" />
+          </div>
+          {!isCollapsed && (
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-bold text-neutral-900 dark:text-white truncate">
+                {displayName}
+              </div>
+              <div className="text-[10px] text-neutral-500 dark:text-blue-300/70 font-mono truncate">
+                {roleName}
+              </div>
+            </div>
+          )}
+          {!isCollapsed && (
+            <button
+              id="btn-sidebar-logout"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                logout();
+              }}
+              className="p-1 rounded-lg text-neutral-400 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-neutral-200/60 dark:hover:bg-rose-950/40 transition"
+              title="Sign Out"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
     </aside>
   );
