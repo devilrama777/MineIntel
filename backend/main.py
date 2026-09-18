@@ -63,11 +63,13 @@ document_generator = DocumentGenerator()
 # AUTHENTICATION HELPERS & MODELS
 # -------------------------------------------------------------------------
 class LoginRequest(BaseModel):
-    officer_id: str
+    officer_id: Optional[str] = None
+    username: Optional[str] = None
     password: str
     captcha_challenge_id: str
     captcha_answer: str
     remember_device: Optional[bool] = True
+
 
 
 class CreateUserRequest(BaseModel):
@@ -221,7 +223,7 @@ def auth_login(req: LoginRequest):
     """Authenticates executive master officers and registered members against secure credential store."""
     if not req.captcha_challenge_id.strip() or not req.captcha_answer.strip() or not verify_challenge(req.captcha_challenge_id, req.captcha_answer):
         raise HTTPException(status_code=400, detail="CAPTCHA is missing, incorrect, expired, or already used.")
-    officer_id = req.officer_id.strip()
+    officer_id = (req.officer_id or req.username or "").strip()
     password = req.password.strip()
 
     officer_id_configured = config.get_auth_officer_id()
@@ -347,10 +349,15 @@ def auth_verify(authorization: Optional[str] = Header(None), token: Optional[str
     session = verify_session_token(raw_token)
     if not session:
         raise HTTPException(status_code=401, detail="Session token invalid or expired.")
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (session.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(session.get("officer_id", "").lower(), master_officer.lower())
+    )
     return {
         "authenticated": True,
         "officer_id": session["officer_id"],
-        "role": session["role"]
+        "role": session["role"],
+        "is_master": is_master
     }
 
 

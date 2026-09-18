@@ -416,8 +416,8 @@ def authenticate_user(officer_id: str, password: str) -> Optional[Dict[str, Any]
         return None
 
     # Check 1: Provisioned Master Account
-    master_officer = config.get_auth_officer_id().strip()
-    master_secret = config.get_auth_secret_password().strip()
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    master_secret = config.get_auth_secret_password().strip().strip("\"'").strip()
 
     if master_officer and master_secret:
         if secrets.compare_digest(clean_id.lower(), master_officer.lower()) and secrets.compare_digest(clean_pw, master_secret):

@@ -19,6 +19,7 @@ CAPTCHA_FONT_PATH = Path(__file__).resolve().parents[1] / "assets" / "DejaVuSans
 
 _lock = threading.Lock()
 _challenges: Dict[str, Tuple[str, float]] = {}
+_consumed_challenges: set[str] = set()
 
 
 def _secure_answer() -> str:
@@ -136,30 +137,75 @@ def _pg_verify_challenge(challenge_id: str, answer: str) -> Optional[bool]:
 
 def create_challenge() -> Dict[str, str | int]:
     """Creates a new challenge and invalidates the previously issued challenge."""
+    import hmac
+    from backend import config
     answer = _secure_answer()
-    challenge_id = uuid.uuid4().hex
-    expires_at = time.time() + CAPTCHA_TTL_SECONDS
+    expires_at = int(time.time() + CAPTCHA_TTL_SECONDS)
     answer_hash = hashlib.sha256(answer.encode("utf-8")).hexdigest()
+    salt = secrets.token_hex(4)
+    raw_payload = f"{salt}:{answer_hash}:{expires_at}"
+    sig = hmac.new(config.JWT_SECRET.encode("utf-8"), raw_payload.encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+    challenge_id = f"cap_{salt}_{answer_hash[:16]}_{expires_at}_{sig}"
     with _lock:
+        for cid in list(_challenges.keys()):
+            _consumed_challenges.add(cid)
         _challenges.clear()
-        _challenges[challenge_id] = (answer_hash, expires_at)
-    _pg_save_challenge(challenge_id, answer_hash, expires_at)
+        _challenges[challenge_id] = (answer_hash, float(expires_at))
+    _pg_save_challenge(challenge_id, answer_hash, float(expires_at))
     return {"challenge_id": challenge_id, "image": _render_png(answer), "expires_in": CAPTCHA_TTL_SECONDS}
 
 
 def verify_challenge(challenge_id: str, answer: str) -> bool:
     """Atomically verifies, consumes, and invalidates one challenge."""
-    pg_res = _pg_verify_challenge(challenge_id, answer)
+    if not challenge_id or not answer:
+        return False
+    clean_ans = answer.strip().upper()
+    if len(clean_ans) != CAPTCHA_LENGTH:
+        return False
+
+    with _lock:
+        if challenge_id in _consumed_challenges:
+            return False
+
+    pg_res = _pg_verify_challenge(challenge_id, clean_ans)
     if pg_res is not None:
         with _lock:
+            _consumed_challenges.add(challenge_id)
             _challenges.pop(challenge_id, None)
         return pg_res
+
     with _lock:
         record = _challenges.pop(challenge_id, None)
-    if not record:
-        return False
-    answer_hash, expires_at = record
-    if time.time() > expires_at:
-        return False
-    candidate_hash = hashlib.sha256(answer.strip().upper().encode("utf-8")).hexdigest()
-    return secrets.compare_digest(candidate_hash, answer_hash)
+    if record:
+        with _lock:
+            _consumed_challenges.add(challenge_id)
+        answer_hash, expires_at = record
+        if time.time() > expires_at:
+            return False
+        candidate_hash = hashlib.sha256(clean_ans.encode("utf-8")).hexdigest()
+        return secrets.compare_digest(candidate_hash, answer_hash)
+
+    # Stateless fallback for multi-instance serverless environments (e.g. Vercel lambdas)
+    try:
+        if challenge_id.startswith("cap_"):
+            parts = challenge_id.split("_")
+            if len(parts) == 5:
+                import hmac
+                from backend import config
+                _, salt, hash_prefix, expires_str, sig = parts
+                expires_at = int(expires_str)
+                if time.time() > expires_at:
+                    return False
+                candidate_hash = hashlib.sha256(clean_ans.encode("utf-8")).hexdigest()
+                if not secrets.compare_digest(candidate_hash[:16], hash_prefix):
+                    return False
+                raw_payload = f"{salt}:{candidate_hash}:{expires_at}"
+                expected_sig = hmac.new(config.JWT_SECRET.encode("utf-8"), raw_payload.encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+                if secrets.compare_digest(sig, expected_sig):
+                    with _lock:
+                        _consumed_challenges.add(challenge_id)
+                    return True
+    except Exception:
+        pass
+
+    return False

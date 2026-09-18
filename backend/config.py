@@ -93,12 +93,18 @@ def get_database_url() -> str:
 
 def get_auth_officer_id() -> str:
     """Returns officer ID dynamically checking environment or configured default."""
-    return os.getenv("MINEINTEL_OFFICER_ID") or os.getenv("AUTH_OFFICER_ID") or AUTH_OFFICER_ID
+    val = os.getenv("MINEINTEL_OFFICER_ID") or os.getenv("AUTH_OFFICER_ID") or AUTH_OFFICER_ID
+    if isinstance(val, str):
+        val = val.strip().strip("\"'").strip()
+    return val or ""
 
 
 def get_auth_secret_password() -> str:
     """Returns secret password dynamically checking environment or configured default."""
-    return os.getenv("MINEINTEL_AUTH_PASSWORD") or os.getenv("AUTH_SECRET_PASSWORD") or AUTH_SECRET_PASSWORD
+    val = os.getenv("MINEINTEL_AUTH_PASSWORD") or os.getenv("AUTH_SECRET_PASSWORD") or AUTH_SECRET_PASSWORD
+    if isinstance(val, str):
+        val = val.strip().strip("\"'").strip()
+    return val or ""
 
 
 # Bounded chunking parameters for large documents

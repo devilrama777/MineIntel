@@ -45,6 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { isLight } = useTheme();
   const { user, logout } = useAuth();
+  const isMaster = Boolean(user?.is_master || user?.role === 'Senior Operational Auditor');
   const initials = user?.display_name
     ? user.display_name
         .split(' ')
@@ -126,12 +127,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </span>
               <span
                 className={`text-[9px] font-mono px-1 py-0.2 rounded font-semibold shrink-0 ${
-                  isLight
+                  isMaster
+                    ? isLight
+                      ? 'text-amber-800 bg-amber-100 border border-amber-300'
+                      : 'text-amber-300 bg-amber-950/80 border border-amber-600/70'
+                    : isLight
                     ? 'text-blue-700 bg-blue-50 border border-blue-200'
                     : 'text-blue-400 bg-blue-950/70 border border-blue-800/60'
                 }`}
               >
-                DESKTOP
+                {isMaster ? 'MASTER' : 'DESKTOP'}
               </span>
             </div>
             <span
@@ -139,7 +144,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 isLight ? 'text-slate-500' : 'text-slate-400'
               }`}
             >
-              Report Generator
+              {isMaster ? 'Executive Audit Enclave' : 'Report Generator'}
             </span>
           </div>
         )}
