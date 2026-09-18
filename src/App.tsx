@@ -246,6 +246,15 @@ function DesktopAppContent() {
     setActiveView('report-planner');
   };
 
+  const handleUploadIngest = async (file: File) => {
+    try {
+      await desktopService.runPipelineWithFile(file);
+      await refreshAllData();
+    } catch (err) {
+      console.error('Failed to run ingestion pipeline:', err);
+    }
+  };
+
   const handleUpdateJobStatus = async (
     id: string,
     status: 'running' | 'paused' | 'completed' | 'failed'
@@ -334,158 +343,171 @@ function DesktopAppContent() {
   }
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#0a0d14] text-slate-100 font-sans select-none antialiased">
-      {/* 1. Cross-Platform Desktop Titlebar (Linux / macOS / Windows) */}
-      <div className="no-print">
-        <AppTitlebar
-          currentPlatform={currentPlatform}
-          onChangePlatform={(p) => {
-            setCurrentPlatform(p);
-            desktopBridge.setPlatform(p);
-          }}
-          activeReportTitle={activeReport?.name}
-          isAirgapped={true}
-          onNavigate={handleNavigate}
-          onOpenAudit={() => setActiveView('security-audit')}
-          onOpenAbout={() => setAboutModalOpen(true)}
+    <div className="flex h-screen w-screen overflow-hidden bg-[#0a0d14] text-slate-100 font-sans antialiased">
+      {/* 1. Full-Height Sidebar (Extends from top of application viewport to bottom) */}
+      <div className="no-print flex h-screen shrink-0 z-20">
+        <Sidebar
           currentView={activeView}
-          onOpenCommandPalette={() => setCommandPaletteOpen(true)}
-          onRefreshData={refreshAllData}
-          aiProvider={aiProvider}
-          aiModel={aiModel}
+          onNavigate={handleNavigate}
+          isCollapsed={sidebarCollapsed}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+          badgeCounts={{
+            jobsRunning: jobs.filter((j) => j.status === 'running').length,
+            validationIssues: unresolvedIssuesCount,
+            dataSourcesCount: dataSources.length,
+          }}
+          unresolvedIssuesCount={unresolvedIssuesCount}
         />
       </div>
 
-      {/* 2. Main Shell Layout */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar Navigation */}
-        <div className="no-print flex h-full">
-          <Sidebar
-            currentView={activeView}
-            onNavigate={handleNavigate}
-            isCollapsed={sidebarCollapsed}
-            collapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
-            badgeCounts={{
-              jobsRunning: jobs.filter((j) => j.status === 'running').length,
-              validationIssues: unresolvedIssuesCount,
-              dataSourcesCount: dataSources.length,
+      {/* 2. Main Shell Layout (Titlebar, Natural Scrollable Content, Status Bar) */}
+      <div className="flex-1 flex flex-col h-screen min-w-0 overflow-hidden bg-[#0d121c]">
+        {/* Pinned Desktop Titlebar */}
+        <div className="no-print shrink-0">
+          <AppTitlebar
+            currentPlatform={currentPlatform}
+            onChangePlatform={(p) => {
+              setCurrentPlatform(p);
+              desktopBridge.setPlatform(p);
             }}
-            unresolvedIssuesCount={unresolvedIssuesCount}
+            activeReportTitle={activeReport?.name}
+            isAirgapped={true}
+            onNavigate={handleNavigate}
+            onOpenAudit={() => setActiveView('security-audit')}
+            onOpenAbout={() => setAboutModalOpen(true)}
+            currentView={activeView}
+            onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+            onRefreshData={refreshAllData}
+            aiProvider={aiProvider}
+            aiModel={aiModel}
           />
         </div>
 
-        {/* Workspace Canvas Area */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-[#0d121c]">
-          {/* View Dispatcher */}
-          <main className="flex-1 flex overflow-hidden">
-            {activeView === 'dashboard' && (
-              <DashboardView
-                reports={reports}
-                dataSources={dataSources}
-                jobs={jobs}
-                healthComponents={healthComponents}
-                validationIssues={validationIssues}
-                onNavigate={handleNavigate}
-                onSelectReport={handleSelectReport}
-              />
-            )}
+        {/* Natural Scrollable Main Canvas */}
+        <main className="flex-1 overflow-y-auto min-h-0 bg-[#0d121c]">
+          {activeView === 'dashboard' && (
+            <DashboardView
+              reports={reports}
+              dataSources={dataSources}
+              jobs={jobs}
+              healthComponents={healthComponents}
+              validationIssues={validationIssues}
+              onNavigate={handleNavigate}
+              onSelectReport={handleSelectReport}
+            />
+          )}
 
-            {activeView === 'new-report' && (
-              <NewReportWorkflowView
-                dataSources={dataSources}
-                previousReports={reports}
-                userName={user?.display_name || user?.username || 'Authorized Officer'}
-                onCreateReport={handleCreateReport}
-                onCancel={() => handleNavigate('dashboard')}
-                aiProvider={aiProvider}
-                aiModel={aiModel}
-              />
-            )}
+          {activeView === 'new-report' && (
+            <NewReportWorkflowView
+              dataSources={dataSources}
+              previousReports={reports}
+              userName={user?.display_name || user?.username || 'Authorized Officer'}
+              onCreateReport={handleCreateReport}
+              onCancel={() => handleNavigate('dashboard')}
+              aiProvider={aiProvider}
+              aiModel={aiModel}
+            />
+          )}
 
-            {activeView === 'processing-jobs' && (
-              <ProcessingJobsView
-                jobs={jobs}
-                onUpdateJobStatus={handleUpdateJobStatus}
-              />
-            )}
+          {activeView === 'processing-jobs' && (
+            <ProcessingJobsView
+              jobs={jobs}
+              onUpdateJobStatus={handleUpdateJobStatus}
+              onUploadIngest={handleUploadIngest}
+            />
+          )}
 
-            {activeView === 'evidence-search' && (
-              <EvidenceSearchView
-                evidenceList={evidenceList}
-                onInspectSource={handleInspectEvidence}
-              />
-            )}
+          {activeView === 'evidence-search' && (
+            <EvidenceSearchView
+              evidenceList={evidenceList}
+              onInspectSource={handleInspectEvidence}
+            />
+          )}
 
-            {activeView === 'report-planner' && (
-              <ReportPlannerView
-                sections={sections}
-                onUpdateSections={handleUpdateSections}
-                onOpenEditorSection={(secId) => {
-                  setEditorTargetSectionId(secId);
-                  handleNavigate('report-editor');
-                }}
-              />
-            )}
+          {activeView === 'report-planner' && (
+            <ReportPlannerView
+              sections={sections}
+              onUpdateSections={handleUpdateSections}
+              onOpenEditorSection={(secId) => {
+                setEditorTargetSectionId(secId);
+                handleNavigate('report-editor');
+              }}
+            />
+          )}
 
-            {activeView === 'report-editor' && activeReport && (
-              <ReportEditorView
-                report={activeReport}
-                sections={sections}
-                initialSectionId={editorTargetSectionId}
-                blocks={blocks}
-                evidenceList={evidenceList}
-                onUpdateBlock={handleUpdateBlock}
-                onApplyAIProposal={handleApplyAIProposal}
-                onTriggerAIAgent={desktopService.triggerContextualAIAgent.bind(
-                  desktopService
-                )}
-                onInspectEvidence={handleInspectEvidence}
-              />
-            )}
+          {activeView === 'report-editor' && activeReport && (
+            <ReportEditorView
+              report={activeReport}
+              sections={sections}
+              initialSectionId={editorTargetSectionId}
+              blocks={blocks}
+              evidenceList={evidenceList}
+              onUpdateBlock={handleUpdateBlock}
+              onApplyAIProposal={handleApplyAIProposal}
+              onTriggerAIAgent={desktopService.triggerContextualAIAgent.bind(
+                desktopService
+              )}
+              onInspectEvidence={handleInspectEvidence}
+            />
+          )}
 
-            {activeView === 'asset-manager' && (
-              <AssetManagerView
-                assets={assets}
-                onInsertAssetToReport={(asset) => {
-                  alert(`Asset '${asset.filename}' inserted into active draft.`);
-                  handleNavigate('report-editor');
-                }}
-              />
-            )}
+          {activeView === 'asset-manager' && (
+            <AssetManagerView
+              assets={assets}
+              onInsertAssetToReport={(asset) => {
+                alert(`Asset '${asset.filename}' inserted into active draft.`);
+                handleNavigate('report-editor');
+              }}
+            />
+          )}
 
-            {activeView === 'validation' && (
-              <ValidationView
-                issues={validationIssues}
-                onNavigateToElement={handleNavigateToElement}
-                onResolveIssue={handleResolveValidationIssue}
-              />
-            )}
+          {activeView === 'validation' && (
+            <ValidationView
+              issues={validationIssues}
+              onNavigateToElement={handleNavigateToElement}
+              onResolveIssue={handleResolveValidationIssue}
+            />
+          )}
 
-            {activeView === 'preview' && (
-              <ReportPreviewView
-                report={activeReport}
-                onNavigateToExport={() => handleNavigate('export')}
-                onCreateNewReport={() => handleNavigate('new-report')}
-              />
-            )}
+          {activeView === 'preview' && (
+            <ReportPreviewView
+              report={activeReport}
+              onNavigateToExport={() => handleNavigate('export')}
+              onCreateNewReport={() => handleNavigate('new-report')}
+            />
+          )}
 
-            {activeView === 'export' && (
-              <ExportView
-                report={activeReport}
-                onOpenPreview={() => handleNavigate('preview')}
-                onCreateNewReport={() => handleNavigate('new-report')}
-              />
-            )}
+          {activeView === 'export' && (
+            <ExportView
+              report={activeReport}
+              onOpenPreview={() => handleNavigate('preview')}
+              onCreateNewReport={() => handleNavigate('new-report')}
+            />
+          )}
 
-            {activeView === 'security-audit' && (
-              <SecurityAuditView auditLogs={auditLogs} />
-            )}
+          {activeView === 'security-audit' && (
+            <SecurityAuditView auditLogs={auditLogs} />
+          )}
 
-            {activeView === 'settings' && (
-              <SettingsView healthComponents={healthComponents} aiProvider={aiProvider} aiModel={aiModel} />
-            )}
-          </main>
+          {activeView === 'settings' && (
+            <SettingsView healthComponents={healthComponents} aiProvider={aiProvider} aiModel={aiModel} />
+          )}
+        </main>
+
+        {/* Pinned Desktop Taskbar / Status Bar */}
+        <div className="no-print shrink-0">
+          <DesktopStatusBar
+            currentPlatform={currentPlatform}
+            onChangePlatform={(p) => {
+              setCurrentPlatform(p);
+              desktopBridge.setPlatform(p);
+            }}
+            onOpenAudit={() => setActiveView('security-audit')}
+            onOpenSettings={() => setActiveView('settings')}
+            aiProvider={aiProvider}
+            aiModel={aiModel}
+          />
         </div>
       </div>
 
@@ -509,19 +531,6 @@ function DesktopAppContent() {
         highlightBbox={sourceModal.highlightBbox}
         cellRange={sourceModal.cellRange}
         rawSnippet={sourceModal.rawSnippet}
-      />
-
-      {/* Desktop Taskbar / Status Bar */}
-      <DesktopStatusBar
-        currentPlatform={currentPlatform}
-        onChangePlatform={(p) => {
-          setCurrentPlatform(p);
-          desktopBridge.setPlatform(p);
-        }}
-        onOpenAudit={() => setActiveView('security-audit')}
-        onOpenSettings={() => setActiveView('settings')}
-        aiProvider={aiProvider}
-        aiModel={aiModel}
       />
 
       {/* About MineIntel Desktop Modal */}

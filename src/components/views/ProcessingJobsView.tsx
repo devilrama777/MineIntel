@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Clock,
   Layers,
+  Upload,
 } from 'lucide-react';
 import { ProcessingJobItem, JobStage } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
@@ -18,14 +19,27 @@ import { ProgressIndicator } from '../common/ProgressIndicator';
 interface ProcessingJobsViewProps {
   jobs: ProcessingJobItem[];
   onUpdateJobStatus: (id: string, status: 'running' | 'paused' | 'completed' | 'failed') => void;
+  onUploadIngest?: (file: File) => void;
 }
 
 export const ProcessingJobsView: React.FC<ProcessingJobsViewProps> = ({
   jobs,
   onUpdateJobStatus,
+  onUploadIngest,
 }) => {
   const [selectedJobId, setSelectedJobId] = useState<string>(jobs[0]?.id || '');
   const [statusFilter, setStatusFilter] = useState<string>('All');
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onUploadIngest) {
+      onUploadIngest(file);
+    }
+    if (e.target) {
+      e.target.value = '';
+    }
+  };
 
   const selectedJob = jobs.find((j) => j.id === selectedJobId) || jobs[0];
 
@@ -46,9 +60,9 @@ export const ProcessingJobsView: React.FC<ProcessingJobsViewProps> = ({
   ];
 
   return (
-    <div className="flex-1 overflow-hidden flex flex-col p-6 space-y-4">
+    <div className="min-h-full flex flex-col p-6 space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[#233145] pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#233145] pb-4 gap-3">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Cpu className="w-5 h-5 text-blue-400" />
@@ -61,13 +75,34 @@ export const ProcessingJobsView: React.FC<ProcessingJobsViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {onUploadIngest && (
+            <>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept=".pdf,.csv,.xlsx,.docx,.txt"
+                className="hidden"
+              />
+              <button
+                type="button"
+                id="btn-upload-ingest"
+                onClick={() => fileInputRef.current?.click()}
+                className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Upload & Ingest</span>
+              </button>
+            </>
+          )}
+
           {['All', 'Running', 'Completed', 'Paused'].map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => setStatusFilter(s)}
-              className={`px-3 py-1 rounded text-xs font-mono transition cursor-pointer ${
+              className={`px-3 py-1.5 rounded text-xs font-mono transition cursor-pointer ${
                 statusFilter === s
                   ? 'bg-blue-600 text-white font-semibold'
                   : 'bg-slate-800 text-slate-400 hover:text-slate-200'
@@ -80,7 +115,7 @@ export const ProcessingJobsView: React.FC<ProcessingJobsViewProps> = ({
       </div>
 
       {/* Main Split Layout: Left Jobs Table, Right Job Detail & Live Logs */}
-      <div className="flex-1 flex gap-5 overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row gap-5 min-h-[500px]">
         {/* Left Table Panel */}
         <div className="flex-1 bg-[#111722] border border-[#1e2a3b] rounded-md overflow-hidden flex flex-col">
           <div className="px-4 py-2.5 bg-[#141d2b] border-b border-[#1e2a3b] text-[11px] font-mono uppercase tracking-wider text-slate-400">

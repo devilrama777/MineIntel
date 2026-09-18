@@ -88,7 +88,7 @@ export const ReportPreviewView: React.FC<ReportPreviewViewProps> = ({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#0b0f17] p-6">
+    <div className="min-h-full bg-[#0b0f17] p-6">
       <div className="max-w-5xl mx-auto space-y-4">
         <div className="flex items-center justify-between border-b border-[#233145] pb-4">
           <div className="min-w-0">

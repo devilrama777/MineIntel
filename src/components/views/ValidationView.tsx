@@ -61,7 +61,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   const passCount = issues.filter((i) => i.severity === 'pass').length;
 
   return (
-    <div className="flex-1 overflow-hidden flex flex-col p-6 space-y-4">
+    <div className="min-h-full flex flex-col p-6 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[#233145] pb-4">
         <div>
@@ -138,13 +138,13 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
       </div>
 
       {/* Issues Table */}
-      <div className="flex-1 bg-[#111722] border border-[#1e2a3b] rounded-md overflow-hidden flex flex-col">
+      <div className="bg-[#111722] border border-[#1e2a3b] rounded-md flex flex-col">
         <div className="px-4 py-2.5 bg-[#141d2b] border-b border-[#1e2a3b] text-[11px] font-mono uppercase tracking-wider text-slate-400 flex items-center justify-between">
           <span>Validation Diagnostic Ledger ({filteredIssues.length} entries)</span>
           <span>Click any issue to navigate directly to document block</span>
         </div>
 
-        <div className="flex-1 overflow-y-auto divide-y divide-[#182333]">
+        <div className="divide-y divide-[#182333]">
           {filteredIssues.map((issue) => {
             const secId = issue.sectionId || issue.targetSectionId || 'sec-4-1';
             const blkId = issue.blockId || issue.targetBlockId;

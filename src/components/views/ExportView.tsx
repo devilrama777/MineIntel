@@ -59,7 +59,7 @@ export const ExportView: React.FC<ExportViewProps> = ({ report, onOpenPreview, o
 
   const formatLabel = exportFormat === 'pdf' ? 'PDF' : 'DOCX';
   return (
-    <div className="flex-1 overflow-y-auto bg-[#0d121c] p-6">
+    <div className="min-h-full p-6 max-w-4xl mx-auto space-y-6">
       <div className="max-w-3xl mx-auto space-y-6">
         <div className="border-b border-[#233145] pb-5">
           <div className="flex items-center gap-2 text-blue-400 text-xs font-mono uppercase tracking-wider"><Download className="w-4 h-4" /> Final report</div>

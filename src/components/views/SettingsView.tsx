@@ -87,7 +87,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents, ai
   ] as const;
 
   return (
-    <div className="flex-1 overflow-hidden flex flex-col p-6 space-y-4">
+    <div className="min-h-full flex flex-col p-6 space-y-6 max-w-7xl mx-auto w-full">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[#233145] pb-4">
         <div>
@@ -120,9 +120,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents, ai
       </div>
 
       {/* Main Settings Split: Left Tabs, Right Form */}
-      <div className="flex-1 flex gap-5 overflow-hidden">
+      <div className="flex flex-col md:flex-row gap-5 items-start">
         {/* Left Vertical Tabs */}
-        <div className="w-64 bg-[#111722] border border-[#1e2a3b] rounded-md overflow-hidden flex flex-col shrink-0 select-none">
+        <div className="w-full md:w-64 bg-[#111722] border border-[#1e2a3b] rounded-md overflow-hidden flex flex-col shrink-0 select-none">
           <div className="p-3 bg-[#141d2b] border-b border-[#1e2a3b] text-[10px] font-mono uppercase tracking-wider text-slate-400">
             CONFIGURATION SECTORS
           </div>
@@ -145,7 +145,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ healthComponents, ai
         </div>
 
         {/* Right Configuration Forms */}
-        <div className="flex-1 bg-[#111722] border border-[#1e2a3b] rounded-md p-6 overflow-y-auto space-y-6 font-mono text-xs">
+        <div className="flex-1 w-full bg-[#111722] border border-[#1e2a3b] rounded-md p-6 space-y-6 font-mono text-xs">
           {activeTab === 'Profile' && (
             <div className="space-y-5 max-w-2xl">
               <div><h2 className="text-sm font-semibold text-slate-100 font-sans">Authenticated User Profile</h2><p className="text-xs text-slate-400 font-sans">Update permitted personal information. Officer ID is immutable.</p></div>

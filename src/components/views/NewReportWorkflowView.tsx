@@ -294,7 +294,7 @@ export const NewReportWorkflowView: React.FC<Props> = ({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto report-workspace">
+    <div className="min-h-full report-workspace">
       <div className="report-shell">
         <header className="report-header">
           <div>
@@ -356,6 +356,7 @@ export const NewReportWorkflowView: React.FC<Props> = ({
               ) : (
                 <button
                   type="button"
+                  id="btn-generate-report"
                   disabled={launching || !reportName.trim() || selected.length === 0}
                   onClick={launch}
                   className="primary-button"
@@ -365,7 +366,7 @@ export const NewReportWorkflowView: React.FC<Props> = ({
                   ) : (
                     <Play className="w-4 h-4" />
                   )}
-                  Create report plan
+                  Generate Report
                 </button>
               )}
             </footer>

@@ -62,7 +62,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div
-      className={`flex-1 overflow-y-auto p-5 sm:p-7 space-y-7 transition-colors duration-200 ${
+      className={`min-h-full p-5 sm:p-7 space-y-7 transition-colors duration-200 ${
         isLight ? 'bg-slate-50 text-slate-800' : 'bg-[#0a0d14] text-slate-100'
       }`}
     >
@@ -170,11 +170,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         <div
-          className={`p-4 rounded-xl border transition-all ${
+          id="card-ingested-sources"
+          onClick={() => onNavigate('processing-jobs')}
+          className={`p-4 rounded-xl border transition-all cursor-pointer ${
             isLight
               ? 'bg-white border-slate-200 shadow-xs hover:border-indigo-300'
               : 'bg-[#111722] border-[#1e2a3b] hover:border-slate-700'
           }`}
+          title="View Ingested Sources and Processing Queue"
         >
           <div className="flex items-center justify-between text-xs mb-2">
             <span

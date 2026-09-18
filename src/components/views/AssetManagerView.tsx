@@ -42,7 +42,7 @@ export const AssetManagerView: React.FC<AssetManagerViewProps> = ({
   });
 
   return (
-    <div className="flex-1 overflow-hidden flex flex-col p-6 space-y-4">
+    <div className="min-h-full flex flex-col p-6 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[#233145] pb-4">
         <div>
@@ -97,7 +97,7 @@ export const AssetManagerView: React.FC<AssetManagerViewProps> = ({
       </div>
 
       {/* Main Split Layout: Assets Grid + Asset Inspector */}
-      <div className="flex-1 flex gap-5 overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row gap-5 min-h-[500px]">
         {/* Assets Grid */}
         <div className="flex-1 overflow-y-auto grid grid-cols-2 md:grid-cols-3 gap-4 pr-1">
           {filteredAssets.map((asset) => {

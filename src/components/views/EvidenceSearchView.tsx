@@ -52,7 +52,7 @@ export const EvidenceSearchView: React.FC<EvidenceSearchViewProps> = ({
     evidenceList.find((e) => e.id === selectedEvidenceId) || filteredEvidence[0];
 
   return (
-    <div className="flex-1 overflow-hidden flex flex-col p-6 space-y-4">
+    <div className="min-h-full flex flex-col p-6 space-y-4">
       {/* Search Header */}
       <div className="flex items-center justify-between border-b border-[#233145] pb-4">
         <div>
@@ -177,7 +177,7 @@ export const EvidenceSearchView: React.FC<EvidenceSearchViewProps> = ({
       </div>
 
       {/* Split Workspace: Left Results List, Right Evidence Deep-Dive Panel */}
-      <div className="flex-1 flex gap-5 overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row gap-5 min-h-[500px]">
         {/* Results List */}
         <div className="flex-1 bg-[#111722] border border-[#1e2a3b] rounded-md overflow-hidden flex flex-col">
           <div className="px-4 py-2.5 bg-[#141d2b] border-b border-[#1e2a3b] text-[11px] font-mono uppercase tracking-wider text-slate-400 flex items-center justify-between">

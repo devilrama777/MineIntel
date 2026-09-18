@@ -70,7 +70,7 @@ export const SecurityAuditView: React.FC<SecurityAuditViewProps> = ({ auditLogs 
   ];
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-6">
+    <div className="min-h-full p-6 space-y-6">
       {/* Header */}
       <div className="border-b border-[#233145] pb-4 flex items-center justify-between">
         <div>
