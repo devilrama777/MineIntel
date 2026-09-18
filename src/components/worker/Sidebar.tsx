@@ -7,10 +7,10 @@ import {
   ChevronRight,
   Layers,
   Settings as SettingsIcon,
-  User,
   LogOut
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { ActiveView } from './types';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -19,8 +19,9 @@ interface SidebarProps {
   onSelectDataSource: () => void;
   onPreview: () => void;
   onExport: () => void;
+  onNavigateSettings?: () => void;
   onNavigateProfile?: () => void;
-  activeView: 'generator' | 'preview' | 'export' | 'report' | 'editor' | 'datasource' | 'profile';
+  activeView: ActiveView;
   hasReport: boolean;
   hasDataSource: boolean;
   dataSourceName?: string;
@@ -33,6 +34,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectDataSource,
   onPreview,
   onExport,
+  onNavigateSettings,
   onNavigateProfile,
   activeView,
   hasReport,
@@ -45,13 +47,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const avatarLetter = (displayName[0] || 'O').toUpperCase();
   return (
     <aside
-      className={`relative flex flex-col border-r transition-all duration-300 z-30 shrink-0 select-none ${
+      className={`relative flex flex-col h-full border-r transition-all duration-300 z-30 shrink-0 select-none ${
         isCollapsed ? 'w-18' : 'w-64'
       } bg-white/95 dark:bg-[#091222]/95 backdrop-blur-md border-blue-900/20 dark:border-blue-500/20 shadow-xs`}
       aria-label="Application Sidebar"
     >
       {/* Sidebar Header & Toggle */}
-      <div className="h-16 px-3.5 flex items-center justify-between border-b border-blue-900/15 dark:border-blue-500/15">
+      <div className="h-18 px-3.5 flex items-center justify-between border-b border-blue-900/15 dark:border-blue-500/15 shrink-0">
         {!isCollapsed && (
           <div className="flex items-center gap-2.5 overflow-hidden">
             <div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/70 border border-blue-200 dark:border-blue-800/60">
@@ -103,15 +105,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
           onClick={onNewReport}
           className={`w-full group flex items-center gap-3 px-3.5 py-3 rounded-xl font-bold text-sm transition-all duration-200 cursor-pointer text-left ${
             isCollapsed ? 'justify-center px-2' : ''
-          } bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md shadow-blue-500/20 border border-blue-400/30 active:scale-98`}
+          } ${
+            activeView === 'editor' && !hasReport
+              ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 text-white shadow-md shadow-blue-500/25 ring-2 ring-blue-400 dark:ring-blue-400/80 border border-blue-400/40'
+              : 'bg-blue-600/10 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-gradient-to-r hover:from-blue-600 hover:to-indigo-600 hover:text-white border border-blue-200/60 dark:border-blue-800/60 shadow-xs'
+          } active:scale-98`}
           title="New Report"
         >
-          <FilePlus2 className="w-5 h-5 flex-shrink-0 text-white group-hover:scale-110 transition-transform" />
+          <FilePlus2 className={`w-5 h-5 flex-shrink-0 transition-transform group-hover:scale-110 ${
+            activeView === 'editor' && !hasReport ? 'text-white' : 'text-blue-600 dark:text-blue-400 group-hover:text-white'
+          }`} />
           {!isCollapsed && (
             <div className="flex-1 min-w-0 flex items-center justify-between">
               <span className="truncate">New Report</span>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-white/20 text-white">
-                Start
+              <span className={`text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md transition-colors ${
+                activeView === 'editor' && !hasReport
+                  ? 'bg-white/25 text-white'
+                  : 'bg-blue-600/20 dark:bg-blue-400/20 text-blue-700 dark:text-blue-300 group-hover:bg-white/20 group-hover:text-white'
+              }`}>
+                {activeView === 'editor' && !hasReport ? 'Active' : 'Start'}
               </span>
             </div>
           )}
@@ -132,14 +144,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className={`w-full group flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-semibold text-sm transition-all duration-150 cursor-pointer text-left border ${
             isCollapsed ? 'justify-center px-2' : ''
           } ${
-            hasDataSource
-              ? 'bg-blue-50/80 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200 border-blue-200 dark:border-blue-800/60 shadow-2xs'
+            activeView === 'datasource'
+              ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-900 dark:text-blue-100 border-blue-300 dark:border-blue-500/60 shadow-xs ring-1 ring-blue-400/40'
               : 'text-neutral-700 dark:text-blue-100 hover:bg-neutral-100 dark:hover:bg-blue-950/40 border-transparent'
           }`}
           title="Data Source (Upload / Change Document)"
         >
           <div className="relative flex-shrink-0">
-            <Database className="w-5 h-5 text-blue-600 dark:text-blue-400 group-hover:scale-105 transition-transform" />
+            <Database className={`w-5 h-5 group-hover:scale-105 transition-transform ${
+              activeView === 'datasource' ? 'text-blue-600 dark:text-blue-400' : 'text-blue-600 dark:text-blue-400'
+            }`} />
             {hasDataSource && (
               <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full ring-2 ring-white dark:ring-[#091222]" />
             )}
@@ -170,13 +184,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
             isCollapsed ? 'justify-center px-2' : ''
           } ${
             activeView === 'preview'
-              ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-900 dark:text-indigo-200 border-indigo-200 dark:border-indigo-800/60 shadow-2xs'
+              ? 'bg-indigo-50 dark:bg-indigo-950/70 text-indigo-900 dark:text-indigo-100 border-indigo-300 dark:border-indigo-500/60 shadow-xs ring-1 ring-indigo-400/40'
               : 'text-neutral-700 dark:text-blue-100 hover:bg-neutral-100 dark:hover:bg-blue-950/40 border-transparent'
           }`}
           title="Preview File (Open PDF Slide Form)"
         >
           <div className="relative flex-shrink-0">
-            <Eye className="w-5 h-5 text-indigo-600 dark:text-indigo-400 group-hover:scale-105 transition-transform" />
+            <Eye className={`w-5 h-5 group-hover:scale-105 transition-transform ${
+              activeView === 'preview' ? 'text-indigo-600 dark:text-indigo-400' : 'text-indigo-600 dark:text-indigo-400'
+            }`} />
             {(hasReport || hasDataSource) && (
               <span className="absolute -top-1 -right-1 w-2 h-2 bg-indigo-500 rounded-full" />
             )}
@@ -207,12 +223,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
             isCollapsed ? 'justify-center px-2' : ''
           } ${
             activeView === 'export'
-              ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800/60 shadow-2xs'
+              ? 'bg-emerald-50 dark:bg-emerald-950/70 text-emerald-900 dark:text-emerald-100 border-emerald-300 dark:border-emerald-500/60 shadow-xs ring-1 ring-emerald-400/40'
               : 'text-neutral-700 dark:text-blue-100 hover:bg-neutral-100 dark:hover:bg-blue-950/40 border-transparent'
           }`}
           title="Export Document (PDF / DOCX)"
         >
-          <Download className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0 group-hover:scale-105 transition-transform" />
+          <Download className={`w-5 h-5 flex-shrink-0 group-hover:scale-105 transition-transform ${
+            activeView === 'export' ? 'text-emerald-600 dark:text-emerald-400' : 'text-emerald-600 dark:text-emerald-400'
+          }`} />
           {!isCollapsed && (
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
@@ -231,21 +249,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Bottom Pinned Section: Settings & Profile/User Menu */}
       <div className="p-3 border-t border-blue-900/15 dark:border-blue-500/15 space-y-2 shrink-0 bg-white/50 dark:bg-[#070e1c]/50">
-        {/* Settings Button */}
+        {/* 5. Settings Button */}
         <button
           id="btn-sidebar-settings"
           type="button"
-          onClick={onNavigateProfile}
+          onClick={onNavigateSettings || onNavigateProfile}
           className={`w-full group flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-semibold text-xs transition-all duration-150 cursor-pointer text-left border ${
             isCollapsed ? 'justify-center px-2' : ''
           } ${
-            activeView === 'profile'
-              ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-900 dark:text-blue-100 border-blue-200 dark:border-blue-800/60 shadow-2xs'
+            activeView === 'settings'
+              ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-900 dark:text-blue-100 border-blue-300 dark:border-blue-500/60 shadow-xs ring-1 ring-blue-400/40'
               : 'text-neutral-700 dark:text-blue-100 hover:bg-neutral-100 dark:hover:bg-blue-950/40 border-transparent'
           }`}
           title="Settings & System Configuration"
         >
-          <SettingsIcon className="w-4 h-4 text-neutral-500 dark:text-blue-400 group-hover:rotate-45 transition-transform" />
+          <SettingsIcon className={`w-4 h-4 group-hover:rotate-45 transition-transform ${
+            activeView === 'settings' ? 'text-blue-600 dark:text-blue-400' : 'text-neutral-500 dark:text-blue-400'
+          }`} />
           {!isCollapsed && (
             <div className="flex-1 min-w-0">
               <span className="truncate font-semibold">Settings</span>
@@ -253,12 +273,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </button>
 
-        {/* Profile / User Option Card */}
+        {/* 6. Profile / User Option Card */}
         <div
           id="sidebar-user-card"
           onClick={onNavigateProfile}
-          className={`group flex items-center gap-2.5 p-2 rounded-xl border border-neutral-200/80 dark:border-blue-900/50 bg-neutral-50 dark:bg-[#0b162a] hover:border-blue-500/40 transition cursor-pointer ${
+          className={`group flex items-center gap-2.5 p-2 rounded-xl border transition cursor-pointer ${
             isCollapsed ? 'justify-center p-1.5' : ''
+          } ${
+            activeView === 'profile'
+              ? 'border-blue-400 dark:border-blue-500/80 bg-blue-50 dark:bg-blue-950/60 ring-1 ring-blue-400/40 shadow-xs'
+              : 'border-neutral-200/80 dark:border-blue-900/50 bg-neutral-50 dark:bg-[#0b162a] hover:border-blue-500/40'
           }`}
           title={`Signed in as ${displayName}`}
         >

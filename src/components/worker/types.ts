@@ -10,7 +10,7 @@ export type ReportDepth = 'concise' | 'standard' | 'comprehensive';
 
 export type ReportTone = 'executive' | 'analytical' | 'action-oriented';
 
-export type ActiveView = 'editor' | 'datasource' | 'preview' | 'export' | 'profile';
+export type ActiveView = 'editor' | 'datasource' | 'preview' | 'export' | 'profile' | 'settings';
 
 export interface ReportMetadata {
   title: string;

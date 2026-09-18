@@ -39,6 +39,9 @@ import {
   AuthenticatedUserProfileView 
 } from './AuthenticatedUserProfileView';
 import { 
+  SettingsView 
+} from '../views/SettingsView';
+import { 
   SAMPLE_DOCUMENTS 
 } from './sampleDocuments';
 import { 
@@ -458,6 +461,15 @@ export function WorkerApp() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const scrollToTop = () => {
+    const mainEl = document.getElementById('main-content-scroll');
+    if (mainEl) {
+      mainEl.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   const handleNewReport = () => {
     setCurrentReport(null);
     handleClearFile();
@@ -465,13 +477,13 @@ export function WorkerApp() {
     setActiveView('editor');
     setIsMobileSidebarOpen(false);
     showToast('Ready to create a new report! Upload a document to begin.');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollToTop();
   };
 
   const handleSelectDataSource = () => {
     setActiveView('datasource');
     setIsMobileSidebarOpen(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollToTop();
   };
 
   const handlePreviewReport = () => {
@@ -484,7 +496,7 @@ export function WorkerApp() {
       }
     }
     setActiveView('preview');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollToTop();
   };
 
   const handleExportReport = () => {
@@ -497,78 +509,91 @@ export function WorkerApp() {
       }
     }
     setActiveView('export');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollToTop();
+  };
+
+  const handleSelectSettings = () => {
+    setActiveView('settings');
+    setIsMobileSidebarOpen(false);
+    scrollToTop();
   };
 
   const handleSelectProfile = () => {
     setActiveView('profile');
     setIsMobileSidebarOpen(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollToTop();
   };
 
   const canGenerate = Boolean(fileBase64 || rawText.trim().length > 0);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#f4f8ff] dark:bg-[#070e1c] text-neutral-900 dark:text-neutral-50 transition-colors duration-200">
-      {/* Top Navigation */}
-      <Header
-        isDark={isDark}
-        onToggleTheme={handleToggleTheme}
-        onOpenHistory={() => setIsHistoryOpen(true)}
-        onNavigateProfile={handleSelectProfile}
-        historyCount={reportsHistory.length}
-        onToggleMobileSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
-      />
+    <div className="flex h-screen w-screen overflow-hidden bg-[#f4f8ff] dark:bg-[#070e1c] text-neutral-900 dark:text-neutral-50 transition-colors duration-200">
+      {/* 1. Full-Height Left Sidebar (Extends from top of application viewport to bottom) */}
+      <div className="hidden lg:flex h-screen shrink-0 z-30">
+        <Sidebar
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+          onNewReport={handleNewReport}
+          onSelectDataSource={handleSelectDataSource}
+          onPreview={handlePreviewReport}
+          onExport={handleExportReport}
+          onNavigateSettings={handleSelectSettings}
+          onNavigateProfile={handleSelectProfile}
+          activeView={activeView}
+          hasReport={Boolean(currentReport || reportsHistory.length > 0)}
+          hasDataSource={Boolean(fileName || rawText.trim().length > 0)}
+          dataSourceName={fileName}
+        />
+      </div>
 
-      {/* Main Workspace Layout with Left Sidebar */}
-      <div className="flex-1 flex w-full relative overflow-x-hidden">
-        {/* Left Sidebar (Desktop Fixed Sticky) */}
-        <div className="hidden lg:block sticky top-18 h-[calc(100vh-4.5rem)]">
-          <Sidebar
-            isCollapsed={isSidebarCollapsed}
-            onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
-            onNewReport={handleNewReport}
-            onSelectDataSource={handleSelectDataSource}
-            onPreview={handlePreviewReport}
-            onExport={handleExportReport}
+      {/* Mobile Slide-over Drawer for Sidebar */}
+      {isMobileSidebarOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex">
+          <div 
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setIsMobileSidebarOpen(false)}
+          />
+          <div className="relative z-10 w-72 max-w-[80vw] h-full shadow-2xl">
+            <Sidebar
+              isCollapsed={false}
+              onToggleCollapse={() => setIsMobileSidebarOpen(false)}
+              onNewReport={handleNewReport}
+              onSelectDataSource={handleSelectDataSource}
+              onPreview={handlePreviewReport}
+              onExport={handleExportReport}
+              onNavigateSettings={() => {
+                handleSelectSettings();
+                setIsMobileSidebarOpen(false);
+              }}
+              onNavigateProfile={() => {
+                handleSelectProfile();
+                setIsMobileSidebarOpen(false);
+              }}
+              activeView={activeView}
+              hasReport={Boolean(currentReport || reportsHistory.length > 0)}
+              hasDataSource={Boolean(fileName || rawText.trim().length > 0)}
+              dataSourceName={fileName}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 2. Main Shell Layout (Header at Top + Vertical Scrollable Main Canvas Below) */}
+      <div className="flex-1 flex flex-col h-screen min-w-0 overflow-hidden">
+        {/* Pinned Top Navigation beside Sidebar */}
+        <div className="shrink-0 z-20">
+          <Header
+            isDark={isDark}
+            onToggleTheme={handleToggleTheme}
+            onOpenHistory={() => setIsHistoryOpen(true)}
             onNavigateProfile={handleSelectProfile}
-            activeView={activeView}
-            hasReport={Boolean(currentReport || reportsHistory.length > 0)}
-            hasDataSource={Boolean(fileName || rawText.trim().length > 0)}
-            dataSourceName={fileName}
+            historyCount={reportsHistory.length}
+            onToggleMobileSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
           />
         </div>
 
-        {/* Mobile Slide-over Drawer for Sidebar */}
-        {isMobileSidebarOpen && (
-          <div className="fixed inset-0 z-50 lg:hidden flex">
-            <div 
-              className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
-              onClick={() => setIsMobileSidebarOpen(false)}
-            />
-            <div className="relative z-10 w-72 max-w-[80vw] h-full shadow-2xl">
-              <Sidebar
-                isCollapsed={false}
-                onToggleCollapse={() => setIsMobileSidebarOpen(false)}
-                onNewReport={handleNewReport}
-                onSelectDataSource={handleSelectDataSource}
-                onPreview={handlePreviewReport}
-                onExport={handleExportReport}
-                onNavigateProfile={() => {
-                  handleSelectProfile();
-                  setIsMobileSidebarOpen(false);
-                }}
-                activeView={activeView}
-                hasReport={Boolean(currentReport || reportsHistory.length > 0)}
-                hasDataSource={Boolean(fileName || rawText.trim().length > 0)}
-                dataSourceName={fileName}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Main Content Area */}
-        <main className="flex-1 min-w-0 px-4 sm:px-6 lg:px-8 py-6 sm:py-8 max-w-7xl mx-auto w-full">
+        {/* Natural Vertical Scrollable Main Content Container */}
+        <main id="main-content-scroll" className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-6 lg:px-8 py-6 sm:py-8 max-w-7xl mx-auto w-full">
           {/* Toast feedback banner */}
           {toastMessage && (
             <div className="mb-6 p-4 rounded-2xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/95 dark:bg-blue-950/70 text-blue-900 dark:text-blue-100 text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 shadow-xs animate-fade-in">
@@ -603,8 +628,13 @@ export function WorkerApp() {
             </div>
           )}
 
-          {/* VIEW 1: PREVIEW PAGE VIEW (Untouched, rendered directly in app) */}
-          {activeView === 'preview' ? (
+          {/* VIEW 1: SETTINGS VIEW */}
+          {activeView === 'settings' ? (
+            <div className="space-y-6">
+              <SettingsView healthComponents={[]} />
+            </div>
+          ) : activeView === 'preview' ? (
+            /* VIEW 2: PREVIEW PAGE VIEW (Untouched, rendered directly in app) */
             <PdfSlidePreviewView
               fileName={fileName || currentReport?.fileName || (uploadedFiles[0]?.name ?? SAMPLE_DOCUMENTS[0].fileName)}
               fileType={fileType || 'application/pdf'}
@@ -613,24 +643,24 @@ export function WorkerApp() {
               currentReport={currentReport}
               onJumpToExport={() => {
                 setActiveView('export');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                scrollToTop();
               }}
               onUpdateRawText={(updatedText) => setRawText(updatedText)}
             />
           ) : activeView === 'export' ? (
-            /* VIEW 2: EXPORT SECTION (Untouched, PDF and DOCX options, nothing selected by default) */
+            /* VIEW 3: EXPORT SECTION (Untouched, PDF and DOCX options, nothing selected by default) */
             <ExportSection
               fileName={fileName || currentReport?.fileName || (uploadedFiles[0]?.name ?? SAMPLE_DOCUMENTS[0].fileName)}
               fileSize={fileSize}
               totalSlides={6}
               onBackToPreview={() => {
                 setActiveView('preview');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                scrollToTop();
               }}
               onDownload={handleDownloadExport}
             />
           ) : activeView === 'datasource' ? (
-            /* VIEW 3: DATA SOURCE SECTION (New Ingestion View) */
+            /* VIEW 4: DATA SOURCE SECTION (New Ingestion View) */
             <DataSourceView
               fileName={fileName}
               fileType={fileType}
@@ -646,21 +676,25 @@ export function WorkerApp() {
               isDark={isDark}
             />
           ) : activeView === 'profile' ? (
-            /* VIEW 4: AUTHENTICATED USER PROFILE */
+            /* VIEW 5: AUTHENTICATED USER PROFILE */
             <AuthenticatedUserProfileView
-              onBack={() => setActiveView('editor')}
+              onBack={() => {
+                setActiveView('editor');
+                scrollToTop();
+              }}
             />
           ) : currentReport ? (
-            /* VIEW 5: REPORT VIEWER */
+            /* VIEW 6: REPORT VIEWER */
             <ReportViewer
               report={currentReport}
               onReset={() => {
                 setCurrentReport(null);
                 setActiveView('editor');
+                scrollToTop();
               }}
               onOpenSlidePreview={() => {
                 setActiveView('preview');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                scrollToTop();
               }}
             />
           ) : (

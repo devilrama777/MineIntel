@@ -25,7 +25,7 @@ export const MineIntelLogo: React.FC<MineIntelLogoProps> = ({
           style={{ width: size, height: size }}
         >
           <img
-            src="/mineintel_logo.svg"
+            src="/logo.png"
             alt="MineIntel Icon"
             className="w-full h-full object-contain"
           />
@@ -56,7 +56,7 @@ export const MineIntelLogo: React.FC<MineIntelLogoProps> = ({
           <div className="absolute -inset-1.5 rounded-2xl bg-blue-500/30 blur-lg -z-10 animate-pulse" />
         )}
         <img
-          src="/mineintel_logo.svg"
+          src="/logo.png"
           alt="MineIntel Official Logo"
           className="w-full h-full object-contain drop-shadow-md transition-transform hover:scale-102 duration-200"
         />
