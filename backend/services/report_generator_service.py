@@ -131,6 +131,17 @@ class ReportGeneratorService:
             artifact.completed_at = int(time.time() * 1000)
             store_save_report(artifact.to_dict())
 
+            try:
+                from backend.services.report_editor_service import report_editor_service
+                report_editor_service.initialize_report_revision(
+                    report_dict=artifact.to_dict(),
+                    plan_dict=plan.to_dict(),
+                    evidence_items=evidence_items,
+                    charts=charts
+                )
+            except Exception as rev_err:
+                logger.warning(f"Could not auto-initialize v1 revision for {report_id}: {rev_err}")
+
             logger.info(f"Report generation complete: {report_id} ({page_count} pages)")
             return {
                 "success": True,

@@ -583,5 +583,323 @@ class LongDocumentBuilder:
         md_path.write_text(md_content, encoding="utf-8")
         return str(md_path)
 
+    def build_pdf_from_revision(
+        self,
+        revision: Any,  # ReportRevision
+        evidence_items: List[Dict[str, Any]],
+        charts: List[Dict[str, Any]],
+        output_filename: Optional[str] = None
+    ) -> Tuple[str, int]:
+        """
+        Renders long-document PDF reflecting user edits, approved state, and audit trails.
+        Returns (pdf_path, total_page_count).
+        """
+        fname = output_filename or f"Report_{revision.report_id}_v{revision.version}.pdf"
+        pdf_path = REPORTS_DIR / fname
+
+        evidence_by_id = {it.get("evidence_id"): it for it in evidence_items if it.get("evidence_id")}
+        charts_by_id = {c.get("chart_id"): c for c in charts if c.get("chart_id")}
+
+        doc = SimpleDocTemplate(
+            str(pdf_path),
+            pagesize=letter,
+            leftMargin=54,
+            rightMargin=54,
+            topMargin=54,
+            bottomMargin=54
+        )
+
+        elements: List[Any] = []
+
+        # 1. Cover Page
+        elements.append(Spacer(1, 24))
+        header_text = "<b>GOVERNMENT OF INDIA • MINISTRY OF COAL</b><br/><font color='#64748B' size='7.5'>CENTRAL MINE PLANNING &amp; DESIGN INSTITUTE • REVISION AUDIT DIVISION</font>"
+        elements.append(Paragraph(header_text, ParagraphStyle("GovHeadRev", fontName="Helvetica", fontSize=9, leading=12, alignment=1, textColor=colors.HexColor("#0F172A"))))
+        elements.append(Spacer(1, 16))
+        elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor("#0D9488"), spaceAfter=30))
+
+        elements.append(Paragraph(self._sanitize_for_reportlab(revision.title), self.style_cover_title))
+        if revision.subtitle:
+            elements.append(Paragraph(self._sanitize_for_reportlab(revision.subtitle), self.style_cover_sub))
+
+        elements.append(Spacer(1, 20))
+        created_date = time.strftime("%d %B %Y", time.localtime(revision.updated_at / 1000 if revision.updated_at else time.time()))
+        meta_data = [
+            [Paragraph("<b>Document Reference:</b>", self.style_body), Paragraph(f"MIN/REP/{revision.job_id}/v{revision.version}", self.style_body)],
+            [Paragraph("<b>Revision Version:</b>", self.style_body), Paragraph(f"Version {revision.version} ({revision.state.upper()})", self.style_body)],
+            [Paragraph("<b>Authorizing Officer:</b>", self.style_body), Paragraph(revision.owner_id, self.style_body)],
+            [Paragraph("<b>Date of Compilation:</b>", self.style_body), Paragraph(created_date, self.style_body)],
+            [Paragraph("<b>Change Summary:</b>", self.style_body), Paragraph(self._sanitize_for_reportlab(revision.change_summary or "Baseline Compilation"), self.style_body)],
+        ]
+        if revision.approved_by:
+            app_date = time.strftime("%d %B %Y", time.localtime(revision.approved_at / 1000 if revision.approved_at else time.time()))
+            meta_data.append([Paragraph("<b>Approved By:</b>", self.style_body), Paragraph(f"<b>{revision.approved_by}</b> on {app_date}", self.style_body)])
+
+        meta_data.append([Paragraph("<b>Classification:</b>", self.style_body), Paragraph("<font color='#B91C1C'><b>CONFIDENTIAL REGULATORY DOSSIER</b></font>", self.style_body)])
+
+        meta_table = Table(meta_data, colWidths=[150, 350])
+        meta_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+            ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#CBD5E1")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ]))
+        elements.append(meta_table)
+        elements.append(Spacer(1, 40))
+        elements.append(PageBreak())
+
+        # 2. Table of Contents
+        elements.append(Paragraph("TABLE OF CONTENTS (REVISION DOSSIER)", self.style_sec_h1))
+        elements.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#0D9488"), spaceAfter=14))
+        toc_data = [[Paragraph("<b>Section Title</b>", self.style_toc_item_bold), Paragraph("<b>Revision Status</b>", self.style_toc_item_bold)]]
+        for sec in revision.sections:
+            status_tag = "<font color='#B45309'>User Edited</font>" if getattr(sec, "user_modified", False) else "Original AI Baseline"
+            toc_data.append([
+                Paragraph(f"<b>{sec.section_id} {self._sanitize_for_reportlab(sec.title)}</b>", self.style_toc_item_bold),
+                Paragraph(status_tag, self.style_toc_item)
+            ])
+            for sub in getattr(sec, "subsections", []):
+                toc_data.append([
+                    Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;{sub.section_id} {self._sanitize_for_reportlab(sub.title)}", self.style_toc_item),
+                    Paragraph("Sub-topic", self.style_toc_item)
+                ])
+        toc_table = Table(toc_data, colWidths=[360, 140])
+        toc_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
+            ("LINEBELOW", (0, 0), (-1, 0), 1, colors.HexColor("#94A3B8")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(toc_table)
+        elements.append(PageBreak())
+
+        # 3. Dynamic Sections
+        for sec in revision.sections:
+            elements.append(Paragraph(f"{sec.section_id} {self._sanitize_for_reportlab(sec.title)}", self.style_sec_h1))
+            elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0D9488"), spaceAfter=8))
+
+            if getattr(sec, "user_modified", False):
+                badge_p = Paragraph("<font color='#0D9488'><b>[AUDITOR REVISED NARRATIVE]</b></font>", self.style_citation)
+                elements.append(badge_p)
+
+            # Narrative Text
+            if getattr(sec, "content_text", ""):
+                elements.append(Paragraph(self._sanitize_for_reportlab(sec.content_text), self.style_body))
+                elements.append(Spacer(1, 4))
+
+            # Attached evidence items
+            for eid in getattr(sec, "evidence_ids", []):
+                ev = evidence_by_id.get(eid)
+                if ev:
+                    cls_name = ev.get("classification", "LOCKED FACT")
+                    prov = ev.get("provenance") or {}
+                    cit = prov.get("citation") or prov.get("provenance") or prov.get("filename", "Evidence")
+                    header_p = f"<font color='#0369A1'><b>[{cls_name}]</b></font> <b>{eid}</b> <font color='#64748B'>• {self._sanitize_for_reportlab(cit)}</font>"
+                    elements.append(Paragraph(header_p, self.style_citation))
+
+            # Attached charts
+            for cid in getattr(sec, "chart_ids", []):
+                chart = charts_by_id.get(cid)
+                if chart and chart.get("png_path") and Path(chart["png_path"]).exists():
+                    try:
+                        cfg = chart.get("config") or {}
+                        elements.append(Spacer(1, 4))
+                        elements.append(Paragraph(f"<b>Figure: {self._sanitize_for_reportlab(cfg.get('title', 'Chart'))}</b>", self.style_sec_h2))
+                        rl_chart = RLImage(str(chart["png_path"]), width=480, height=240)
+                        elements.append(rl_chart)
+                        elements.append(Spacer(1, 6))
+                    except Exception as e:
+                        logger.warning(f"Error embedding chart {cid}: {e}")
+
+            # Subsections
+            for sub in getattr(sec, "subsections", []):
+                elements.append(Spacer(1, 4))
+                elements.append(Paragraph(f"{sub.section_id} {self._sanitize_for_reportlab(sub.title)}", self.style_sec_h2))
+                if getattr(sub, "content_text", ""):
+                    elements.append(Paragraph(self._sanitize_for_reportlab(sub.content_text), self.style_body))
+
+            elements.append(Spacer(1, 8))
+            elements.append(PageBreak())
+
+        # 4. Appendix: Audited Evidence Ledger
+        elements.append(Paragraph("APPENDIX: AUDITED EVIDENCE PROVENANCE LEDGER", self.style_sec_h1))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0D9488"), spaceAfter=10))
+        ledger_data = [
+            [Paragraph("<b>Evidence ID</b>", self.style_toc_item_bold),
+             Paragraph("<b>Classification</b>", self.style_toc_item_bold),
+             Paragraph("<b>Source Document</b>", self.style_toc_item_bold),
+             Paragraph("<b>Provenance Citation</b>", self.style_toc_item_bold)]
+        ]
+        all_eids = list(dict.fromkeys([eid for s in revision.sections for eid in getattr(s, "evidence_ids", [])]))
+        for eid in all_eids[:100]:
+            it = evidence_by_id.get(eid, {})
+            prov = it.get("provenance") or {}
+            ledger_data.append([
+                Paragraph(eid, self.style_citation),
+                Paragraph(it.get("classification", "FACT"), self.style_citation),
+                Paragraph(prov.get("filename", "N/A"), self.style_citation),
+                Paragraph(prov.get("citation") or prov.get("provenance") or "Document", self.style_citation)
+            ])
+        ledger_table = Table(ledger_data, colWidths=[90, 85, 125, 200], repeatRows=1)
+        ledger_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E2E8F0")),
+            ("LINEBELOW", (0, 0), (-1, 0), 1, colors.HexColor("#64748B")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+        elements.append(ledger_table)
+
+        def make_canvas(*args, **kwargs):
+            c = NumberedReportCanvas(*args, **kwargs)
+            c.job_id = revision.job_id
+            c.doc_title = revision.title
+            return c
+
+        doc.build(elements, canvasmaker=make_canvas)
+
+        page_count = 1
+        try:
+            import pypdf
+            with open(pdf_path, "rb") as f:
+                reader = pypdf.PdfReader(f)
+                page_count = len(reader.pages)
+        except Exception:
+            page_count = getattr(doc, "_pageNumber", 1)
+
+        logger.info(f"Generated PDF from revision: {pdf_path} ({page_count} pages)")
+        return str(pdf_path), page_count
+
+    def build_docx_from_revision(
+        self,
+        revision: Any,  # ReportRevision
+        evidence_items: List[Dict[str, Any]],
+        charts: List[Dict[str, Any]],
+        output_filename: Optional[str] = None
+    ) -> str:
+        """Generates DOCX reflecting user edits and revision state."""
+        fname = output_filename or f"Report_{revision.report_id}_v{revision.version}.docx"
+        docx_path = REPORTS_DIR / fname
+        evidence_by_id = {it.get("evidence_id"): it for it in evidence_items if it.get("evidence_id")}
+        charts_by_id = {c.get("chart_id"): c for c in charts if c.get("chart_id")}
+
+        doc = docx.Document()
+        h_p = doc.add_paragraph("GOVERNMENT OF INDIA • MINISTRY OF COAL\nCONFIDENTIAL REGULATORY DOSSIER")
+        h_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        h_p.runs[0].font.bold = True
+        h_p.runs[0].font.size = Pt(9)
+
+        doc.add_heading(revision.title, level=0)
+        if revision.subtitle:
+            doc.add_paragraph(revision.subtitle)
+
+        t = doc.add_table(rows=4, cols=2)
+        t.style = "Light Shading Accent 1"
+        created_date = time.strftime("%d %B %Y", time.localtime(revision.updated_at / 1000 if revision.updated_at else time.time()))
+        rows_meta = [
+            ("Reference ID:", f"MIN/REP/{revision.job_id}/v{revision.version}"),
+            ("Authorizing Officer:", revision.owner_id),
+            ("Revision State:", revision.state.upper()),
+            ("Date of Revision:", created_date)
+        ]
+        for idx, (lbl, val) in enumerate(rows_meta):
+            t.rows[idx].cells[0].text = lbl
+            t.rows[idx].cells[1].text = val
+
+        doc.add_page_break()
+
+        for sec in revision.sections:
+            doc.add_heading(f"{sec.section_id} {sec.title}", level=1)
+            if getattr(sec, "user_modified", False):
+                p_mod = doc.add_paragraph("[AUDITOR REVISED CONTENT]")
+                p_mod.runs[0].font.color.rgb = RGBColor(13, 148, 136)
+
+            if getattr(sec, "content_text", ""):
+                doc.add_paragraph(sec.content_text)
+
+            for eid in getattr(sec, "evidence_ids", []):
+                ev = evidence_by_id.get(eid)
+                if ev:
+                    cls_name = ev.get("classification", "LOCKED FACT")
+                    prov = ev.get("provenance") or {}
+                    doc.add_paragraph(f"[{cls_name}] {eid} (Source: {prov.get('filename')})", style="List Bullet")
+
+            for cid in getattr(sec, "chart_ids", []):
+                chart = charts_by_id.get(cid)
+                if chart and chart.get("png_path") and Path(chart["png_path"]).exists():
+                    try:
+                        doc.add_heading(chart.get("config", {}).get("title", "Figure"), level=3)
+                        doc.add_picture(str(chart["png_path"]), width=Inches(6.0))
+                    except Exception as e:
+                        logger.warning(f"DOCX image error: {e}")
+
+            for sub in getattr(sec, "subsections", []):
+                doc.add_heading(f"{sub.section_id} {sub.title}", level=2)
+                if getattr(sub, "content_text", ""):
+                    doc.add_paragraph(sub.content_text)
+
+        doc.save(str(docx_path))
+        return str(docx_path)
+
+    def build_markdown_from_revision(
+        self,
+        revision: Any,  # ReportRevision
+        evidence_items: List[Dict[str, Any]],
+        charts: List[Dict[str, Any]],
+        output_filename: Optional[str] = None
+    ) -> str:
+        """Generates Markdown reflecting user edits and revision state."""
+        fname = output_filename or f"Report_{revision.report_id}_v{revision.version}.md"
+        md_path = REPORTS_DIR / fname
+        evidence_by_id = {it.get("evidence_id"): it for it in evidence_items if it.get("evidence_id")}
+        charts_by_id = {c.get("chart_id"): c for c in charts if c.get("chart_id")}
+
+        lines = [
+            f"# {revision.title}",
+            f"**Subtitle:** {revision.subtitle or 'Operational Dossier'}",
+            f"**Reference:** MIN/REP/{revision.job_id}/v{revision.version} | **Officer:** {revision.owner_id}",
+            f"**State:** {revision.state.upper()} | **Change Summary:** {revision.change_summary or 'N/A'}",
+            "",
+            "---",
+            ""
+        ]
+
+        for sec in revision.sections:
+            lines.append(f"## {sec.section_id} {sec.title}\n")
+            if getattr(sec, "user_modified", False):
+                lines.append("> ✍️ **AUDITOR REVISED CONTENT**\n")
+            if getattr(sec, "content_text", ""):
+                lines.append(f"{sec.content_text}\n")
+
+            for eid in getattr(sec, "evidence_ids", []):
+                ev = evidence_by_id.get(eid)
+                if ev:
+                    cls_name = ev.get("classification", "LOCKED FACT")
+                    prov = ev.get("provenance") or {}
+                    lines.append(f"- **[{cls_name}] {eid}** ({prov.get('filename')}): {ev.get('content_text')}")
+
+            for cid in getattr(sec, "chart_ids", []):
+                chart = charts_by_id.get(cid)
+                if chart:
+                    cfg = chart.get("config", {})
+                    lines.append(f"\n### Chart: {cfg.get('title')}")
+                    lines.append(f"![{cfg.get('title')}]({chart.get('png_path')})")
+
+            for sub in getattr(sec, "subsections", []):
+                lines.append(f"### {sub.section_id} {sub.title}\n")
+                if getattr(sub, "content_text", ""):
+                    lines.append(f"{sub.content_text}\n")
+
+            lines.append("\n---\n")
+
+        md_content = "\n".join(lines)
+        md_path.write_text(md_content, encoding="utf-8")
+        return str(md_path)
+
 
 long_document_builder = LongDocumentBuilder()
+

@@ -40,6 +40,7 @@ from backend.services.intelligence_service import intelligence_service
 from backend.services.chart_service import chart_service
 from backend.services.planner_service import planner_service
 from backend.services.report_generator_service import report_generator_service
+from backend.services.report_editor_service import report_editor_service
 
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
@@ -1626,7 +1627,15 @@ def download_report_endpoint(
     media_type = "application/octet-stream"
     download_name = f"{report.get('title', 'Report')}.{fmt}"
 
-    if fmt == "pdf":
+    # Prioritize active / approved revision export path (consistent with current approval state)
+    active_path = report_editor_service.get_active_export_path(
+        report_id=report_id,
+        format_type=fmt,
+        owner_id=report.get("owner_id", auth["officer_id"])
+    )
+    if active_path and Path(active_path).exists():
+        file_path = active_path
+    elif fmt == "pdf":
         file_path = report.get("pdf_path")
         media_type = "application/pdf"
         download_name = f"{report_id}.pdf"
@@ -1643,6 +1652,13 @@ def download_report_endpoint(
 
     if not file_path or not Path(file_path).exists():
         raise HTTPException(status_code=404, detail=f"Requested {fmt.upper()} artifact file not found on disk.")
+
+    if fmt == "pdf":
+        media_type = "application/pdf"
+    elif fmt in ("docx", "word"):
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    elif fmt in ("md", "markdown"):
+        media_type = "text/markdown"
 
     return FileResponse(
         path=file_path,
@@ -1678,6 +1694,262 @@ def list_job_reports_endpoint(
         "reports_count": len(reports),
         "reports": reports
     }
+
+
+# -------------------------------------------------------------------------
+# PHASE 8: REPORT EDITOR & VERSIONING ENDPOINTS
+# -------------------------------------------------------------------------
+class ReportSectionEditRequest(BaseModel):
+    section_id: str
+    title: Optional[str] = None
+    content_text: Optional[str] = None
+    change_summary: Optional[str] = None
+
+
+class ReportBatchEditRequest(BaseModel):
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    section_updates: Optional[List[Dict[str, Any]]] = None
+    change_summary: Optional[str] = None
+
+
+class ReportRestoreRequest(BaseModel):
+    version: int
+
+
+class ReportApproveRequest(BaseModel):
+    version: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class ReportFinalizeRequest(BaseModel):
+    version: Optional[int] = None
+    notes: Optional[str] = None
+
+
+@app.get("/api/reports/{report_id}/revisions")
+def list_report_revisions_endpoint(
+    report_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Lists all revision versions for a report in chronological order.
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    revisions = report_editor_service.list_revisions(
+        report_id=report_id,
+        owner_id=None if is_master else auth["officer_id"]
+    )
+    if not revisions:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' revisions not found or access forbidden.")
+
+    return {
+        "success": True,
+        "report_id": report_id,
+        "revisions_count": len(revisions),
+        "revisions": revisions
+    }
+
+
+@app.get("/api/reports/{report_id}/revisions/{version}")
+def get_report_revision_endpoint(
+    report_id: str,
+    version: int,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Retrieves a specific revision version of a report.
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    revision = report_editor_service.get_revision(
+        report_id=report_id,
+        version=version,
+        owner_id=None if is_master else auth["officer_id"]
+    )
+    if not revision:
+        raise HTTPException(status_code=404, detail=f"Revision v{version} for report '{report_id}' not found or access forbidden.")
+
+    return {
+        "success": True,
+        "revision": revision
+    }
+
+
+@app.post("/api/reports/{report_id}/edit-section")
+def edit_report_section_endpoint(
+    report_id: str,
+    payload: ReportSectionEditRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Edits a specific section or subsection in a report:
+    - Increments revision version (preserving prior version immutably)
+    - Records diff audit flags (user_modified=True)
+    - Recompiles official PDF, DOCX, and Markdown artifacts
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    report = report_generator_service.get_report(report_id, owner_id=None if is_master else auth["officer_id"])
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found or access forbidden.")
+
+    result = report_editor_service.edit_section(
+        report_id=report_id,
+        owner_id=report.get("owner_id", auth["officer_id"]),
+        section_id=payload.section_id,
+        new_title=payload.title,
+        new_content=payload.content_text,
+        change_summary=payload.change_summary or ""
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to edit section."))
+
+    return result
+
+
+@app.post("/api/reports/{report_id}/edit")
+def edit_report_batch_endpoint(
+    report_id: str,
+    payload: ReportBatchEditRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Batch edits title, subtitle, and multiple sections in a report:
+    - Increments revision version and preserves history
+    - Recompiles official document exports
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    report = report_generator_service.get_report(report_id, owner_id=None if is_master else auth["officer_id"])
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found or access forbidden.")
+
+    result = report_editor_service.edit_report(
+        report_id=report_id,
+        owner_id=report.get("owner_id", auth["officer_id"]),
+        title=payload.title,
+        subtitle=payload.subtitle,
+        section_updates=payload.section_updates,
+        change_summary=payload.change_summary or ""
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to edit report."))
+
+    return result
+
+
+@app.post("/api/reports/{report_id}/restore")
+def restore_report_revision_endpoint(
+    report_id: str,
+    payload: ReportRestoreRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Restores a historical revision of a report as a new active version.
+    Guarantees that history is strictly append-only and never deleted.
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    report = report_generator_service.get_report(report_id, owner_id=None if is_master else auth["officer_id"])
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found or access forbidden.")
+
+    result = report_editor_service.restore_revision(
+        report_id=report_id,
+        target_version=payload.version,
+        owner_id=report.get("owner_id", auth["officer_id"])
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to restore revision."))
+
+    return result
+
+
+@app.post("/api/reports/{report_id}/approve")
+def approve_report_endpoint(
+    report_id: str,
+    payload: ReportApproveRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Approves a report revision for official regulatory submission:
+    - Sets state to APPROVED and stamps approving officer identity and timestamp
+    - Recompiles exports with approval badges
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    report = report_generator_service.get_report(report_id, owner_id=None if is_master else auth["officer_id"])
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found or access forbidden.")
+
+    result = report_editor_service.approve_report(
+        report_id=report_id,
+        owner_id=report.get("owner_id", auth["officer_id"]),
+        version=payload.version,
+        approving_officer=auth["officer_id"]
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to approve report."))
+
+    return result
+
+
+@app.post("/api/reports/{report_id}/finalize")
+def finalize_report_endpoint(
+    report_id: str,
+    payload: ReportFinalizeRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Finalizes a report revision, locking it permanently against accidental in-place edits.
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    report = report_generator_service.get_report(report_id, owner_id=None if is_master else auth["officer_id"])
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found or access forbidden.")
+
+    result = report_editor_service.finalize_report(
+        report_id=report_id,
+        owner_id=report.get("owner_id", auth["officer_id"]),
+        version=payload.version,
+        finalizing_officer=auth["officer_id"]
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to finalize report."))
+
+    return result
+
 
 
 @app.post("/api/convert")
