@@ -13,7 +13,7 @@ mock_modules = [
     'reportlab.lib', 'reportlab.lib.pagesizes', 'reportlab.lib.styles',
     'reportlab.platypus', 'reportlab.pdfgen', 'docx', 'docx.shared', 
     'docx.enum', 'docx.enum.text', 'openpyxl', 'matplotlib', 'matplotlib.pyplot', 
-    'seaborn', 'wordcloud'
+    'seaborn', 'wordcloud', 'psycopg2', 'psycopg2.pool'
 ]
 for mod_name in mock_modules:
     sys.modules[mod_name] = DummyMock()
