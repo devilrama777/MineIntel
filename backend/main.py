@@ -39,6 +39,7 @@ from backend.services.ai_providers.registry import get_active_ai_status
 from backend.services.intelligence_service import intelligence_service
 from backend.services.chart_service import chart_service
 from backend.services.planner_service import planner_service
+from backend.services.report_generator_service import report_generator_service
 
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
@@ -1526,6 +1527,157 @@ def validate_report_plan_endpoint(
         raise HTTPException(status_code=404, detail=result.get("error", "Plan validation failed."))
 
     return result
+
+
+# -------------------------------------------------------------------------
+# PHASE 7: LONG-DOCUMENT REPORT GENERATION ENDPOINTS
+# -------------------------------------------------------------------------
+class GenerateLongReportRequest(BaseModel):
+    job_id: str
+    plan_id: Optional[str] = None
+    formats: Optional[List[str]] = None
+    title: Optional[str] = None
+
+
+@app.post("/api/reports/generate-long")
+def generate_long_report_endpoint(
+    payload: GenerateLongReportRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Generates a full-length, source-grounded regulatory report from a Phase 6 Report Plan:
+    - Renders dynamic PDF with two-pass NumberedReportCanvas ("Page X of Y", running headers)
+    - Embeds Phase 5 charts, data tables, and historical photographs with grounded captions
+    - Preserves exact source citations [EV-...] and provides Appendix ledger
+    - Supports multi-format export (PDF, DOCX, Markdown)
+    - Zero numerical AI hallucination: all metrics come from immutable evidence
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(payload.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{payload.job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job for report generation.")
+
+    result = report_generator_service.generate_report(
+        job_id=payload.job_id,
+        owner_id=job.get("owner_id", auth["officer_id"]),
+        plan_id=payload.plan_id,
+        formats=payload.formats,
+        title_override=payload.title
+    )
+
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Report generation failed."))
+
+    return result
+
+
+@app.get("/api/reports/{report_id}/status")
+def get_report_status_endpoint(
+    report_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Retrieves generated report metadata, generation status, and page metrics.
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    report = report_generator_service.get_report(report_id, owner_id=None if is_master else auth["officer_id"])
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found or access forbidden.")
+
+    return {
+        "success": True,
+        "report": report
+    }
+
+
+@app.get("/api/reports/{report_id}/download")
+def download_report_endpoint(
+    report_id: str,
+    format: str = Query("pdf", description="Export format: pdf, docx, or md"),
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Downloads a generated report artifact in the requested format (PDF, DOCX, or Markdown).
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    report = report_generator_service.get_report(report_id, owner_id=None if is_master else auth["officer_id"])
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found or access forbidden.")
+
+    fmt = format.lower().strip()
+    file_path = None
+    media_type = "application/octet-stream"
+    download_name = f"{report.get('title', 'Report')}.{fmt}"
+
+    if fmt == "pdf":
+        file_path = report.get("pdf_path")
+        media_type = "application/pdf"
+        download_name = f"{report_id}.pdf"
+    elif fmt in ("docx", "word"):
+        file_path = report.get("docx_path")
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        download_name = f"{report_id}.docx"
+    elif fmt in ("md", "markdown"):
+        file_path = report.get("md_path")
+        media_type = "text/markdown"
+        download_name = f"{report_id}.md"
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported format '{format}'. Use 'pdf', 'docx', or 'md'.")
+
+    if not file_path or not Path(file_path).exists():
+        raise HTTPException(status_code=404, detail=f"Requested {fmt.upper()} artifact file not found on disk.")
+
+    return FileResponse(
+        path=file_path,
+        media_type=media_type,
+        filename=download_name
+    )
+
+
+@app.get("/api/reports/job/{job_id}/history")
+def list_job_reports_endpoint(
+    job_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Lists all generated reports for an ingestion job.
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job report history.")
+
+    reports = report_generator_service.list_reports(job_id=job_id, owner_id=job.get("owner_id", auth["officer_id"]))
+    return {
+        "success": True,
+        "job_id": job_id,
+        "reports_count": len(reports),
+        "reports": reports
+    }
 
 
 @app.post("/api/convert")

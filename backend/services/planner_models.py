@@ -81,6 +81,30 @@ class PlannedSection:
             "validation_notes": self.validation_notes
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PlannedSection":
+        subs = [
+            PlannedSection.from_dict(s) if isinstance(s, dict) else s
+            for s in data.get("subsections", [])
+        ]
+        return cls(
+            section_id=data.get("section_id", ""),
+            title=data.get("title", ""),
+            topic=data.get("topic", ""),
+            section_type=data.get("section_type", ""),
+            order_index=int(data.get("order_index", 0)),
+            dependencies=data.get("dependencies", []),
+            subsections=subs,
+            evidence_ids=data.get("evidence_ids", []),
+            evidence_breakdown=data.get("evidence_breakdown", {}),
+            chart_ids=data.get("chart_ids", []),
+            table_ids=data.get("table_ids", []),
+            provenance_citations=data.get("provenance_citations", []),
+            chronology_period=data.get("chronology_period"),
+            validation_status=data.get("validation_status", "supported"),
+            validation_notes=data.get("validation_notes", [])
+        )
+
 
 @dataclass
 class ReportPlan:
@@ -121,3 +145,31 @@ class ReportPlan:
             "created_at": self.created_at,
             "updated_at": self.updated_at
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ReportPlan":
+        secs = [
+            PlannedSection.from_dict(s) if isinstance(s, dict) else s
+            for s in data.get("sections", [])
+        ]
+        flags = [
+            MissingEvidenceFlag(**f) if isinstance(f, dict) else f
+            for f in data.get("insufficient_evidence_flags", [])
+        ]
+        return cls(
+            plan_id=data.get("plan_id", ""),
+            job_id=data.get("job_id", ""),
+            owner_id=data.get("owner_id", ""),
+            version=int(data.get("version", 1)),
+            status=data.get("status", "draft"),
+            title=data.get("title", ""),
+            subtitle=data.get("subtitle"),
+            sections=secs,
+            total_evidence_referenced=int(data.get("total_evidence_referenced", 0)),
+            total_charts_referenced=int(data.get("total_charts_referenced", 0)),
+            evidence_sufficiency_score=float(data.get("evidence_sufficiency_score", 1.0)),
+            insufficient_evidence_flags=flags,
+            metadata=data.get("metadata", {}),
+            created_at=int(data.get("created_at", 0)),
+            updated_at=int(data.get("updated_at", 0))
+        )
