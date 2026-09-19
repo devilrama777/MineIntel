@@ -110,7 +110,7 @@ export function WorkerApp() {
   const [fileSize, setFileSize] = useState<number | undefined>(undefined);
   const [fileBase64, setFileBase64] = useState<string>('');
   const [rawText, setRawText] = useState<string>('');
-  const [activeFileId, setActiveFileId] = useState<string | null>('init-doc-1');
+  const [activeFileId, setActiveFileId] = useState<string | null>(null);
 
   // Uploaded Files in Data Source Repository (displayed in New Report)
   const [uploadedFiles, setUploadedFiles] = useState<UploadedDataSourceFile[]>(() => {
@@ -474,8 +474,6 @@ export function WorkerApp() {
     if (!fileName && rawText.trim().length === 0 && !fileBase64 && !currentReport) {
       if (uploadedFiles.length > 0) {
         handleSelectUploadedFile(uploadedFiles[0]);
-      } else {
-        handleSelectSample(SAMPLE_DOCUMENTS[0]);
       }
     }
     setActiveView('preview');
@@ -487,8 +485,6 @@ export function WorkerApp() {
     if (!fileName && rawText.trim().length === 0 && !fileBase64 && !currentReport) {
       if (uploadedFiles.length > 0) {
         handleSelectUploadedFile(uploadedFiles[0]);
-      } else {
-        handleSelectSample(SAMPLE_DOCUMENTS[0]);
       }
     }
     setActiveView('export');
@@ -619,10 +615,10 @@ export function WorkerApp() {
           ) : activeView === 'preview' ? (
             /* VIEW 2: PREVIEW PAGE VIEW (Untouched, rendered directly in app) */
             <PdfSlidePreviewView
-              fileName={fileName || currentReport?.fileName || (uploadedFiles[0]?.name ?? SAMPLE_DOCUMENTS[0].fileName)}
+              fileName={fileName || currentReport?.fileName || uploadedFiles[0]?.name || ''}
               fileType={fileType || 'application/pdf'}
               fileSize={fileSize}
-              rawText={rawText || currentReport?.reportMarkdown || (uploadedFiles[0]?.rawText ?? SAMPLE_DOCUMENTS[0].content)}
+              rawText={rawText || currentReport?.reportMarkdown || uploadedFiles[0]?.rawText || ''}
               currentReport={currentReport}
               onJumpToExport={() => {
                 setActiveView('export');
@@ -633,7 +629,7 @@ export function WorkerApp() {
           ) : activeView === 'export' ? (
             /* VIEW 3: EXPORT SECTION (Untouched, PDF and DOCX options, nothing selected by default) */
             <ExportSection
-              fileName={fileName || currentReport?.fileName || (uploadedFiles[0]?.name ?? SAMPLE_DOCUMENTS[0].fileName)}
+              fileName={fileName || currentReport?.fileName || uploadedFiles[0]?.name || ''}
               fileSize={fileSize}
               totalSlides={6}
               onBackToPreview={() => {

@@ -272,7 +272,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* 3. Dedicated Section: "Trends & Analytics" (Animated Vertical Graphs & Curves) */}
-      <TrendsAndAnalytics />
+      <TrendsAndAnalytics dataSources={dataSources} reports={reports} />
 
       {/* 4. Active Filings & System Pipelines (Organized Layout) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
