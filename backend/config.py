@@ -68,14 +68,14 @@ def read_data_text(filename: str, fallback_default: str = "") -> str:
 
 # Upload limits and validation
 MAX_UPLOAD_SIZE_BYTES: int = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(50 * 1024 * 1024)))  # 50 MB
-ALLOWED_EXTENSIONS: Set[str] = {".pdf", ".csv", ".tsv", ".txt", ".xlsx", ".xls", ".docx"}
+ALLOWED_EXTENSIONS: Set[str] = {".pdf", ".csv", ".tsv", ".txt", ".xlsx", ".xls", ".docx", ".png", ".jpg", ".jpeg"}
 
 # Security & Authentication configurations
 # Production credentials are supplied ONLY through secure environment configuration
 CORS_ORIGINS = [orig.strip() for orig in os.getenv("CORS_ORIGINS", "*").split(",") if orig.strip()]
 AUTH_OFFICER_ID = os.getenv("MINEINTEL_OFFICER_ID") or os.getenv("AUTH_OFFICER_ID", "")
 AUTH_SECRET_PASSWORD = os.getenv("MINEINTEL_AUTH_PASSWORD") or os.getenv("AUTH_SECRET_PASSWORD", "")
-JWT_SECRET = os.getenv("JWT_SECRET", "sih-mining-enclave-secret-key-2026-secure")
+JWT_SECRET = os.getenv("MINEINTEL_JWT_SECRET") or os.getenv("JWT_SECRET", "sih-mining-enclave-secret-key-2026-secure")
 SESSION_EXPIRY_HOURS = int(os.getenv("SESSION_EXPIRY_HOURS", "24"))
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or os.getenv("MineIntel_DATABASE_URL") or os.getenv("MineIntel_POSTGRES_URL") or ""
 

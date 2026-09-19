@@ -120,25 +120,8 @@ export function WorkerApp() {
     } catch (e) {
       console.error(e);
     }
-    // Seed initial files for demonstration
-    return [
-      {
-        id: 'init-doc-1',
-        name: 'Q3_Financial_Performance_Audit.pdf',
-        type: 'application/pdf',
-        size: 2450000,
-        uploadedAt: '10:30 AM, Today',
-        rawText: 'Q3 Financial Performance and Corporate Growth Audit. Revenue grew 18.4% YoY to $42.6M. Operating expenses optimized by 8.2%. EBITDA margins expanded to 24.2%. Primary drivers include high enterprise client retention and cloud workload migration. Working capital remains strong with $18.4M in cash reserves.',
-      },
-      {
-        id: 'init-doc-2',
-        name: 'Infrastructure_Security_Compliance_2025.pdf',
-        type: 'application/pdf',
-        size: 1820000,
-        uploadedAt: '09:15 AM, Today',
-        rawText: 'Zero-trust enterprise network architecture compliance assessment. Key audit findings focus on multi-region failover automation, IAM key rotation schedules, automated SIEM anomaly detection, and ISO 27001 / SOC2 Type II certification standards across all distributed nodes.',
-      }
-    ];
+    // Real user files only; zero synthetic demonstration documents
+    return [];
   });
 
   useEffect(() => {

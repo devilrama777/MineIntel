@@ -33,29 +33,11 @@ def _atomic_write_json(file_path: Path, data: Any) -> None:
 def get_history(search: Optional[str] = None, auditor_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Retrieves all generated reports with optional keyword search filtering."""
     if not HISTORY_FILE.exists():
-        initial_history = [
-            {
-                "id": "REP-2026-B56D",
-                "title": "National Coal Extraction & Power Dispatch Briefing",
-                "template": "executive_brief",
-                "template_name": "Executive Ministry Brief",
-                "theme": "Sovereign Navy & Gold",
-                "auditor_id": "MOC-7890",
-                "timestamp": datetime.now().strftime("%d %b %Y, %I:%M %p"),
-                "records_count": 18,
-                "summary_snippet": "National extraction logged 133,767.30 MT with 96.26% target fulfillment and 95.55% offtake ratio.",
-                "pdf_url": "/api/reports/download/pdf?template=executive_brief",
-                "docx_url": "/api/reports/download/docx?template=executive_brief",
-                "csv_url": "/api/reports/download/csv"
-            }
-        ]
-        _atomic_write_json(HISTORY_FILE, initial_history)
-        items = initial_history
-    else:
-        try:
-            items = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            items = []
+        return []
+    try:
+        items = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        items = []
 
     if auditor_id:
         items = [i for i in items if i.get("auditor_id", "").lower() == auditor_id.lower()]
