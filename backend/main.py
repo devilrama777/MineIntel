@@ -34,6 +34,8 @@ from backend.services.llama_client import LlamaClient
 from backend.services.math_engine import MathEngine
 from backend.services.pipeline import DocumentPipeline
 from backend.services.captcha import create_challenge, verify_challenge
+from backend.services.ai_inference_service import ai_inference_service
+from backend.services.ai_providers.registry import get_active_ai_status
 
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
@@ -100,6 +102,21 @@ class ProfileUpdateRequest(BaseModel):
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str
+
+
+class AIReasoningRequest(BaseModel):
+    job_id: str
+    custom_instruction: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = 0.2
+
+
+class AIMultimodalRequest(BaseModel):
+    evidence_id: str
+    custom_instruction: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 
 def create_session_token(officer_id: str, role: str = "Senior Operational Auditor") -> str:
@@ -846,6 +863,98 @@ def trigger_evidence_extraction(
         "extracted_items_count": len(all_extracted),
         "summary": summary
     }
+
+
+# -------------------------------------------------------------------------
+# PHASE 3: LOCAL AI & PROVIDER-NEUTRAL INFERENCE ENDPOINTS
+# -------------------------------------------------------------------------
+@app.get("/api/ai/status")
+def get_ai_status_endpoint(
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Detects and returns active AI provider capabilities, Ollama daemon status,
+    local model availability (qwen3:8b, qwen3-vl:8b), and registered providers.
+    Enforces Phase 0 authenticated access.
+    """
+    status = get_active_ai_status()
+    return {
+        "success": True,
+        "ai_status": status
+    }
+
+
+@app.post("/api/ai/reason")
+def generate_job_reasoning_endpoint(
+    payload: AIReasoningRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Synthesizes provider-neutral reasoning analysis over Phase 2 structured evidence.
+    Grounds prompt in LOCKED FACT, CALCULATED VALUE, and SUMMARIZABLE TEXT.
+    Persists derived AI ANALYSIS evidence items linked back to source facts.
+    Enforces Phase 0 ownership isolation. Gracefully handles model unavailability (no synthetic fallback).
+    """
+    job = ingestion_store.get_job(payload.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{payload.job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job for AI reasoning.")
+
+    result = ai_inference_service.generate_job_reasoning(
+        job_id=payload.job_id,
+        owner_id=auth["officer_id"],
+        provider_name=payload.provider,
+        model_name=payload.model,
+        custom_instruction=payload.custom_instruction,
+        temperature=payload.temperature or 0.2
+    )
+
+    if not result.get("success"):
+        status_code = 503 if result.get("status") == "model_unavailable" else 400
+        return JSONResponse(status_code=status_code, content=result)
+
+    return result
+
+
+@app.post("/api/ai/multimodal/caption")
+def generate_image_caption_endpoint(
+    payload: AIMultimodalRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Generates structured AI-GENERATED CAPTION for visual evidence items using Qwen3-VL-8B.
+    Enforces Phase 0 ownership isolation. Gracefully handles model unavailability (no synthetic fallback).
+    """
+    evidence_item = evidence_store.get_evidence_by_id(payload.evidence_id)
+    if not evidence_item:
+        raise HTTPException(status_code=404, detail=f"Evidence item '{payload.evidence_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and evidence_item.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to evidence item for multimodal captioning.")
+
+    result = ai_inference_service.generate_image_caption(
+        evidence_id=payload.evidence_id,
+        owner_id=auth["officer_id"],
+        provider_name=payload.provider,
+        model_name=payload.model,
+        custom_instruction=payload.custom_instruction
+    )
+
+    if not result.get("success"):
+        status_code = 503 if result.get("status") == "model_unavailable" else 400
+        return JSONResponse(status_code=status_code, content=result)
+
+    return result
 
 
 @app.post("/api/convert")

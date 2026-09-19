@@ -1,0 +1,3 @@
+"""
+MineIntel AI Provider Package
+"""
