@@ -34,14 +34,18 @@ def _secure_answer() -> str:
 
 
 def _font(size: int):
-    """Returns the bundled TrueType font, or PIL's default raster font if the TTF is unavailable."""
-    if CAPTCHA_FONT_PATH.is_file():
-        try:
-            return ImageFont.truetype(str(CAPTCHA_FONT_PATH), size)
-        except Exception:
-            pass
-    # Graceful fallback: PIL built-in bitmap font (no external file required)
-    return ImageFont.load_default()
+    """Returns the bundled TrueType font (from base64), or PIL's default raster font if unavailable."""
+    try:
+        from backend.services.captcha_font_data import FONT_B64
+        import base64
+        import io
+        from PIL import ImageFont
+        return ImageFont.truetype(io.BytesIO(base64.b64decode(FONT_B64)), size)
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger("mineintel.captcha").warning(f"Fallback to raster font: {e}")
+        from PIL import ImageFont
+        return ImageFont.load_default()
 
 
 def _render_png(answer: str) -> str:
