@@ -36,6 +36,7 @@ from backend.services.pipeline import DocumentPipeline
 from backend.services.captcha import create_challenge, verify_challenge
 from backend.services.ai_inference_service import ai_inference_service
 from backend.services.ai_providers.registry import get_active_ai_status
+from backend.services.intelligence_service import intelligence_service
 
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
@@ -955,6 +956,167 @@ def generate_image_caption_endpoint(
         return JSONResponse(status_code=status_code, content=result)
 
     return result
+
+
+# -------------------------------------------------------------------------
+# PHASE 4: INTELLIGENCE & ORGANIZATION LAYER ENDPOINTS
+# -------------------------------------------------------------------------
+class ConflictResolveRequest(BaseModel):
+    status: str = "resolved"
+    resolution_notes: Optional[str] = None
+
+
+@app.post("/api/intelligence/analyze/{job_id}")
+def analyze_job_intelligence_endpoint(
+    job_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Executes Phase 4 intelligence analysis over a job's structured evidence:
+    - Topic-first categorization
+    - Adaptive chronology detection (day, week, month, quarter, year)
+    - Multi-tier duplicate clustering without deleting originals
+    - Conflict and numerical variance detection (> 1%) with source-priority weighting
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job for intelligence analysis.")
+
+    dossier = intelligence_service.organize_job_evidence(job_id=job_id, owner_id=job.get("owner_id", auth["officer_id"]))
+    return {
+        "success": True,
+        "job_id": job_id,
+        "dossier": dossier
+    }
+
+
+@app.get("/api/intelligence/dossier/{job_id}")
+def get_job_dossier_endpoint(
+    job_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Retrieves the organized evidence dossier for an ingestion job.
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job dossier.")
+
+    dossier = intelligence_service.get_dossier(job_id=job_id, owner_id=job.get("owner_id", auth["officer_id"]))
+    if not dossier:
+        # If not analyzed yet, analyze on demand
+        dossier = intelligence_service.organize_job_evidence(job_id=job_id, owner_id=job.get("owner_id", auth["officer_id"]))
+
+    return {
+        "success": True,
+        "job_id": job_id,
+        "dossier": dossier
+    }
+
+
+@app.get("/api/intelligence/conflicts/{job_id}")
+def get_job_conflicts_endpoint(
+    job_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Retrieves flagged conflicts and discrepancy audit items for a job.
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job conflicts.")
+
+    conflicts = intelligence_service.get_conflicts(job_id=job_id, owner_id=job.get("owner_id", auth["officer_id"]))
+    return {
+        "success": True,
+        "job_id": job_id,
+        "conflicts_count": len(conflicts),
+        "conflicts": conflicts
+    }
+
+
+@app.get("/api/intelligence/timeline/{job_id}")
+def get_job_timeline_endpoint(
+    job_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Retrieves adaptive chronological timeline buckets for a job.
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job timeline.")
+
+    timeline = intelligence_service.get_timeline(job_id=job_id, owner_id=job.get("owner_id", auth["officer_id"]))
+    return {
+        "success": True,
+        "job_id": job_id,
+        "timeline": timeline
+    }
+
+
+@app.post("/api/intelligence/conflicts/{conflict_id}/resolve")
+def resolve_conflict_endpoint(
+    conflict_id: str,
+    payload: ConflictResolveRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Auditor resolution endpoint for flagged conflicts.
+    Updates conflict status and appends resolution notes while maintaining audit trail.
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    resolved = intelligence_service.resolve_conflict(
+        conflict_id=conflict_id,
+        status=payload.status,
+        owner_id=None if is_master else auth["officer_id"],
+        resolution_notes=payload.resolution_notes
+    )
+    if not resolved:
+        raise HTTPException(status_code=404, detail=f"Conflict '{conflict_id}' not found or access forbidden.")
+
+    return {
+        "success": True,
+        "conflict_id": conflict_id,
+        "resolved_conflict": resolved
+    }
 
 
 @app.post("/api/convert")
