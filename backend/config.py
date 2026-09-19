@@ -19,7 +19,8 @@ IS_VERCEL = bool(
     os.getenv("VERCEL") == "1" or 
     os.getenv("VERCEL_ENV") or 
     os.getenv("AWS_EXECUTION_ENV") or 
-    os.getenv("AWS_LAMBDA_FUNCTION_NAME")
+    os.getenv("AWS_LAMBDA_FUNCTION_NAME") or
+    str(BASE_DIR).startswith("/var/task")
 )
 
 # --- Startup diagnostic (visible in Vercel function logs) ---
