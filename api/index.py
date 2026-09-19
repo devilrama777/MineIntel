@@ -1,29 +1,30 @@
 import sys
+import types
 import traceback
 from pathlib import Path
 
 class DummyMock:
-    def __init__(self, name=""):
-        self.__name__ = name
-        self.__path__ = []
     def __getattr__(self, name):
-        if name == "__path__":
-            return []
-        return DummyMock(name)
+        return DummyMock()
     def __call__(self, *args, **kwargs):
         return DummyMock()
-    def __iter__(self):
-        return iter([])
+
+def module_getattr(name):
+    return DummyMock()
 
 mock_modules = [
     'pandas', 'numpy', 'numpy.linalg', 'pdfplumber', 'pypdf', 'reportlab', 
     'reportlab.lib', 'reportlab.lib.pagesizes', 'reportlab.lib.styles',
     'reportlab.platypus', 'reportlab.pdfgen', 'docx', 'docx.shared', 
-    'docx.enum', 'docx.enum.text', 'openpyxl', 'matplotlib', 'matplotlib.pyplot', 
-    'seaborn', 'wordcloud', 'openpyxl.styles'
+    'docx.enum', 'docx.enum.text', 'openpyxl', 'openpyxl.styles', 'matplotlib', 
+    'matplotlib.pyplot', 'seaborn', 'wordcloud'
 ]
+
 for mod_name in mock_modules:
-    sys.modules[mod_name] = DummyMock()
+    mod = types.ModuleType(mod_name)
+    mod.__path__ = []
+    mod.__getattr__ = module_getattr
+    sys.modules[mod_name] = mod
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
