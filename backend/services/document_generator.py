@@ -79,6 +79,8 @@ def _sanitize_text_for_pdf(text: Optional[str]) -> str:
     s = "<br/>".join(lines)
     s = re.sub(r"#+", "", s)
     s = s.replace("*", "")
+    s = re.sub(r"<\s*br\s*/?\s*>", "<br/>", s, flags=re.IGNORECASE)
+    s = re.sub(r"<\s*/\s*br\s*>", "<br/>", s, flags=re.IGNORECASE)
     s = re.sub(r"(<br/>\s*){3,}", "<br/><br/>", s)
     return s.strip()
 

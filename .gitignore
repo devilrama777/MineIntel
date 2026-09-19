@@ -30,6 +30,8 @@ outputs/job_*
 outputs/active_*
 outputs/reports/*
 !outputs/reports/.gitkeep
+outputs/charts/*
+!outputs/charts/.gitkeep
 .freebuff/
 scratch/
 node_modules/

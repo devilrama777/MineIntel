@@ -1,6 +1,7 @@
 import os
 import sys
 import asyncio
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -121,7 +122,7 @@ def run_integration_verification():
         print("PASS: Master password change correctly blocked with 403 (master-account restriction)")
 
     # 7. Normal User: Create, Login, Profile Edit, Password Change & Session Invalidation
-    normal_uid = "field_officer_77"
+    normal_uid = f"field_officer_{int(time.time() * 1000) % 100000}"
     normal_pwd = "InitialSecret2026!"
     auth_store.create_user(normal_uid, normal_pwd, "Field Auditor Alpha", phone="+91-1111111111", email="alpha@mineintel.gov.in")
     

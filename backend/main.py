@@ -37,6 +37,7 @@ from backend.services.captcha import create_challenge, verify_challenge
 from backend.services.ai_inference_service import ai_inference_service
 from backend.services.ai_providers.registry import get_active_ai_status
 from backend.services.intelligence_service import intelligence_service
+from backend.services.chart_service import chart_service
 
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
@@ -1116,6 +1117,254 @@ def resolve_conflict_endpoint(
         "success": True,
         "conflict_id": conflict_id,
         "resolved_conflict": resolved
+    }
+
+
+# -------------------------------------------------------------------------
+# PHASE 5: CHART INTELLIGENCE & VISUALIZATION ENGINE ENDPOINTS
+# -------------------------------------------------------------------------
+class ChartRecommendRequest(BaseModel):
+    job_id: str
+    table_id: str
+    use_ai: bool = False
+
+
+class ChartGenerateRequest(BaseModel):
+    job_id: str
+    file_id: Optional[str] = None
+    x_col: str
+    y_cols: List[str]
+    chart_type: str = "bar"
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    x_axis_label: Optional[str] = None
+    y_axis_label: Optional[str] = None
+    unit: Optional[str] = None
+    theme: str = "mineintel_dark"
+    agg_func: str = "sum"
+
+
+@app.post("/api/charts/detect/{job_id}")
+def detect_job_charts_endpoint(
+    job_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Detects chartable structured/tabular evidence from CSV/XLSX/processed data.
+    Analyzes columns, types, time dimensions, cardinality, and recommends chart types.
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job for chart detection.")
+
+    tables = chart_service.detect_tables(job_id=job_id, owner_id=job.get("owner_id", auth["officer_id"]))
+    return {
+        "success": True,
+        "job_id": job_id,
+        "tables_count": len(tables),
+        "tables": tables
+    }
+
+
+@app.post("/api/charts/recommend")
+def recommend_chart_endpoint(
+    payload: ChartRecommendRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Recommends optimal chart type, title, and axes for a detected table.
+    Optionally enriches with Phase 3 Qwen3-8B AI advice (never allows AI to invent numbers).
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(payload.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{payload.job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job for chart recommendation.")
+
+    recommendation = chart_service.recommend_chart(
+        job_id=payload.job_id,
+        table_id=payload.table_id,
+        owner_id=job.get("owner_id", auth["officer_id"]),
+        use_ai=payload.use_ai
+    )
+    return {
+        "success": True,
+        "recommendation": recommendation
+    }
+
+
+@app.post("/api/charts/generate")
+def generate_chart_endpoint(
+    payload: ChartGenerateRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Generates and renders a chart:
+    - Deterministically calculates data from tabular evidence (zero AI numerical fabrication)
+    - Validates against misleading chart configurations (e.g. pie slice limits, negative proportions)
+    - Renders high-DPI PNG and vector SVG via headless Matplotlib Agg engine
+    - Persists chart artifact and provenance in Neon/local store
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(payload.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{payload.job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job for chart generation.")
+
+    result = chart_service.generate_chart(
+        job_id=payload.job_id,
+        owner_id=job.get("owner_id", auth["officer_id"]),
+        file_id=payload.file_id,
+        x_col=payload.x_col,
+        y_cols=payload.y_cols,
+        chart_type=payload.chart_type,
+        title=payload.title,
+        subtitle=payload.subtitle,
+        x_axis_label=payload.x_axis_label,
+        y_axis_label=payload.y_axis_label,
+        unit=payload.unit,
+        theme=payload.theme,
+        agg_func=payload.agg_func
+    )
+
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Chart generation failed."))
+
+    return result
+
+
+@app.get("/api/charts/{chart_id}")
+def get_chart_endpoint(
+    chart_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Retrieves chart metadata, configuration, calculation record, and provenance chain.
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    chart = chart_service.get_chart(chart_id, owner_id=None if is_master else auth["officer_id"])
+    if not chart:
+        raise HTTPException(status_code=404, detail=f"Chart '{chart_id}' not found or access forbidden.")
+
+    return {
+        "success": True,
+        "chart": chart
+    }
+
+
+@app.get("/api/charts/job/{job_id}")
+def list_job_charts_endpoint(
+    job_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Lists all charts generated for a specific ingestion job.
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to list job charts.")
+
+    charts = chart_service.list_charts(job_id=job_id, owner_id=job.get("owner_id", auth["officer_id"]))
+    return {
+        "success": True,
+        "job_id": job_id,
+        "charts_count": len(charts),
+        "charts": charts
+    }
+
+
+@app.get("/api/charts/{chart_id}/image")
+def get_chart_image_endpoint(
+    chart_id: str,
+    format: str = Query("png"),
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Serves rendered chart image file (PNG or SVG).
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    chart = chart_service.get_chart(chart_id, owner_id=None if is_master else auth["officer_id"])
+    if not chart:
+        raise HTTPException(status_code=404, detail=f"Chart '{chart_id}' not found or access forbidden.")
+
+    fmt = format.lower().strip()
+    img_path_str = chart.get("svg_path") if fmt == "svg" else chart.get("png_path")
+    if not img_path_str or not Path(img_path_str).exists():
+        # Fall back to png if svg requested but missing
+        img_path_str = chart.get("png_path")
+        fmt = "png"
+
+    if not img_path_str or not Path(img_path_str).exists():
+        raise HTTPException(status_code=404, detail="Rendered chart image file missing from disk.")
+
+    media_type = "image/svg+xml" if fmt == "svg" else "image/png"
+    return FileResponse(
+        path=Path(img_path_str),
+        media_type=media_type,
+        filename=f"{chart_id}.{fmt}"
+    )
+
+
+@app.delete("/api/charts/{chart_id}")
+def delete_chart_endpoint(
+    chart_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Deletes chart artifact and rendered files.
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    deleted = chart_service.delete_chart(chart_id, owner_id=None if is_master else auth["officer_id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Chart '{chart_id}' not found or access forbidden.")
+
+    return {
+        "success": True,
+        "chart_id": chart_id,
+        "message": f"Chart '{chart_id}' and rendered image files deleted successfully."
     }
 
 
