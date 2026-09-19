@@ -38,6 +38,7 @@ from backend.services.ai_inference_service import ai_inference_service
 from backend.services.ai_providers.registry import get_active_ai_status
 from backend.services.intelligence_service import intelligence_service
 from backend.services.chart_service import chart_service
+from backend.services.planner_service import planner_service
 
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
@@ -1366,6 +1367,165 @@ def delete_chart_endpoint(
         "chart_id": chart_id,
         "message": f"Chart '{chart_id}' and rendered image files deleted successfully."
     }
+
+
+# -------------------------------------------------------------------------
+# PHASE 6: REPORT PLANNER ENDPOINTS
+# -------------------------------------------------------------------------
+class PlanGenerateRequest(BaseModel):
+    job_id: str
+    title: Optional[str] = None
+    use_ai: bool = False
+    custom_instruction: Optional[str] = None
+
+
+@app.post("/api/planner/generate")
+def generate_report_plan_endpoint(
+    payload: PlanGenerateRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Generates a dynamic, machine-readable Report Plan from evidence, dossier, and charts:
+    - Topic-first section organization with adaptive chronology
+    - Dynamically generates section/subsection tree (avoids rigid templates)
+    - Allocates supporting evidence with exact classification breakdown
+    - Integrates Phase 5 charts and tables without fake data
+    - Evaluates evidence sufficiency and creates missing evidence flags
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(payload.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{payload.job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job for report planning.")
+
+    result = planner_service.generate_plan(
+        job_id=payload.job_id,
+        owner_id=job.get("owner_id", auth["officer_id"]),
+        title=payload.title,
+        use_ai=payload.use_ai,
+        custom_instruction=payload.custom_instruction
+    )
+
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Plan generation failed."))
+
+    return result
+
+
+@app.get("/api/planner/{plan_id}")
+def get_report_plan_endpoint(
+    plan_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Retrieves a specific report plan by plan_id.
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    plan = planner_service.get_plan(plan_id, owner_id=None if is_master else auth["officer_id"])
+    if not plan:
+        raise HTTPException(status_code=404, detail=f"Report Plan '{plan_id}' not found or access forbidden.")
+
+    return {
+        "success": True,
+        "plan": plan
+    }
+
+
+@app.get("/api/planner/job/{job_id}")
+def get_active_job_plan_endpoint(
+    job_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Retrieves the current active (newest version) report plan for a job.
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job report plan.")
+
+    plan = planner_service.get_active_plan(job_id=job_id, owner_id=job.get("owner_id", auth["officer_id"]))
+    if not plan:
+        # Generate plan on demand if not yet generated
+        gen_res = planner_service.generate_plan(job_id=job_id, owner_id=job.get("owner_id", auth["officer_id"]))
+        if gen_res.get("success"):
+            plan = gen_res.get("plan")
+        else:
+            raise HTTPException(status_code=404, detail=gen_res.get("error", "No report plan found for job."))
+
+    return {
+        "success": True,
+        "job_id": job_id,
+        "plan": plan
+    }
+
+
+@app.get("/api/planner/job/{job_id}/versions")
+def list_job_plan_versions_endpoint(
+    job_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Lists all plan versions for a job to support reproducible generation audits.
+    Enforces Phase 0 user ownership isolation.
+    """
+    job = ingestion_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to list plan versions.")
+
+    versions = planner_service.list_plan_versions(job_id=job_id, owner_id=job.get("owner_id", auth["officer_id"]))
+    return {
+        "success": True,
+        "job_id": job_id,
+        "versions_count": len(versions),
+        "versions": versions
+    }
+
+
+@app.post("/api/planner/{plan_id}/validate")
+def validate_report_plan_endpoint(
+    plan_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Validates evidence sufficiency and completeness of an existing report plan.
+    Enforces Phase 0 user ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    result = planner_service.validate_plan(plan_id, owner_id=None if is_master else auth["officer_id"])
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("error", "Plan validation failed."))
+
+    return result
 
 
 @app.post("/api/convert")
