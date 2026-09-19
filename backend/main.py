@@ -23,9 +23,10 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from backend import config, auth_store
-from backend.services import ingestion_store
+from backend.services import ingestion_store, evidence_store
 from backend.services.converter import MarkdownConverter
 from backend.services.document_generator import DocumentGenerator, TEMPLATE_CONFIGS, get_active_dataset_metrics
+from backend.services.evidence_extractor import evidence_extractor
 from backend.services.gemma_client import GemmaClient
 from backend.services.history_manager import get_history, record_report
 from backend.services.ingestion_service import ingestion_engine
@@ -688,6 +689,162 @@ def get_normalized_evidence_content(
         "file_type": rec.get("file_type"),
         "normalized_markdown": content,
         "provenance": rec.get("provenance", [])
+    }
+
+
+# -------------------------------------------------------------------------
+# PHASE 2: STRUCTURED EVIDENCE LAYER ENDPOINTS
+# -------------------------------------------------------------------------
+@app.get("/api/evidence")
+def list_structured_evidence(
+    job_id: Optional[str] = Query(None),
+    file_id: Optional[str] = Query(None),
+    layer: Optional[str] = Query(None),
+    classification: Optional[str] = Query(None),
+    source_type: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Queries structured evidence items with multi-dimensional filtering.
+    Classifications: LOCKED FACT, CALCULATED VALUE, SUMMARIZABLE TEXT, AI ANALYSIS, AI-GENERATED CAPTION, AI INTERPRETATION.
+    Layers: raw, processed, derived.
+    Enforces Phase 0 ownership isolation.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+
+    effective_job_id = job_id if isinstance(job_id, str) and job_id.strip() else None
+    effective_file_id = file_id if isinstance(file_id, str) and file_id.strip() else None
+    effective_layer = layer if isinstance(layer, str) and layer.strip() else None
+    effective_class = classification if isinstance(classification, str) and classification.strip() else None
+    effective_source_type = source_type if isinstance(source_type, str) and source_type.strip() else None
+    effective_search = search if isinstance(search, str) and search.strip() else None
+    effective_limit = limit if isinstance(limit, int) else 100
+    effective_offset = offset if isinstance(offset, int) else 0
+
+    if effective_job_id:
+        job = ingestion_store.get_job(effective_job_id)
+        if job and not is_master and job.get("owner_id") != auth["officer_id"]:
+            raise HTTPException(status_code=403, detail="Forbidden: Access denied to job evidence.")
+
+    filter_owner = None if is_master else auth["officer_id"]
+    result = evidence_store.query_evidence(
+        job_id=effective_job_id,
+        file_id=effective_file_id,
+        owner_id=filter_owner,
+        layer=effective_layer,
+        classification=effective_class,
+        source_type=effective_source_type,
+        search=effective_search,
+        limit=effective_limit,
+        offset=effective_offset
+    )
+
+    return {
+        "success": True,
+        "total": result["total"],
+        "limit": result["limit"],
+        "offset": result["offset"],
+        "items": result["items"]
+    }
+
+
+@app.get("/api/evidence/{evidence_id}")
+def get_single_evidence_item(
+    evidence_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Retrieves a single structured evidence item by stable evidence ID.
+    Enforces Phase 0 ownership isolation.
+    """
+    item = evidence_store.get_evidence_by_id(evidence_id)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Evidence item '{evidence_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and item.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to evidence item.")
+
+    return {
+        "success": True,
+        "evidence": item
+    }
+
+
+@app.get("/api/evidence/jobs/{job_id}/summary")
+def get_job_evidence_summary_api(
+    job_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Retrieves evidence classification and layer summary metrics for a job.
+    Enforces Phase 0 ownership isolation.
+    """
+    job = ingestion_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job evidence summary.")
+
+    summary = evidence_store.get_job_evidence_summary(
+        job_id=job_id,
+        owner_id=None if is_master else auth["officer_id"]
+    )
+    return {
+        "success": True,
+        "summary": summary
+    }
+
+
+@app.post("/api/evidence/extract/{job_id}")
+def trigger_evidence_extraction(
+    job_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Triggers structured evidence extraction for all files in an ingested job.
+    Enforces Phase 0 ownership isolation.
+    """
+    job = ingestion_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
+
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (auth.get("role") == "Senior Operational Auditor") or (
+        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+    )
+    if not is_master and job.get("owner_id") != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Access denied to trigger extraction.")
+
+    files = ingestion_store.list_files_for_job(job_id)
+    all_extracted = []
+    for f in files:
+        items = evidence_extractor.extract_from_file_record(f)
+        if items:
+            evidence_store.save_evidence_items([it.to_dict() for it in items])
+            all_extracted.extend(items)
+
+    summary = evidence_store.get_job_evidence_summary(job_id=job_id, owner_id=None if is_master else auth["officer_id"])
+
+    return {
+        "success": True,
+        "job_id": job_id,
+        "extracted_items_count": len(all_extracted),
+        "summary": summary
     }
 
 

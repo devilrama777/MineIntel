@@ -570,6 +570,16 @@ class IngestionEngine:
         )
 
         save_evidence_file(evidence_record.to_dict())
+
+        # 5. Extract and persist structured evidence layer
+        try:
+            from backend.services.evidence_extractor import evidence_extractor
+            from backend.services import evidence_store
+            ev_items = evidence_extractor.extract_from_file_record(evidence_record.to_dict())
+            evidence_store.save_evidence_items([item.to_dict() for item in ev_items])
+        except Exception as ev_err:
+            logger.warning(f"Structured evidence extraction error for {clean_name}: {ev_err}")
+
         return evidence_record
 
     @classmethod
@@ -582,7 +592,8 @@ class IngestionEngine:
         Creates and executes a multi-file Ingestion Job:
         - Allocates job_id
         - Processes all files sequentially with immutable raw copies
-        - Constructs job manifest.json
+        - Generates structured evidence items with stable IDs and classifications
+        - Constructs job manifest.json with evidence summary
         - Updates job state in Ingestion Store
         """
         now_ms = int(time.time() * 1000)
@@ -629,8 +640,15 @@ class IngestionEngine:
         job_record.updated_at = int(time.time() * 1000)
         job_record.files = evidence_files
 
-        # Write manifest.json
+        # Compute evidence breakdown summary for this job
         manifest_data = job_record.to_dict()
+        try:
+            from backend.services import evidence_store
+            manifest_data["evidence_summary"] = evidence_store.get_job_evidence_summary(job_id=job_id, owner_id=owner_id)
+        except Exception:
+            manifest_data["evidence_summary"] = {}
+
+        # Write manifest.json
         manifest_file = job_dir / "manifest.json"
         manifest_file.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
 

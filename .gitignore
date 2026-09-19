@@ -10,7 +10,7 @@ __pycache__/
 .env*.local
 
 # User storage & database files (dynamic runtime state)
-backend/data/users.json
+backend/data/*.json
 *.db
 *.sqlite
 *.sqlite3
