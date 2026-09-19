@@ -17,6 +17,27 @@ except ImportError:
 
 IS_VERCEL = bool(os.getenv("VERCEL") == "1" or os.getenv("VERCEL_ENV"))
 
+# --- Startup diagnostic (visible in Vercel function logs) ---
+import logging as _logging
+_startup_logger = _logging.getLogger("mineintel.config")
+
+_officer_id_set = bool(os.getenv("MINEINTEL_OFFICER_ID") or os.getenv("AUTH_OFFICER_ID"))
+_auth_pw_set = bool(os.getenv("MINEINTEL_AUTH_PASSWORD") or os.getenv("AUTH_SECRET_PASSWORD"))
+
+if IS_VERCEL and not (_officer_id_set and _auth_pw_set):
+    _startup_logger.critical(
+        "PRODUCTION MISCONFIGURATION: Master authentication environment variables are not set. "
+        "Set MINEINTEL_OFFICER_ID and MINEINTEL_AUTH_PASSWORD in the Vercel dashboard under "
+        "Project → Settings → Environment Variables. Without these, all login attempts will "
+        "return HTTP 503."
+    )
+elif not (_officer_id_set and _auth_pw_set):
+    _startup_logger.warning(
+        "Master auth env vars (MINEINTEL_OFFICER_ID / MINEINTEL_AUTH_PASSWORD) are not set. "
+        "Login will only work if normal users exist in the database. "
+        "See .env.example for required variables."
+    )
+
 if IS_VERCEL:
     WORK_DIR = Path("/tmp")
     UPLOADS_DIR = WORK_DIR / "uploads"

@@ -34,9 +34,14 @@ def _secure_answer() -> str:
 
 
 def _font(size: int):
-    if not CAPTCHA_FONT_PATH.is_file():
-        raise FileNotFoundError(f"Bundled CAPTCHA font is missing: {CAPTCHA_FONT_PATH}")
-    return ImageFont.truetype(str(CAPTCHA_FONT_PATH), size)
+    """Returns the bundled TrueType font, or PIL's default raster font if the TTF is unavailable."""
+    if CAPTCHA_FONT_PATH.is_file():
+        try:
+            return ImageFont.truetype(str(CAPTCHA_FONT_PATH), size)
+        except Exception:
+            pass
+    # Graceful fallback: PIL built-in bitmap font (no external file required)
+    return ImageFont.load_default()
 
 
 def _render_png(answer: str) -> str:
@@ -152,7 +157,24 @@ def create_challenge() -> Dict[str, str | int]:
         _challenges.clear()
         _challenges[challenge_id] = (answer_hash, float(expires_at))
     _pg_save_challenge(challenge_id, answer_hash, float(expires_at))
-    return {"challenge_id": challenge_id, "image": _render_png(answer), "expires_in": CAPTCHA_TTL_SECONDS}
+    try:
+        image_b64 = _render_png(answer)
+    except Exception as render_err:
+        # Font or rendering unavailable: produce a plain text placeholder image so
+        # the endpoint still returns 200 and the user can see the challenge text.
+        import logging as _logging
+        _logging.getLogger("mineintel.captcha").warning(
+            f"CAPTCHA render failed ({render_err}), using text-only fallback."
+        )
+        img = Image.new("RGB", (260, 82), (238, 244, 252))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle((0, 0, 259, 81), outline=(47, 79, 115), width=2)
+        fb_font = ImageFont.load_default()
+        draw.text((40, 28), answer, font=fb_font, fill=(20, 83, 150))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        image_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    return {"challenge_id": challenge_id, "image": image_b64, "expires_in": CAPTCHA_TTL_SECONDS}
 
 
 def verify_challenge(challenge_id: str, answer: str) -> bool:
