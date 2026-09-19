@@ -15,7 +15,12 @@ except ImportError:
     pass
 
 
-IS_VERCEL = bool(os.getenv("VERCEL") == "1" or os.getenv("VERCEL_ENV"))
+IS_VERCEL = bool(
+    os.getenv("VERCEL") == "1" or 
+    os.getenv("VERCEL_ENV") or 
+    os.getenv("AWS_EXECUTION_ENV") or 
+    os.getenv("AWS_LAMBDA_FUNCTION_NAME")
+)
 
 # --- Startup diagnostic (visible in Vercel function logs) ---
 import logging as _logging
