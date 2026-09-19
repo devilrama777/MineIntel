@@ -27,7 +27,7 @@ logger = logging.getLogger("mineintel.auth_store")
 HASH_ITERATIONS = 100_000
 
 # Local fallback file location
-USERS_FILE = config.DATA_DIR / "users.json"
+USERS_FILE = (config.OUTPUTS_DIR / "users.json") if config.IS_VERCEL else (config.DATA_DIR / "users.json")
 
 _pg_initialized = False
 
@@ -174,7 +174,7 @@ def load_users() -> Dict[str, Dict[str, Any]]:
 
 def get_user_by_id(officer_id: str) -> Optional[Dict[str, Any]]:
     """Retrieves user by officer ID / username (case-insensitive)."""
-    clean_id = officer_id.strip()
+    clean_id = (officer_id or "").strip().strip("\"'").strip()
     if not clean_id:
         return None
 
@@ -238,14 +238,15 @@ def create_user(
     email: str = ""
 ) -> Dict[str, Any]:
     """Creates a new normal user with salted PBKDF2 hash in PostgreSQL or local file."""
-    clean_id = officer_id.strip()
+    clean_id = (officer_id or "").strip().strip("\"'").strip()
+    clean_pw = (password or "").strip().strip("\"'").strip()
     if not clean_id:
         raise ValueError("Officer ID / Username cannot be empty.")
-    if len(password.strip()) < 4:
+    if len(clean_pw) < 4:
         raise ValueError("Password must be at least 4 characters.")
 
     # Disallow shadowing the Master Account
-    master_id = config.get_auth_officer_id().strip().lower()
+    master_id = config.get_auth_officer_id().strip().strip("\"'").strip().lower()
     if master_id and clean_id.lower() == master_id:
         raise ValueError("Cannot create a user with the Master Officer ID.")
 
@@ -253,10 +254,10 @@ def create_user(
     if get_user_by_id(clean_id):
         raise ValueError(f"User '{clean_id}' already exists.")
 
-    pwd_hash, salt = hash_password(password.strip())
+    pwd_hash, salt = hash_password(clean_pw)
     created_ts = int(time.time())
-    display_val = (display_name or clean_id).strip()
-    role_val = role.strip() if role else "Operational Auditor"
+    display_val = (display_name or clean_id).strip().strip("\"'").strip()
+    role_val = (role.strip().strip("\"'").strip()) if role else "Operational Auditor"
 
     if is_postgres_configured():
         try:
@@ -280,7 +281,9 @@ def create_user(
             }
         except Exception as e:
             logger.warning(f"PostgreSQL write failed: {e}")
-            raise RuntimeError(f"Database write error: {e}")
+            if config.IS_VERCEL:
+                raise RuntimeError(f"Database write error: {e}")
+            logger.info("Falling back to local storage for user registration.")
 
     # Local fallback
     local_users = _load_local_users()
@@ -410,8 +413,8 @@ def authenticate_user(officer_id: str, password: str) -> Optional[Dict[str, Any]
     2. A registered normal user from PostgreSQL or local persistent storage
     Returns safe user info dict if valid, else None.
     """
-    clean_id = officer_id.strip()
-    clean_pw = password.strip()
+    clean_id = (officer_id or "").strip().strip("\"'").strip()
+    clean_pw = (password or "").strip().strip("\"'").strip()
     if not clean_id or not clean_pw:
         return None
 

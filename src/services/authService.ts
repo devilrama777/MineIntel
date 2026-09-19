@@ -136,9 +136,11 @@ class AuthService {
    * Authenticate officer with Employee ID / Username and Password.
    */
   public async login(credentials: LoginCredentials): Promise<AuthSession> {
+    const cleanOfficerId = (credentials.username || '').trim().replace(/^["']|["']$/g, '');
+    const cleanPassword = (credentials.password || '').trim().replace(/^["']|["']$/g, '');
     const payload = {
-      officer_id: credentials.username.trim(),
-      password: credentials.password.trim(),
+      officer_id: cleanOfficerId,
+      password: cleanPassword,
       captcha_challenge_id: credentials.captcha_challenge_id,
       captcha_answer: credentials.captcha_answer.trim(),
     };
@@ -308,10 +310,17 @@ class AuthService {
     display_name?: string;
     role?: string;
   }): Promise<{ success: boolean; message: string; user?: any }> {
+    const payload = {
+      ...data,
+      master_officer_id: (data.master_officer_id || '').trim().replace(/^["']|["']$/g, ''),
+      master_password: (data.master_password || '').trim().replace(/^["']|["']$/g, ''),
+      officer_id: (data.officer_id || '').trim().replace(/^["']|["']$/g, ''),
+      password: (data.password || '').trim().replace(/^["']|["']$/g, ''),
+    };
     const resp = await fetch(`${API_BASE}/api/auth/users`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
 
     const resData = await resp.json().catch(() => ({}));

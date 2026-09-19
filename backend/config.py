@@ -107,19 +107,39 @@ SESSION_EXPIRY_HOURS = int(os.getenv("SESSION_EXPIRY_HOURS", "24"))
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or os.getenv("MineIntel_DATABASE_URL") or os.getenv("MineIntel_POSTGRES_URL") or ""
 
 
+def refresh_local_env() -> None:
+    """Ensures local .env is loaded and synchronized with environment when not on Vercel."""
+    if not IS_VERCEL:
+        try:
+            from dotenv import load_dotenv
+            for path in (BASE_DIR / ".env", Path.cwd() / ".env"):
+                if path.exists() and path.is_file():
+                    load_dotenv(dotenv_path=path, override=False)
+                    break
+        except Exception:
+            pass
+
+
 def get_database_url() -> str:
     """Returns PostgreSQL connection string if configured in environment."""
-    return (
+    if not IS_VERCEL:
+        refresh_local_env()
+    val = (
         os.getenv("DATABASE_URL")
         or os.getenv("POSTGRES_URL")
         or os.getenv("MineIntel_DATABASE_URL")
         or os.getenv("MineIntel_POSTGRES_URL")
         or DATABASE_URL
     )
+    if isinstance(val, str):
+        val = val.strip().strip("\"'").strip()
+    return val or ""
 
 
 def get_auth_officer_id() -> str:
     """Returns officer ID dynamically checking environment or configured default."""
+    if not IS_VERCEL:
+        refresh_local_env()
     val = os.getenv("MINEINTEL_OFFICER_ID") or os.getenv("AUTH_OFFICER_ID") or AUTH_OFFICER_ID
     if isinstance(val, str):
         val = val.strip().strip("\"'").strip()
@@ -128,6 +148,8 @@ def get_auth_officer_id() -> str:
 
 def get_auth_secret_password() -> str:
     """Returns secret password dynamically checking environment or configured default."""
+    if not IS_VERCEL:
+        refresh_local_env()
     val = os.getenv("MINEINTEL_AUTH_PASSWORD") or os.getenv("AUTH_SECRET_PASSWORD") or AUTH_SECRET_PASSWORD
     if isinstance(val, str):
         val = val.strip().strip("\"'").strip()

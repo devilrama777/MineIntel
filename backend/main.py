@@ -249,8 +249,8 @@ def auth_login(req: LoginRequest):
     """Authenticates executive master officers and registered members against secure credential store."""
     if not req.captcha_challenge_id.strip() or not req.captcha_answer.strip() or not verify_challenge(req.captcha_challenge_id, req.captcha_answer):
         raise HTTPException(status_code=400, detail="CAPTCHA is missing, incorrect, expired, or already used.")
-    officer_id = (req.officer_id or req.username or "").strip()
-    password = req.password.strip()
+    officer_id = (req.officer_id or req.username or "").strip().strip("\"'").strip()
+    password = req.password.strip().strip("\"'").strip()
 
     officer_id_configured = config.get_auth_officer_id()
     secret_pw_configured = config.get_auth_secret_password()
@@ -298,8 +298,8 @@ def auth_create_user(req: CreateUserRequest):
     Creates a new normal user account.
     Requires Master Officer authentication.
     """
-    master_officer = config.get_auth_officer_id().strip()
-    master_secret = config.get_auth_secret_password().strip()
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    master_secret = config.get_auth_secret_password().strip().strip("\"'").strip()
 
     if not master_officer or not master_secret:
         raise HTTPException(
@@ -307,8 +307,11 @@ def auth_create_user(req: CreateUserRequest):
             detail="Master authentication is unconfigured on the server."
         )
 
-    valid_master_id = secrets.compare_digest(req.master_officer_id.strip().lower(), master_officer.lower())
-    valid_master_pw = secrets.compare_digest(req.master_password.strip(), master_secret)
+    req_master_id = req.master_officer_id.strip().strip("\"'").strip()
+    req_master_pw = req.master_password.strip().strip("\"'").strip()
+
+    valid_master_id = secrets.compare_digest(req_master_id.lower(), master_officer.lower())
+    valid_master_pw = secrets.compare_digest(req_master_pw, master_secret)
 
     if not (valid_master_id and valid_master_pw):
         raise HTTPException(
@@ -318,10 +321,10 @@ def auth_create_user(req: CreateUserRequest):
 
     try:
         new_user = auth_store.create_user(
-            officer_id=req.officer_id,
-            password=req.password,
-            display_name=req.display_name,
-            role=req.role or "Operational Auditor"
+            officer_id=req.officer_id.strip().strip("\"'").strip(),
+            password=req.password.strip().strip("\"'").strip(),
+            display_name=(req.display_name or "").strip().strip("\"'").strip() if req.display_name else None,
+            role=(req.role or "Operational Auditor").strip().strip("\"'").strip()
         )
         return {
             "success": True,
@@ -338,19 +341,22 @@ def auth_update_user_status(req: MasterUserActionRequest):
     Enables or disables/revokes a user account.
     Requires Master Officer authentication.
     """
-    master_officer = config.get_auth_officer_id().strip()
-    master_secret = config.get_auth_secret_password().strip()
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    master_secret = config.get_auth_secret_password().strip().strip("\"'").strip()
 
     if not master_officer or not master_secret:
         raise HTTPException(status_code=503, detail="Master authentication is unconfigured.")
 
-    valid_master_id = secrets.compare_digest(req.master_officer_id.strip().lower(), master_officer.lower())
-    valid_master_pw = secrets.compare_digest(req.master_password.strip(), master_secret)
+    req_master_id = req.master_officer_id.strip().strip("\"'").strip()
+    req_master_pw = req.master_password.strip().strip("\"'").strip()
+
+    valid_master_id = secrets.compare_digest(req_master_id.lower(), master_officer.lower())
+    valid_master_pw = secrets.compare_digest(req_master_pw, master_secret)
 
     if not (valid_master_id and valid_master_pw):
         raise HTTPException(status_code=401, detail="Master authentication failed.")
 
-    success = auth_store.set_user_status(req.target_officer_id, req.is_active)
+    success = auth_store.set_user_status(req.target_officer_id.strip().strip("\"'").strip(), req.is_active)
     if not success:
         raise HTTPException(status_code=404, detail=f"User '{req.target_officer_id}' not found.")
 
