@@ -41,6 +41,7 @@ from backend.services.chart_service import chart_service
 from backend.services.planner_service import planner_service
 from backend.services.report_generator_service import report_generator_service
 from backend.services.report_editor_service import report_editor_service
+from backend.services.learning_service import learning_service
 
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
@@ -1951,8 +1952,137 @@ def finalize_report_endpoint(
     return result
 
 
+# -------------------------------------------------------------------------
+# PHASE 9: USER-SPECIFIC LEARNING & FEEDBACK ENDPOINTS
+# -------------------------------------------------------------------------
+class UserPreferencesUpdateRequest(BaseModel):
+    style_preferences: Optional[Dict[str, Any]] = None
+    terminology_rules: Optional[Dict[str, str]] = None
+    chart_preferences: Optional[Dict[str, str]] = None
 
-@app.post("/api/convert")
+
+class ChartFeedbackRequest(BaseModel):
+    report_id: str
+    job_id: str
+    chart_id: str
+    chart_type: str
+    action: str = "accepted"  # "accepted", "rejected", "modified"
+    details: Optional[Dict[str, Any]] = None
+
+
+@app.get("/api/learning/profile")
+def get_user_learning_profile_endpoint(
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Retrieves the authenticated user's isolated learning profile and derived preferences.
+    Enforces Phase 0 user ownership isolation.
+    """
+    profile = learning_service.get_user_profile(user_id=auth["officer_id"])
+    return {
+        "success": True,
+        "profile": profile
+    }
+
+
+@app.put("/api/learning/preferences")
+def update_user_preferences_endpoint(
+    payload: UserPreferencesUpdateRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Updates the authenticated user's learned preferences.
+    Enforces Phase 0 user ownership isolation.
+    """
+    updated_profile = learning_service.update_user_preferences(
+        user_id=auth["officer_id"],
+        style_preferences=payload.style_preferences,
+        terminology_rules=payload.terminology_rules,
+        chart_preferences=payload.chart_preferences
+    )
+    return {
+        "success": True,
+        "profile": updated_profile
+    }
+
+
+@app.get("/api/learning/events")
+def list_user_learning_events_endpoint(
+    limit: int = Query(50, ge=1, le=200),
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Retrieves the chronological feedback audit trail strictly for the authenticated user.
+    Enforces Phase 0 user ownership isolation.
+    """
+    events = learning_service.list_user_events(user_id=auth["officer_id"], limit=limit)
+    return {
+        "success": True,
+        "user_id": auth["officer_id"],
+        "events_count": len(events),
+        "events": events
+    }
+
+
+@app.post("/api/learning/feedback/chart")
+def record_chart_feedback_endpoint(
+    payload: ChartFeedbackRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Records chart selection, modification, or rejection feedback.
+    Enforces Phase 0 user ownership isolation.
+    """
+    event = learning_service.record_chart_feedback(
+        user_id=auth["officer_id"],
+        report_id=payload.report_id,
+        job_id=payload.job_id,
+        chart_id=payload.chart_id,
+        chart_type=payload.chart_type,
+        action=payload.action,
+        details=payload.details
+    )
+    return {
+        "success": True,
+        "event_id": event.event_id,
+        "event": event.to_dict()
+    }
+
+
+@app.get("/api/learning/export-dataset")
+def export_fine_tuning_dataset_endpoint(
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Exports approved edit pairs into a dataset for optional offline supervised fine-tuning.
+    Does NOT execute automatic fine-tuning.
+    Enforces Phase 0 user ownership isolation.
+    """
+    dataset = learning_service.export_fine_tuning_dataset(user_id=auth["officer_id"])
+    return {
+        "success": True,
+        "user_id": auth["officer_id"],
+        "dataset_count": len(dataset),
+        "dataset": dataset
+    }
+
+
+@app.delete("/api/learning/data")
+def delete_user_learning_data_endpoint(
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Deletes all learning records and preference profiles belonging to the authenticated user.
+    Fulfills Phase 0 ownership lifecycle deletion.
+    """
+    deleted = learning_service.delete_user_learning_data(user_id=auth["officer_id"])
+    return {
+        "success": True,
+        "user_id": auth["officer_id"],
+        "deleted": deleted,
+        "message": "All user learning data, feedback events, and preference profiles deleted successfully."
+    }
+
 def convert_to_markdown(file_id: str = Form(...)):
     """Converts an uploaded file into structured Markdown."""
     target_path = config.UPLOADS_DIR / file_id

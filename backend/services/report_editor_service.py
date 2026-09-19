@@ -272,6 +272,39 @@ class ReportEditorService:
         self._recompile_revision_artifacts(new_rev, owner_id)
         store_save_revision(new_rev.to_dict())
 
+        # Record learning feedback event in Phase 9 Learning Service
+        try:
+            from backend.services.learning_service import learning_service
+            orig_sec_text = ""
+            eids = []
+            topic = ""
+            for s in latest_rev.sections:
+                if s.section_id == section_id:
+                    orig_sec_text = s.content_text
+                    eids = s.evidence_ids
+                    topic = s.topic
+                    break
+                for sub in s.subsections:
+                    if sub.section_id == section_id:
+                        orig_sec_text = sub.content_text
+                        eids = sub.evidence_ids
+                        topic = sub.topic
+                        break
+            learning_service.record_edit_feedback(
+                user_id=owner_id,
+                report_id=report_id,
+                job_id=latest_rev.job_id,
+                plan_id=latest_rev.plan_id,
+                section_id=section_id,
+                section_topic=topic,
+                original_text=orig_sec_text,
+                edited_text=new_content if new_content is not None else orig_sec_text,
+                evidence_ids=eids,
+                details={"change_summary": change_summary}
+            )
+        except Exception as learn_err:
+            logger.warning(f"Could not record learning event for report {report_id}: {learn_err}")
+
         logger.info(f"Created revision v{new_ver} for report {report_id} (edited section {section_id})")
         return {
             "success": True,
