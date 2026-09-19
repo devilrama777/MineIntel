@@ -36,6 +36,25 @@ if False:
 _app_instance = None
 
 async def app(scope, receive, send):
+    if scope['type'] == 'http' and scope.get('path') == '/api/debug':
+        import os
+        debug_info = {
+            "cwd": os.getcwd(),
+            "env": dict(os.environ),
+            "sys_path": sys.path
+        }
+        import json
+        await send({
+            'type': 'http.response.start',
+            'status': 200,
+            'headers': [(b'content-type', b'application/json')]
+        })
+        await send({
+            'type': 'http.response.body',
+            'body': json.dumps(debug_info).encode('utf-8')
+        })
+        return
+
     global _app_instance
     if _app_instance is None:
         try:
