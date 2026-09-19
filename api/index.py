@@ -3,17 +3,24 @@ import traceback
 from pathlib import Path
 
 class DummyMock:
+    def __init__(self, name=""):
+        self.__name__ = name
+        self.__path__ = []
     def __getattr__(self, name):
-        return DummyMock()
+        if name == "__path__":
+            return []
+        return DummyMock(name)
     def __call__(self, *args, **kwargs):
         return DummyMock()
+    def __iter__(self):
+        return iter([])
 
 mock_modules = [
     'pandas', 'numpy', 'numpy.linalg', 'pdfplumber', 'pypdf', 'reportlab', 
     'reportlab.lib', 'reportlab.lib.pagesizes', 'reportlab.lib.styles',
     'reportlab.platypus', 'reportlab.pdfgen', 'docx', 'docx.shared', 
     'docx.enum', 'docx.enum.text', 'openpyxl', 'matplotlib', 'matplotlib.pyplot', 
-    'seaborn', 'wordcloud', 'psycopg2', 'psycopg2.pool'
+    'seaborn', 'wordcloud', 'openpyxl.styles'
 ]
 for mod_name in mock_modules:
     sys.modules[mod_name] = DummyMock()
