@@ -461,7 +461,8 @@ class LocalDesktopService {
   async runPipelineWithFiles(
     files: File[],
     customCommand?: string,
-    title?: string
+    title?: string,
+    onProgress?: (status: 'PENDING' | 'RUNNING' | 'VALIDATING' | 'COMPLETED' | 'FAILED') => void
   ): Promise<{
     job_id: string;
     report_id: string;
@@ -498,77 +499,48 @@ class LocalDesktopService {
     const ingestResult = await res.json();
     const jobId = ingestResult.job_id;
 
-    // 2. Phase 4: Intelligence Analysis
-    try {
-      await fetch(`${API_BASE}/api/intelligence/analyze/${jobId}`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-    } catch {
-      // Non-blocking
+    // 2. PHASE 3 UPDATE: Submit to Agent and Poll
+    onProgress?.('PENDING');
+    const agentRes = await fetch(`${API_BASE}/api/agent/tasks`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({
+        job_id: jobId,
+        instruction: customCommand || undefined,
+      }),
+    });
+    
+    if (!agentRes.ok) {
+      const err = await agentRes.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to start Agent task.');
     }
-
-    // 3. Phase 5: Chart Detection
-    try {
-      await fetch(`${API_BASE}/api/charts/detect/${jobId}`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-    } catch {
-      // Non-blocking
-    }
-
-    // 4. Phase 6: AI Report Planner (autonomous with use_ai: true)
-    let planId: string | undefined = undefined;
-    const reportTitle = title || (files.length === 1 ? `Executive Audit: ${files[0].name}` : `Multi-Source Dossier (${files.length} documents)`);
-    try {
-      const planRes = await fetch(`${API_BASE}/api/planner/generate`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({
-          job_id: jobId,
-          title: reportTitle,
-          use_ai: true,
-          custom_instruction: customCommand,
-        }),
-      });
-      if (planRes.ok) {
-        const planData = await planRes.json();
-        planId = planData.plan_id || planData.plan?.plan_id;
-      }
-    } catch {
-      // Non-blocking
-    }
-
-    // 5. Phase 7: Long-Document Report Generation
-    let outputFiles: { pdf?: string; docx?: string; md?: string } = {};
+    
+    const agentData = await agentRes.json();
+    const taskId = agentData.task_id;
+    
     let reportId = '';
     let reportMarkdown = '';
-    try {
-      const repRes = await fetch(`${API_BASE}/api/reports/generate-long`, {
-        method: 'POST',
+    let outputFiles: any = {};
+    const reportTitle = title || (files.length === 1 ? `Executive Audit: ${files[0].name}` : `Multi-Source Dossier (${files.length} documents)`);
+    
+    while (true) {
+      await new Promise(r => setTimeout(r, 2000));
+      const statusRes = await fetch(`${API_BASE}/api/agent/tasks/${taskId}/status`, {
         headers: this.getAuthHeaders(),
-        body: JSON.stringify({
-          job_id: jobId,
-          plan_id: planId,
-          title: reportTitle,
-          formats: ['pdf', 'docx', 'md'],
-        }),
       });
-      if (repRes.ok) {
-        const repData = await repRes.json();
-        reportId = repData.report_id || '';
-        outputFiles = {
-          pdf: repData.pdf_path,
-          docx: repData.docx_path,
-          md: repData.md_path,
-        };
-        if (repData.report_markdown) {
-          reportMarkdown = repData.report_markdown;
+      
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        const currentStatus = statusData.status;
+        onProgress?.(currentStatus);
+        
+        if (currentStatus === 'COMPLETED') {
+          reportId = statusData.report_id || jobId;
+          break;
+        } else if (currentStatus === 'FAILED') {
+          throw new Error('Agent execution failed.');
         }
       }
-    } catch {
-      // Non-blocking
     }
 
     // 6. Obtain generated markdown using existing report download API

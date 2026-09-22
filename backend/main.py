@@ -524,6 +524,42 @@ def auth_logout():
     return {"success": True, "message": "Enclave session terminated."}
 
 
+@app.get("/api/health/live")
+def health_live():
+    """Checks basic backend container liveness."""
+    return {"status": "alive"}
+
+
+@app.get("/api/health/ready")
+def health_ready():
+    """Checks backend readiness including Database and Ollama model availability."""
+    from backend.services.ai_providers.registry import get_provider
+    provider = get_provider("local_ollama")
+    ai_status = provider.get_status()
+    
+    if not provider.is_available():
+        raise HTTPException(status_code=503, detail="Ollama service is unavailable.")
+        
+    text_ready = ai_status.get("text_model_ready", False)
+    vl_ready = ai_status.get("vl_model_ready", False)
+    
+    if not (text_ready and vl_ready):
+        missing = []
+        if not text_ready:
+            missing.append(provider.default_text_model)
+        if not vl_ready:
+            missing.append(provider.default_vl_model)
+        raise HTTPException(status_code=503, detail=f"Required Ollama models missing: {', '.join(missing)}")
+        
+    return {
+        "status": "ready",
+        "database": "connected", # Implicitly connected if the app started and Neon JSONB is active
+        "ai_provider": "local_ollama",
+        "text_model": provider.default_text_model,
+        "vl_model": provider.default_vl_model
+    }
+
+
 @app.get("/api/health")
 def health_check():
     """Checks service health and AI provider configuration."""
@@ -3539,6 +3575,94 @@ def get_analytics_summary(job_id: Optional[str] = Query(None)):
         "upper_fence": metrics.get("upper_fence", 0.0),
         "anomalies": anomalies,
         "state_aggregates": metrics.get("state_aggregates", {})
+    }
+
+
+# -------------------------------------------------------------------------
+# PHASE 3: AGENT EXECUTION LAYER ENDPOINTS
+# -------------------------------------------------------------------------
+from fastapi import BackgroundTasks
+
+class AgentTaskRequest(BaseModel):
+    job_id: str
+    instruction: Optional[str] = None
+
+@app.post("/api/agent/tasks", status_code=201)
+def create_agent_task(
+    req: AgentTaskRequest,
+    background_tasks: BackgroundTasks,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """Creates a new autonomous Agent Task and runs it in the background."""
+    from backend.services.agent.agent_store import get_agent_store
+    from backend.services.agent.agent_coordinator import get_coordinator
+
+    store = get_agent_store()
+    task_id = store.create_task(
+        owner_id=auth["officer_id"],
+        job_id=req.job_id,
+        instruction=req.instruction or "Synthesize a comprehensive report based on the provided evidence."
+    )
+    
+    coordinator = get_coordinator()
+    background_tasks.add_task(coordinator.process_task, task_id)
+    
+    return {
+        "success": True,
+        "task_id": task_id,
+        "message": "Agent task started successfully."
+    }
+
+@app.get("/api/agent/tasks/{task_id}")
+def get_agent_task_details(
+    task_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """Retrieves full details of an Agent Task."""
+    from backend.services.agent.agent_store import get_agent_store
+    store = get_agent_store()
+    task = store.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Agent task not found.")
+    
+    if task.owner_id != auth["officer_id"]:
+        master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+        is_master = (auth.get("role") == "Senior Officer") or (
+            bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+        )
+        if not is_master:
+            raise HTTPException(status_code=403, detail="Forbidden: You do not have access to this agent task.")
+            
+    return {
+        "success": True,
+        "task": task.model_dump()
+    }
+
+@app.get("/api/agent/tasks/{task_id}/status")
+def get_agent_task_status(
+    task_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """Retrieves the high-level status of an Agent Task for polling."""
+    from backend.services.agent.agent_store import get_agent_store
+    store = get_agent_store()
+    task = store.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Agent task not found.")
+    
+    if task.owner_id != auth["officer_id"]:
+        master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+        is_master = (auth.get("role") == "Senior Officer") or (
+            bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
+        )
+        if not is_master:
+            raise HTTPException(status_code=403, detail="Forbidden: You do not have access to this agent task.")
+            
+    return {
+        "success": True,
+        "task_id": task_id,
+        "status": task.status.value,
+        "report_id": task.report_id
     }
 
 

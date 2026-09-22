@@ -16,6 +16,7 @@ interface ProcessingOverlayProps {
   fileName: string;
   isDark: boolean;
   onCancel: () => void;
+  statusMessage?: string;
 }
 
 const STAGES = [
@@ -55,6 +56,7 @@ export const ProcessingOverlay: React.FC<ProcessingOverlayProps> = ({
   fileName,
   isDark,
   onCancel,
+  statusMessage,
 }) => {
   const [currentStage, setCurrentStage] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -134,8 +136,9 @@ export const ProcessingOverlay: React.FC<ProcessingOverlayProps> = ({
           {/* Progress Bar */}
           <div className="mb-6">
             <div className="flex items-center justify-between text-xs sm:text-sm font-bold mb-2 text-neutral-700 dark:text-neutral-200">
-              <span className="truncate pr-2">
-                Analyzing document: <strong className="text-blue-600 dark:text-blue-400">{fileName || 'Provided Source'}</strong>
+              <span className="truncate pr-2 flex flex-col">
+                <span>Analyzing document: <strong className="text-blue-600 dark:text-blue-400">{fileName || 'Provided Source'}</strong></span>
+                {statusMessage && <span className="text-xs text-amber-500 mt-1">{statusMessage}</span>}
               </span>
               <span className="font-mono text-blue-600 dark:text-blue-400 font-extrabold">
                 {progressPercent}%

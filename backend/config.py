@@ -184,8 +184,8 @@ CLOUD_AI_TIMEOUT = int(os.getenv("CLOUD_AI_TIMEOUT", "30"))
 
 # Local Ollama AI Configuration
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-LOCAL_MODEL_QWEN3 = os.getenv("MINEINTEL_LOCAL_MODEL", "qwen2.5-coder:1.5b-base")
-LOCAL_MODEL_QWEN3_VL = os.getenv("MINEINTEL_LOCAL_VL_MODEL", "qwen3-vl:8b")
+LOCAL_MODEL_QWEN3 = os.getenv("MINEINTEL_LOCAL_MODEL", "qwen2.5:7b")
+LOCAL_MODEL_QWEN3_VL = os.getenv("MINEINTEL_LOCAL_VL_MODEL", "qwen2-vl:7b")
 LOCAL_AI_TIMEOUT = int(os.getenv("LOCAL_AI_TIMEOUT", "60"))
 
 # Legacy model name aliases for backward-compatible pipeline invocations

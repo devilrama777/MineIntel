@@ -175,7 +175,8 @@ export function WorkerApp() {
 
   // Execution & Output State
   const [activeView, setActiveView] = useState<ActiveView>('editor');
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [taskStatus, setTaskStatus] = useState<'IDLE' | 'PENDING' | 'RUNNING' | 'VALIDATING' | 'COMPLETED' | 'FAILED'>('IDLE');
+  const isProcessing = taskStatus !== 'IDLE' && taskStatus !== 'COMPLETED' && taskStatus !== 'FAILED';
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentReport, setCurrentReport] = useState<GeneratedReport | null>(null);
 
@@ -442,16 +443,18 @@ export function WorkerApp() {
 
     const reportTitle = targetFile?.name ?? (stagedFiles.length > 1 ? `${stagedFiles.length} Ingested Documents (${stagedFiles.slice(0, 2).map(f => f.name).join(', ')}${stagedFiles.length > 2 ? '...' : ''})` : (stagedFiles[0]?.name || fileName || 'Executive Audit Report'));
 
-    setIsProcessing(true);
+    setTaskStatus('PENDING');
     setErrorMessage(null);
 
     try {
-      // Execute the sovereign pipeline:
-      // Phase 1 Ingestion (ALL files submitted together) -> Phase 4 Intelligence -> Phase 5 Charts -> Phase 6 AI Planner -> Phase 7 Long Report Generation
+      // Execute the sovereign pipeline via Agent Task Orchestration
       const result = await desktopService.runPipelineWithFiles(
         filesToProcess,
         customFocus,
-        reportTitle
+        reportTitle,
+        (status) => {
+          setTaskStatus(status);
+        }
       );
 
       const newReport: GeneratedReport = {
@@ -473,8 +476,11 @@ export function WorkerApp() {
     } catch (err: any) {
       console.error('Report synthesis failed:', err);
       setErrorMessage(err.message || 'Failed to synthesize document into report. Please check API credentials.');
+      setTaskStatus('FAILED');
     } finally {
-      setIsProcessing(false);
+      if (taskStatus !== 'FAILED') {
+        setTaskStatus('IDLE');
+      }
     }
   };
 
@@ -879,7 +885,8 @@ export function WorkerApp() {
         <ProcessingOverlay
           fileName={fileName}
           isDark={isDark}
-          onCancel={() => setIsProcessing(false)}
+          onCancel={() => setTaskStatus('IDLE')}
+          statusMessage={`Agent Status: ${taskStatus}`}
         />
       )}
 
