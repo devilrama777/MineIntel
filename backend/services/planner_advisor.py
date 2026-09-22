@@ -9,7 +9,9 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from backend.services.ai_inference_service import ai_inference_service
+from backend import config
+from backend.services.ai_providers.base import AIRequest
+from backend.services.ai_providers.registry import ai_provider_registry
 from backend.services.planner_models import PlannedSection, ReportPlan
 
 logger = logging.getLogger("mineintel.planner_advisor")
@@ -25,7 +27,7 @@ class PlannerAdvisor:
         custom_instruction: Optional[str] = None
     ) -> ReportPlan:
         """
-        Refines section titles and executive summary framing using Qwen3-8B.
+        Refines section titles and executive summary framing using Ollama Qwen model.
         Grounds prompt only in topic names and section types; zero numbers are passed to alter.
         """
         try:
@@ -43,14 +45,19 @@ class PlannerAdvisor:
                 f"Respond with a JSON object: {{\"title\": \"...\", \"section_titles\": {{\"SEC-1\": \"...\"}}}}"
             )
 
-            resp = ai_inference_service.registry.get_provider().generate(
+            provider = ai_provider_registry.get_provider("local_ollama")
+            req = AIRequest(
                 prompt=prompt,
-                system_prompt="You are an expert mining report structural planner. Respond in strict JSON.",
+                system_instruction="You are an expert mining report structural planner. Respond in strict JSON.",
                 temperature=0.2,
-                max_tokens=300
+                max_tokens=400,
+                model=getattr(config, "LOCAL_MODEL_QWEN3", "qwen2.5-coder:1.5b-base"),
+                job_id=plan.job_id,
+                owner_id=plan.owner_id
             )
+            resp = provider.generate(req)
 
-            if resp and resp.text:
+            if resp and resp.success and resp.text:
                 text = resp.text.strip()
                 if "{" in text and "}" in text:
                     json_str = text[text.find("{"):text.rfind("}") + 1]
@@ -65,6 +72,7 @@ class PlannerAdvisor:
 
                     plan.metadata["ai_advisor_enriched"] = True
                     plan.metadata["ai_advisor_model"] = resp.model
+                    plan.metadata["ai_advisor_provider"] = resp.provider
         except Exception as e:
             logger.info(f"Local AI planner advice bypassed (using deterministic structure): {e}")
 

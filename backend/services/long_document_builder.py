@@ -280,8 +280,9 @@ class LongDocumentBuilder:
             src_fn = prov.get("filename", "source")
             citation = prov.get("citation") or prov.get("provenance") or src_fn
 
-            badge_col = "#0369A1" if "LOCKED" in cls_name else ("#047857" if "CALC" in cls_name else "#B45309")
-            header_p = f"<font color='{badge_col}'><b>[{cls_name}]</b></font> <b>{ev_id}</b> <font color='#64748B'>• Source: {self._sanitize_for_reportlab(citation)}</font>"
+            badge_col = "#0369A1" if "LOCKED" in cls_name else ("#047857" if "CALC" in cls_name else ("#0D9488" if "AI" in cls_name else "#B45309"))
+            badge_label = f"[{cls_name} — GROUNDED INTERPRETATION]" if "AI" in cls_name else f"[{cls_name}]"
+            header_p = f"<font color='{badge_col}'><b>{badge_label}</b></font> <b>{ev_id}</b> <font color='#64748B'>• Source: {self._sanitize_for_reportlab(citation)}</font>"
             elements.append(Paragraph(header_p, self.style_citation))
 
             content_text = item.get("content_text") or str(item.get("content_json") or "")
@@ -370,6 +371,19 @@ class LongDocumentBuilder:
                 for flag in plan.insufficient_evidence_flags:
                     if (flag.section_id if hasattr(flag, "section_id") else flag.get("section_id")) == sec.section_id:
                         self._build_missing_evidence_alert(flag, elements)
+
+            # AI Analytical Synthesis Narrative (clearly separating AI interpretation from source facts)
+            sec_narrative = getattr(sec, "content_text", "") or getattr(sec, "narrative", "")
+            if sec_narrative:
+                elements.append(Paragraph(
+                    "<font color='#0D9488'><b>[AI ANALYTICAL SYNTHESIS — GROUNDED IN AUDITED EVIDENCE]</b></font>",
+                    self.style_sec_h2
+                ))
+                for line in sec_narrative.split("\n"):
+                    clean_line = line.strip()
+                    if clean_line:
+                        elements.append(Paragraph(self._sanitize_for_reportlab(clean_line), self.style_body))
+                elements.append(Spacer(1, 6))
 
             # Section Evidence & Charts
             self._build_section_evidence(sec, evidence_by_id, elements, charts_by_id)
@@ -492,6 +506,14 @@ class LongDocumentBuilder:
                         p_warn = doc.add_paragraph(f"⚠️ AUDIT NOTICE: INSUFFICIENT EVIDENCE - {f_dict.get('rationale')}")
                         p_warn.runs[0].font.color.rgb = RGBColor(185, 28, 28)
 
+            sec_narrative = getattr(sec, "content_text", "") or getattr(sec, "narrative", "")
+            if sec_narrative:
+                p_syn = doc.add_paragraph()
+                r_badge = p_syn.add_run("[AI ANALYTICAL SYNTHESIS — GROUNDED IN AUDITED EVIDENCE]\n")
+                r_badge.bold = True
+                r_badge.font.color.rgb = RGBColor(13, 148, 136)
+                p_syn.add_run(sec_narrative)
+
             # Section Evidence
             for ev_id in sec.evidence_ids[:25]:
                 item = evidence_by_id.get(ev_id)
@@ -555,6 +577,10 @@ class LongDocumentBuilder:
                     f_dict = flag if isinstance(flag, dict) else flag.to_dict()
                     if f_dict.get("section_id") == sec.section_id:
                         lines.append(f"> ⚠️ **AUDIT NOTICE:** {f_dict.get('rationale')}\n")
+
+            sec_narrative = getattr(sec, "content_text", "") or getattr(sec, "narrative", "")
+            if sec_narrative:
+                lines.append(f"> 🤖 **[AI ANALYTICAL SYNTHESIS — GROUNDED IN AUDITED EVIDENCE]**\n>\n" + "\n".join(f"> {l}" for l in sec_narrative.splitlines() if l.strip()) + "\n")
 
             for ev_id in sec.evidence_ids[:30]:
                 item = evidence_by_id.get(ev_id)

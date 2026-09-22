@@ -176,23 +176,23 @@ def get_auth_secret_password() -> str:
 MAX_CHUNK_CHARS = int(os.getenv("MAX_CHUNK_CHARS", "8000"))
 CHUNK_OVERLAP_CHARS = int(os.getenv("CHUNK_OVERLAP_CHARS", "500"))
 
-# Single Cloud AI Model Configuration (OpenRouter)
-AI_PROVIDER = os.getenv("MINEINTEL_AI_PROVIDER", "openrouter")
+# Sole AI Provider Configuration: Local Ollama Only
+AI_PROVIDER = os.getenv("MINEINTEL_AI_PROVIDER", "local_ollama")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
 CLOUD_AI_TIMEOUT = int(os.getenv("CLOUD_AI_TIMEOUT", "30"))
 
-# Phase 3: Local AI & Provider-Neutral Configuration
+# Local Ollama AI Configuration
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-LOCAL_MODEL_QWEN3 = os.getenv("MINEINTEL_LOCAL_MODEL", "qwen3:8b")
+LOCAL_MODEL_QWEN3 = os.getenv("MINEINTEL_LOCAL_MODEL", "qwen2.5-coder:1.5b-base")
 LOCAL_MODEL_QWEN3_VL = os.getenv("MINEINTEL_LOCAL_VL_MODEL", "qwen3-vl:8b")
 LOCAL_AI_TIMEOUT = int(os.getenv("LOCAL_AI_TIMEOUT", "60"))
 
 # Legacy model name aliases for backward-compatible pipeline invocations
-LLAMA_MODEL = OPENROUTER_MODEL
-GEMMA_MODEL = OPENROUTER_MODEL
-GEMMA_FALLBACK_MODEL = OPENROUTER_MODEL
+LLAMA_MODEL = LOCAL_MODEL_QWEN3
+GEMMA_MODEL = LOCAL_MODEL_QWEN3
+GEMMA_FALLBACK_MODEL = LOCAL_MODEL_QWEN3
 
 # Request timeout (seconds)
-LLM_TIMEOUT = CLOUD_AI_TIMEOUT
+LLM_TIMEOUT = LOCAL_AI_TIMEOUT
 

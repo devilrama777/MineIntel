@@ -13,6 +13,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
+from backend import config
 from backend.services import chart_store, evidence_store
 from backend.services.long_document_builder import long_document_builder
 from backend.services.planner_models import ReportPlan
@@ -95,6 +96,48 @@ class ReportGeneratorService:
             }
         )
         store_save_report(artifact.to_dict())
+
+        # 3b. Real Ollama Evidence-Grounded Analytical Synthesis
+        from backend.services.ai_inference_service import ai_inference_service
+        logger.info(f"Executing Ollama analytical synthesis for report on job '{job_id}'...")
+        ai_res = ai_inference_service.generate_job_reasoning(
+            job_id=job_id,
+            owner_id=owner_id,
+            provider_name="local_ollama",
+            model_name=getattr(config, "LOCAL_MODEL_QWEN3", "qwen2.5-coder:1.5b-base")
+        )
+
+        if not ai_res.get("success"):
+            err_msg = ai_res.get("error", "Local Ollama model unavailable.")
+            status_val = ai_res.get("status", "model_unavailable")
+            logger.error(f"Report generation aborted: Ollama inference failed ({status_val}): {err_msg}")
+            artifact.status = ReportGenerationStatus.FAILED.value
+            artifact.metadata["error"] = err_msg
+            store_save_report(artifact.to_dict())
+            return {
+                "success": False,
+                "status": "model_unavailable",
+                "error": f"Model Unavailable: {err_msg}"
+            }
+
+        ai_analysis_text = (ai_res.get("analysis_text") or "").strip()
+        ai_ev_id = ai_res.get("evidence_id")
+        ai_ev_item = ai_res.get("evidence_item")
+
+        if ai_ev_item:
+            evidence_items.insert(0, ai_ev_item)
+
+        if plan.sections:
+            exec_sec = plan.sections[0]
+            if ai_ev_id and ai_ev_id not in exec_sec.evidence_ids:
+                exec_sec.evidence_ids.insert(0, ai_ev_id)
+            exec_sec.content_text = ai_analysis_text
+            plan.metadata["ai_synthesis_model"] = ai_res.get("model")
+            plan.metadata["ai_synthesis_provider"] = ai_res.get("provider")
+
+        artifact.metadata["ai_model"] = ai_res.get("model")
+        artifact.metadata["ai_provider"] = ai_res.get("provider")
+        artifact.metadata["ai_analysis_length"] = len(ai_analysis_text)
 
         try:
             # 4. Generate Primary PDF

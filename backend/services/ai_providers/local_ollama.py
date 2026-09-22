@@ -123,6 +123,21 @@ class LocalOllamaProvider(BaseAIProvider):
                 parent_evidence_ids=req.context_metadata.get("parent_evidence_ids", [])
             )
 
+        installed = self.list_models()
+        if installed and not any(target_model.lower() == m.lower() or target_model.lower() in m.lower() for m in installed):
+            dur_ms = int((time.time() - t0) * 1000)
+            return AIResponse(
+                success=False,
+                text="",
+                provider=self.provider_name,
+                model=target_model,
+                duration_ms=dur_ms,
+                status="model_unavailable",
+                error=f"Model '{target_model}' not found in local Ollama. Installed models: {installed}. Run 'ollama pull {target_model}' to install.",
+                evidence_classification=req.context_metadata.get("classification", "AI ANALYSIS"),
+                parent_evidence_ids=req.context_metadata.get("parent_evidence_ids", [])
+            )
+
         payload: Dict[str, Any] = {
             "model": target_model,
             "prompt": req.prompt,

@@ -34,11 +34,13 @@ class AIInferenceService:
 
     def __init__(self, provider_registry: Optional[Any] = None):
         self.provider_registry = provider_registry
+        self.registry = provider_registry or ai_provider_registry
 
     def _get_provider(self, provider_name: Optional[str] = None):
+        """Ollama ONLY: Always dispatches to local_ollama provider."""
         if self.provider_registry is not None:
-            return self.provider_registry.get_provider(provider_name)
-        return ai_provider_registry.get_provider(provider_name)
+            return self.provider_registry.get_provider("local_ollama")
+        return ai_provider_registry.get_provider("local_ollama")
 
     def generate_job_reasoning(
         self,

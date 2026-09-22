@@ -527,19 +527,21 @@ def auth_logout():
 @app.get("/api/health")
 def health_check():
     """Checks service health and AI provider configuration."""
-    ai_available = llama_client.is_available()
-    cloud_active = llama_client.cloud_client.is_available()
-    active_cloud_model = llama_client.cloud_client.model if cloud_active else config.OPENROUTER_MODEL
-    installed_models = llama_client.list_installed_models() if ai_available else [active_cloud_model]
+    from backend.services.ai_providers.registry import get_active_ai_status, get_provider
+    provider = get_provider("local_ollama")
+    ai_status = provider.get_status()
+    ai_available = provider.is_available()
     return {
         "status": "healthy",
         "ai_available": ai_available,
-        "ai_provider": config.AI_PROVIDER,
-        "cloud_ai_active": cloud_active,
-        "cloud_model": active_cloud_model,
-        "installed_models": installed_models,
-        "default_llama_model": active_cloud_model,
-        "default_gemma_model": active_cloud_model
+        "ai_provider": "local_ollama",
+        "cloud_ai_active": False,
+        "cloud_model": None,
+        "installed_models": ai_status.get("installed_models", []),
+        "default_llama_model": provider.default_text_model,
+        "default_gemma_model": provider.default_text_model,
+        "configured_text_model": provider.default_text_model,
+        "status_detail": ai_status.get("status")
     }
 
 
@@ -1639,7 +1641,8 @@ def generate_long_report_endpoint(
     )
 
     if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error", "Report generation failed."))
+        status_code = 503 if result.get("status") == "model_unavailable" else 400
+        raise HTTPException(status_code=status_code, detail=result.get("error", "Report generation failed."))
 
     return result
 

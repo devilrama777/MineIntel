@@ -26,44 +26,33 @@ class AIProviderRegistry:
         if not self._initialized:
             if "local_ollama" not in self._providers:
                 self._providers["local_ollama"] = LocalOllamaProvider()
-            if "openrouter" not in self._providers:
-                self._providers["openrouter"] = OpenRouterProvider()
             self._initialized = True
 
     def register_provider(self, name: str, provider: BaseAIProvider):
         self._providers[name.lower().strip()] = provider
 
     def get_provider(self, provider_name: Optional[str] = None) -> BaseAIProvider:
+        """
+        Ollama ONLY: Always dispatches to local_ollama.
+        Does not use OpenRouter or other cloud providers for report generation.
+        If local Ollama or the configured model is unavailable, the provider
+        returns clear Model Unavailable status (zero fake fallback outputs).
+        """
         self._ensure_initialized()
-        configured = (provider_name or getattr(config, "AI_PROVIDER", "auto")).lower().strip()
-
-        if configured in self._providers:
-            return self._providers[configured]
-
-        # Auto resolution
-        local_p = self._providers.get("local_ollama")
-        if local_p and local_p.is_available():
-            return local_p
-
-        cloud_p = self._providers.get("openrouter")
-        if cloud_p and cloud_p.is_available():
-            return cloud_p
-
-        # Fallback to local provider (returns graceful model_unavailable, never fake data)
-        return local_p or cloud_p or list(self._providers.values())[0]
+        return self._providers["local_ollama"]
 
     def list_available_providers(self) -> List[Dict[str, Any]]:
         self._ensure_initialized()
-        return [p.get_status() for p in self._providers.values()]
+        return [self._providers["local_ollama"].get_status()]
 
     def get_active_ai_status(self) -> Dict[str, Any]:
         self._ensure_initialized()
-        active = self.get_provider()
+        active = self.get_provider("local_ollama")
         active_status = active.get_status()
 
         return {
-            "active_provider": getattr(active, "provider_name", "unknown"),
-            "configured_setting": getattr(config, "AI_PROVIDER", "auto"),
+            "active_provider": "local_ollama",
+            "configured_setting": "local_ollama",
             "is_available": active.is_available(),
             "active_status": active_status,
             "all_providers": self.list_available_providers()
