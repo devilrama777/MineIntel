@@ -224,7 +224,7 @@ def get_all_users_safe() -> List[Dict[str, Any]]:
             "display_name": u.get("display_name", u["officer_id"]),
             "phone": u.get("phone", ""),
             "email": u.get("email", ""),
-            "role": u.get("role", "Worker") if u.get("role") in VALID_ROLES else ("Senior Officer" if u.get("role") == "Senior Operational Auditor" else "Worker"),
+            "role": u.get("role", "Worker") if u.get("role") in VALID_ROLES else "Worker",
             "is_active": u.get("is_active", True),
             "created_at": u.get("created_at", int(time.time()))
         })
@@ -450,7 +450,7 @@ def authenticate_user(officer_id: str, password: str) -> Optional[Dict[str, Any]
     if verify_password(clean_pw, user["password_hash"], user["salt"]):
         user_role = user.get("role", "Worker")
         if user_role not in VALID_ROLES:
-            user_role = "Senior Officer" if user_role == "Senior Operational Auditor" else "Worker"
+            user_role = "Worker"
         return {
             "officer_id": user["officer_id"],
             "display_name": user.get("display_name", user["officer_id"]),

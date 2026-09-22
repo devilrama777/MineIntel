@@ -467,7 +467,7 @@ def require_auth(
 def auth_profile(auth: Dict[str, Any] = Depends(require_auth)):
     """Returns the authenticated normal user's safe profile."""
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if is_master:
@@ -484,7 +484,7 @@ def auth_profile(auth: Dict[str, Any] = Depends(require_auth)):
 @app.patch("/api/auth/profile")
 def auth_update_profile(req: ProfileUpdateRequest, auth: Dict[str, Any] = Depends(require_auth)):
     """Updates only the current user's permitted profile fields."""
-    if auth.get("role") in ("Senior Officer", "Senior Operational Auditor"):
+    if auth.get("role") == "Senior Officer":
         raise HTTPException(status_code=403, detail="The provisioned master profile is managed by server configuration.")
     try:
         user = auth_store.update_user_profile(auth["officer_id"], req.display_name, req.phone, req.email)
@@ -498,7 +498,7 @@ def auth_update_profile(req: ProfileUpdateRequest, auth: Dict[str, Any] = Depend
 @app.post("/api/auth/password")
 def auth_change_password(req: PasswordChangeRequest, auth: Dict[str, Any] = Depends(require_auth)):
     """Changes a normal user's password and invalidates sessions issued before the change."""
-    if auth.get("role") in ("Senior Officer", "Senior Operational Auditor"):
+    if auth.get("role") == "Senior Officer":
         raise HTTPException(status_code=403, detail="The master password is managed by server configuration.")
     try:
         changed = auth_store.change_user_password(auth["officer_id"], req.current_password, req.new_password)
@@ -627,7 +627,7 @@ def list_ingestion_jobs(
     Master officers can view all jobs or filter by owner_id.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     filter_owner = auth["officer_id"] if not is_master else (owner_id or None)
@@ -652,7 +652,7 @@ def get_ingestion_job_status(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -675,7 +675,7 @@ def get_ingestion_job_manifest(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -704,7 +704,7 @@ def get_evidence_file_details(
         raise HTTPException(status_code=404, detail=f"Evidence file '{file_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and rec.get("owner_id") != auth["officer_id"]:
@@ -727,7 +727,7 @@ def download_raw_evidence_file(
         raise HTTPException(status_code=404, detail=f"Evidence file '{file_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and rec.get("owner_id") != auth["officer_id"]:
@@ -755,7 +755,7 @@ def get_normalized_evidence_content(
         raise HTTPException(status_code=404, detail=f"Evidence file '{file_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and rec.get("owner_id") != auth["officer_id"]:
@@ -801,7 +801,7 @@ def list_structured_evidence(
     Enforces Phase 0 ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -855,7 +855,7 @@ def get_single_evidence_item(
         raise HTTPException(status_code=404, detail=f"Evidence item '{evidence_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and item.get("owner_id") != auth["officer_id"]:
@@ -881,7 +881,7 @@ def get_job_evidence_summary_api(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -911,7 +911,7 @@ def trigger_evidence_extraction(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -970,7 +970,7 @@ def generate_job_reasoning_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{payload.job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1006,7 +1006,7 @@ def generate_image_caption_endpoint(
         raise HTTPException(status_code=404, detail=f"Evidence item '{payload.evidence_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and evidence_item.get("owner_id") != auth["officer_id"]:
@@ -1053,7 +1053,7 @@ def analyze_job_intelligence_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1081,7 +1081,7 @@ def get_job_dossier_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1113,7 +1113,7 @@ def get_job_conflicts_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1142,7 +1142,7 @@ def get_job_timeline_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1168,7 +1168,7 @@ def resolve_conflict_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1227,7 +1227,7 @@ def detect_job_charts_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1257,7 +1257,7 @@ def recommend_chart_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{payload.job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1293,7 +1293,7 @@ def generate_chart_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{payload.job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1331,7 +1331,7 @@ def get_chart_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1359,7 +1359,7 @@ def list_job_charts_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1385,7 +1385,7 @@ def get_chart_image_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1421,7 +1421,7 @@ def delete_chart_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1465,7 +1465,7 @@ def generate_report_plan_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{payload.job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1495,7 +1495,7 @@ def get_report_plan_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1523,7 +1523,7 @@ def get_active_job_plan_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1559,7 +1559,7 @@ def list_job_plan_versions_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1584,7 +1584,7 @@ def validate_report_plan_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1624,7 +1624,7 @@ def generate_long_report_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{payload.job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1654,7 +1654,7 @@ def get_report_status_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1679,7 +1679,7 @@ def download_report_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1746,7 +1746,7 @@ def list_job_reports_endpoint(
         raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
 
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
     if not is_master and job.get("owner_id") != auth["officer_id"]:
@@ -1802,7 +1802,7 @@ def list_report_revisions_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1832,7 +1832,7 @@ def get_report_revision_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1864,7 +1864,7 @@ def edit_report_section_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1899,7 +1899,7 @@ def edit_report_batch_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1933,7 +1933,7 @@ def restore_report_revision_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1965,7 +1965,7 @@ def approve_report_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -1996,7 +1996,7 @@ def finalize_report_endpoint(
     Enforces Phase 0 user ownership isolation.
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+    is_master = (auth.get("role") == "Senior Officer") or (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
     )
 
@@ -2915,7 +2915,7 @@ def get_reports_history(
         session = verify_session_token(raw_token)
         if session:
             master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-            is_master = (session.get("role") in ("Senior Officer", "Senior Operational Auditor")) or (
+            is_master = (session.get("role") == "Senior Officer") or (
                 bool(master_officer) and secrets.compare_digest(session.get("officer_id", "").lower(), master_officer.lower())
             )
             if not is_master:
