@@ -44,7 +44,7 @@ export const LoginView: React.FC = () => {
   const [newOfficerId, setNewOfficerId] = useState('');
   const [newDisplayName, setNewDisplayName] = useState('');
   const [newMemberPassword, setNewMemberPassword] = useState('');
-  const [newRole, setNewRole] = useState('Operational Auditor');
+  const [newRole, setNewRole] = useState('Worker');
   const [createSuccessMsg, setCreateSuccessMsg] = useState<string | null>(null);
 
   const isUnreachable = authConfigStatus?.reachable === false;
@@ -75,7 +75,7 @@ export const LoginView: React.FC = () => {
     setNewOfficerId('');
     setNewDisplayName('');
     setNewMemberPassword('');
-    setNewRole('Operational Auditor');
+    setNewRole('Worker');
     setErrorMessage(null);
   };
 
@@ -271,7 +271,7 @@ export const LoginView: React.FC = () => {
                   <AuthInput id="new-officer-id" label="New Officer ID / Username" value={newOfficerId} onChange={(e) => setNewOfficerId(e.target.value)} placeholder="e.g. analyst_roy or MOC-1042" required />
                   <AuthInput id="new-display-name" label="Full Display Name (Optional)" value={newDisplayName} onChange={(e) => setNewDisplayName(e.target.value)} placeholder="e.g. Inspector R. Sharma" />
                   <AuthInput id="new-member-password" label="Initial Password" type="password" value={newMemberPassword} onChange={(e) => setNewMemberPassword(e.target.value)} placeholder="Minimum 4 characters" required />
-                  <div className="space-y-1.5"><label htmlFor="new-role" className="text-xs font-semibold uppercase tracking-wider text-slate-800 dark:text-slate-200">Assigned Enclave Role</label><select id="new-role" value={newRole} onChange={(e) => setNewRole(e.target.value)} className={fieldClass}><option value="Operational Auditor">Operational Auditor (Standard)</option><option value="Senior Compliance Analyst">Senior Compliance Analyst</option><option value="Field Inspector">Field Inspector</option><option value="Enclave Viewer">Enclave Viewer</option></select></div>
+                  <div className="space-y-1.5"><label htmlFor="new-role" className="text-xs font-semibold uppercase tracking-wider text-slate-800 dark:text-slate-200">Assigned Enclave Role</label><select id="new-role" value={newRole} onChange={(e) => setNewRole(e.target.value)} className={fieldClass}><option value="Senior Officer">Senior Officer</option><option value="Worker">Worker</option></select></div>
                   <div className="flex gap-3 pt-2"><button type="button" onClick={() => setCreateStep('master_auth')} disabled={isLoading} className="h-12 w-1/3 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:border-slate-400 dark:border-slate-700 dark:bg-transparent dark:text-slate-300 dark:hover:bg-slate-800/50">Back</button><button type="submit" disabled={isLoading} className="flex h-12 w-2/3 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:from-blue-500 hover:to-cyan-500 disabled:opacity-60">{isLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating...</> : <>Provision Account <CheckCircle2 className="h-4 w-4" /></>}</button></div>
                 </form>
               )}

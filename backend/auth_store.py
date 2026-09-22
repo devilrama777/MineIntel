@@ -29,6 +29,8 @@ HASH_ITERATIONS = 100_000
 # Local fallback file location
 USERS_FILE = (config.OUTPUTS_DIR / "users.json") if config.IS_VERCEL else (config.DATA_DIR / "users.json")
 
+VALID_ROLES = {"Senior Officer", "Worker"}
+
 _pg_initialized = False
 
 
@@ -88,7 +90,7 @@ def _init_pg_schema() -> None:
                         email VARCHAR(320),
                         password_hash VARCHAR(255) NOT NULL,
                         salt VARCHAR(64) NOT NULL,
-                        role VARCHAR(128) NOT NULL DEFAULT 'Operational Auditor',
+                        role VARCHAR(128) NOT NULL DEFAULT 'Worker',
                         is_active BOOLEAN NOT NULL DEFAULT TRUE,
                         created_at BIGINT NOT NULL,
                         updated_at BIGINT,
@@ -222,7 +224,7 @@ def get_all_users_safe() -> List[Dict[str, Any]]:
             "display_name": u.get("display_name", u["officer_id"]),
             "phone": u.get("phone", ""),
             "email": u.get("email", ""),
-            "role": u.get("role", "Operational Auditor"),
+            "role": u.get("role", "Worker") if u.get("role") in VALID_ROLES else ("Senior Officer" if u.get("role") == "Senior Operational Auditor" else "Worker"),
             "is_active": u.get("is_active", True),
             "created_at": u.get("created_at", int(time.time()))
         })
@@ -233,7 +235,7 @@ def create_user(
     officer_id: str,
     password: str,
     display_name: Optional[str] = None,
-    role: str = "Operational Auditor",
+    role: str = "Worker",
     phone: str = "",
     email: str = ""
 ) -> Dict[str, Any]:
@@ -257,7 +259,9 @@ def create_user(
     pwd_hash, salt = hash_password(clean_pw)
     created_ts = int(time.time())
     display_val = (display_name or clean_id).strip().strip("\"'").strip()
-    role_val = (role.strip().strip("\"'").strip()) if role else "Operational Auditor"
+    role_val = (role.strip().strip("\"'").strip()) if role else "Worker"
+    if role_val not in VALID_ROLES:
+        raise ValueError(f"Invalid role '{role_val}'. Allowed roles are: 'Senior Officer', 'Worker'.")
 
     if is_postgres_configured():
         try:
@@ -427,7 +431,7 @@ def authenticate_user(officer_id: str, password: str) -> Optional[Dict[str, Any]
             return {
                 "officer_id": master_officer,
                 "display_name": "Executive Master Auditor",
-                "role": "Senior Operational Auditor",
+                "role": "Senior Officer",
                 "is_master": True,
                 "is_active": True
             }
@@ -444,11 +448,14 @@ def authenticate_user(officer_id: str, password: str) -> Optional[Dict[str, Any]
         }
 
     if verify_password(clean_pw, user["password_hash"], user["salt"]):
+        user_role = user.get("role", "Worker")
+        if user_role not in VALID_ROLES:
+            user_role = "Senior Officer" if user_role == "Senior Operational Auditor" else "Worker"
         return {
             "officer_id": user["officer_id"],
             "display_name": user.get("display_name", user["officer_id"]),
-            "role": user.get("role", "Operational Auditor"),
-            "is_master": False,
+            "role": user_role,
+            "is_master": (user_role == "Senior Officer"),
             "is_active": True
         }
 

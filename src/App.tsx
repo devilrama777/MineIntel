@@ -343,8 +343,8 @@ function DesktopAppContent() {
     return <LoginView />;
   }
 
-  // Dual application routing: Normal Worker -> Final_w_UI WorkerApp; Master -> Existing MineIntel
-  const isMasterUser = user?.role === 'Senior Operational Auditor' || user?.is_master === true;
+  // Dual application routing: Normal Worker -> Final_w_UI WorkerApp; Senior Officer -> Existing MineIntel
+  const isMasterUser = user?.role === 'Senior Officer' || user?.role === 'Senior Operational Auditor' || user?.is_master === true;
   if (!isMasterUser) {
     return <WorkerApp />;
   }
