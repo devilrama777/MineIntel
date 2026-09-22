@@ -5,11 +5,15 @@ Two-pass canvas for ReportLab that dynamically computes total page numbers
 and renders running headers and footers across arbitrary document lengths (1 to 400+ pages).
 """
 
-from reportlab.lib import colors
-from reportlab.pdfgen import canvas
+try:
+    from reportlab.lib import colors
+    from reportlab.pdfgen import canvas
+    CanvasBase = canvas.Canvas if isinstance(canvas.Canvas, type) else object
+except Exception:
+    CanvasBase = object
 
 
-class NumberedReportCanvas(canvas.Canvas):
+class NumberedReportCanvas(CanvasBase):
     """
     Two-pass canvas that intercepts showPage() to record state,
     calculates total page count, and renders running headers/footers.

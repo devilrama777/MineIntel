@@ -8,6 +8,16 @@ class DummyMock:
         return DummyMock()
     def __call__(self, *args, **kwargs):
         return DummyMock()
+    def __mro_entries__(self, bases):
+        return (object,)
+    def __iter__(self):
+        return iter([])
+    def __bool__(self):
+        return True
+    def __len__(self):
+        return 0
+    def __getitem__(self, item):
+        return DummyMock()
 
 def module_getattr(name):
     return DummyMock()
