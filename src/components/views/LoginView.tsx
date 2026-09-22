@@ -104,12 +104,23 @@ export const LoginView: React.FC = () => {
     }
   };
 
-  const handleMasterAuthStep = (e: React.FormEvent) => {
+  const handleMasterAuthStep = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-    if (!masterOfficerId.trim()) return setErrorMessage('Please enter the Master Officer ID.');
-    if (!masterPassword.trim()) return setErrorMessage('Please enter the Master Enclave Password.');
-    setCreateStep('user_details');
+    const cleanId = masterOfficerId.trim();
+    const cleanPw = masterPassword.trim();
+    if (!cleanId) return setErrorMessage('Please enter the Master Officer ID.');
+    if (!cleanPw) return setErrorMessage('Please enter the Master Enclave Password.');
+
+    setIsLoading(true);
+    try {
+      await authService.verifyMaster(cleanId, cleanPw);
+      setCreateStep('user_details');
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Master authentication failed: Invalid Master Officer ID or Enclave Password.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleCreateUserSubmit = async (e: React.FormEvent) => {
@@ -251,7 +262,7 @@ export const LoginView: React.FC = () => {
                   <div className="flex items-start gap-2.5 rounded-xl border border-blue-500/20 bg-blue-500/10 p-3.5 text-xs text-blue-700 dark:text-cyan-400"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" /><span>Only authorized Master Officers can provision new accounts.</span></div>
                   <AuthInput id="master-officer-id" label="Master Officer ID" value={masterOfficerId} onChange={(e) => setMasterOfficerId(e.target.value)} placeholder="Enter Master Officer ID" icon={<User className="h-4 w-4" />} autoFocus required />
                   <AuthInput id="master-password" label="Master Enclave Password" type="password" value={masterPassword} onChange={(e) => setMasterPassword(e.target.value)} placeholder="Enter Master Password" icon={<Lock className="h-4 w-4" />} required />
-                  <button type="submit" className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:from-blue-500 hover:to-cyan-500">Authorize &amp; Proceed <ArrowRight className="h-4 w-4" /></button>
+                  <button type="submit" disabled={isLoading} className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:from-blue-500 hover:to-cyan-500 disabled:opacity-60">{isLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Verifying Master Auth...</> : <>Authorize &amp; Proceed <ArrowRight className="h-4 w-4" /></>}</button>
                 </form>
               )}
 

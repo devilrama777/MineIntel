@@ -7,12 +7,30 @@ BACKEND_DIR = Path(__file__).resolve().parent
 DATA_DIR = BACKEND_DIR / "data"
 PROMPTS_DIR = BACKEND_DIR / "prompts"
 
+def _sync_env_file(path: Path) -> None:
+    """Safely loads environment variables from a .env file, with dotenv or fallback."""
+    if not path.exists() or not path.is_file():
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(dotenv_path=path, override=False)
+    except Exception:
+        pass
+    try:
+        content = path.read_text(encoding="utf-8")
+        for line in content.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip("\"'").strip()
+                if k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        pass
+
 # Load local workspace environment variables securely if .env is present
-try:
-    from dotenv import load_dotenv
-    load_dotenv(dotenv_path=BASE_DIR / ".env")
-except ImportError:
-    pass
+_sync_env_file(BASE_DIR / ".env")
 
 
 IS_VERCEL = bool(
@@ -46,12 +64,14 @@ elif not (_officer_id_set and _auth_pw_set):
 
 if IS_VERCEL:
     WORK_DIR = Path("/tmp")
+    DATA_DIR = WORK_DIR / "data"
     UPLOADS_DIR = WORK_DIR / "uploads"
     OUTPUTS_DIR = WORK_DIR / "outputs"
     REPORTS_DIR = OUTPUTS_DIR / "reports"
     REPORTED_DATA_DIR = WORK_DIR / "reported_data"
     PROCESSED_OUTPUT_DIR = WORK_DIR / "processed_output"
 else:
+    DATA_DIR = BACKEND_DIR / "data"
     UPLOADS_DIR = BASE_DIR / "uploads"
     OUTPUTS_DIR = BASE_DIR / "outputs"
     REPORTS_DIR = OUTPUTS_DIR / "reports"
@@ -110,14 +130,10 @@ DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or os.gete
 def refresh_local_env() -> None:
     """Ensures local .env is loaded and synchronized with environment when not on Vercel."""
     if not IS_VERCEL:
-        try:
-            from dotenv import load_dotenv
-            for path in (BASE_DIR / ".env", Path.cwd() / ".env"):
-                if path.exists() and path.is_file():
-                    load_dotenv(dotenv_path=path, override=False)
-                    break
-        except Exception:
-            pass
+        for path in (BASE_DIR / ".env", Path.cwd() / ".env"):
+            if path.exists() and path.is_file():
+                _sync_env_file(path)
+                break
 
 
 def get_database_url() -> str:

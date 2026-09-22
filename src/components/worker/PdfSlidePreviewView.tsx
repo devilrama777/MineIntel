@@ -42,23 +42,25 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
 }) => {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
 
-  // Active content from either the uploaded document or report
+  // Preview must show the generated MineIntel report, not the uploaded source document
+  const hasReport = Boolean(currentReport && currentReport.reportMarkdown && currentReport.reportMarkdown.trim().length > 0);
+
   const initialContent = useMemo(() => {
     if (currentReport?.reportMarkdown) {
       return currentReport.reportMarkdown;
     }
-    return rawText;
-  }, [currentReport, rawText]);
+    return '';
+  }, [currentReport]);
 
   // Split content into discrete slides
   const parsedSlides = useMemo(() => {
-    if (!initialContent || initialContent.trim().length === 0) {
+    if (!hasReport || !initialContent || initialContent.trim().length === 0) {
       return [
         {
           id: 1,
-          title: fileName || 'Uploaded Document',
-          subtitle: 'Executive Presentation Overview',
-          content: 'No slide content available. Please upload a PDF or select a sample document.'
+          title: 'Executive Intelligence Report',
+          subtitle: 'No Report Generated Yet',
+          content: 'No executive report has been generated yet for this session.\n\nPlease navigate to **Data Source**, upload or stage your documents, and click **"Generate Intelligence Report"** to synthesize your executive report.'
         }
       ];
     }
@@ -76,7 +78,7 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
         return {
           id: idx + 1,
           title: firstLine || `Section ${idx + 1}`,
-          subtitle: idx === 0 ? 'Document Overview & Executive Synthesis' : `Strategic Insights & Analysis Part ${idx}`,
+          subtitle: idx === 0 ? 'Executive Synthesis & Intelligence Brief' : `Strategic Insights & Analysis Part ${idx}`,
           content: body || trimmed
         };
       })
@@ -87,12 +89,12 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
       : [
           {
             id: 1,
-            title: fileName || 'Document',
+            title: currentReport?.fileName || fileName || 'Executive Report',
             subtitle: 'Overview',
             content: initialContent
           }
         ];
-  }, [initialContent, fileName]);
+  }, [initialContent, hasReport, currentReport, fileName]);
 
   // Slides state so edits can be applied in real-time
   const [slides, setSlides] = useState<SlideItem[]>(parsedSlides);
@@ -223,10 +225,14 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
           <div className="truncate">
             <div className="flex items-center gap-2">
               <h1 className="font-outfit font-extrabold text-sm sm:text-base text-neutral-900 dark:text-white truncate">
-                {fileName || 'Document Preview'}
+                {currentReport?.fileName ? `Report: ${currentReport.fileName}` : hasReport ? 'Generated Intelligence Report' : 'Executive Report Preview'}
               </h1>
-              <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 flex-shrink-0">
-                Document Slides
+              <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider flex-shrink-0 ${
+                hasReport 
+                  ? 'bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300' 
+                  : 'bg-neutral-100 dark:bg-blue-950/40 text-neutral-500 dark:text-neutral-400'
+              }`}>
+                {hasReport ? 'Executive Report' : 'No Report'}
               </span>
             </div>
             <div className="flex items-center gap-2 text-[11px] text-neutral-500 dark:text-blue-200/70">
@@ -246,13 +252,16 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
           <button
             id="btn-edit-pdf"
             type="button"
+            disabled={!hasReport}
             onClick={handleOpenEdit}
-            className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold border transition-all duration-200 flex items-center gap-2 cursor-pointer shadow-xs active:scale-95 ${
-              isEditing
-                ? 'bg-amber-500 hover:bg-amber-600 border-amber-600 text-white shadow-amber-500/20'
-                : 'bg-white dark:bg-blue-950/40 border-neutral-300 dark:border-blue-800 text-neutral-700 dark:text-blue-200 hover:bg-neutral-100 dark:hover:bg-blue-900/60'
+            className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold border transition-all duration-200 flex items-center gap-2 shadow-xs active:scale-95 ${
+              !hasReport
+                ? 'opacity-40 cursor-not-allowed bg-neutral-100 dark:bg-blue-950/20 text-neutral-400 dark:text-neutral-500 border-neutral-200 dark:border-blue-900/30'
+                : isEditing
+                ? 'bg-amber-500 hover:bg-amber-600 border-amber-600 text-white shadow-amber-500/20 cursor-pointer'
+                : 'bg-white dark:bg-blue-950/40 border-neutral-300 dark:border-blue-800 text-neutral-700 dark:text-blue-200 hover:bg-neutral-100 dark:hover:bg-blue-900/60 cursor-pointer'
             }`}
-            title="Edit the PDF slide content"
+            title={hasReport ? "Edit the PDF slide content" : "Generate a report first to edit"}
           >
             <Edit3 className="w-4 h-4" />
             <span>{isEditing ? 'Editing Mode Active' : 'Edit PDF'}</span>
@@ -262,9 +271,14 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
           <button
             id="btn-preview-download-export"
             type="button"
+            disabled={!hasReport}
             onClick={onJumpToExport}
-            className="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/25 transition-all duration-200 flex items-center gap-2 cursor-pointer active:scale-95"
-            title="Jump to Export Section for PDF / DOCX options"
+            className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 flex items-center gap-2 active:scale-95 ${
+              !hasReport
+                ? 'opacity-40 cursor-not-allowed bg-neutral-200 dark:bg-neutral-800 text-neutral-500 border border-neutral-300 dark:border-neutral-700'
+                : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/25 cursor-pointer'
+            }`}
+            title={hasReport ? "Jump to Export Section for PDF / DOCX options" : "Generate a report first to download"}
           >
             <Download className="w-4 h-4" />
             <span>Download</span>

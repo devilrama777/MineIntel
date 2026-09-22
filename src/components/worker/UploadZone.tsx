@@ -18,13 +18,17 @@ import {
   Clock,
   Eye
 } from 'lucide-react';
-import { SampleDocument } from './types';
+import { SampleDocument, UploadedDataSourceFile } from './types';
 import { MineIntelLogo } from './MineIntelLogo';
 
 interface UploadZoneProps {
   fileName: string;
   fileType: string;
   fileSize?: number;
+  stagedFiles?: UploadedDataSourceFile[];
+  onFilesSelected?: (files: File[]) => void;
+  onRemoveStagedFile?: (fileId: string) => void;
+  onClearStagedFiles?: () => void;
   customPrompt: string;
   onCustomPromptChange: (prompt: string) => void;
   onFileSelected: (file: File) => void;
@@ -76,6 +80,10 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
   fileName,
   fileType,
   fileSize,
+  stagedFiles = [],
+  onFilesSelected,
+  onRemoveStagedFile,
+  onClearStagedFiles,
   customPrompt,
   onCustomPromptChange,
   onFileSelected,
@@ -130,25 +138,34 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
     if (isProcessing) return;
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      validateAndUpload(file);
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      validateAndUploadFiles(droppedFiles);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      validateAndUpload(file);
+      const selected = Array.from(e.target.files);
+      validateAndUploadFiles(selected);
+      e.target.value = '';
     }
   };
 
-  const validateAndUpload = (file: File) => {
-    if (file.size > 25 * 1024 * 1024) {
-      setDragError('File exceeds 25MB limit. Please upload a smaller document.');
-      return;
+  const validateAndUploadFiles = (files: File[]) => {
+    const validFiles: File[] = [];
+    for (const f of files) {
+      if (f.size > 50 * 1024 * 1024) {
+        setDragError(`File "${f.name}" exceeds 50MB limit. Please upload a smaller document.`);
+        return;
+      }
+      validFiles.push(f);
     }
     setDragError(null);
-    onFileSelected(file);
+    if (onFilesSelected) {
+      onFilesSelected(validFiles);
+    } else if (validFiles.length > 0) {
+      onFileSelected(validFiles[0]);
+    }
   };
 
   // AI Auto Prompt Generator function
@@ -182,6 +199,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
   };
 
   const isPdf = fileType.includes('pdf') || fileName.toLowerCase().endsWith('.pdf');
+  const hasFiles = (stagedFiles && stagedFiles.length > 0) || Boolean(fileName);
 
   return (
     <div id="upload-dropzone" className="w-full bg-white dark:bg-[#0b162a] rounded-3xl border border-blue-900/20 dark:border-blue-500/20 shadow-md transition-all p-6 sm:p-8 lg:p-10">
@@ -197,21 +215,21 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
               Upload Document &amp; Ingest
             </h2>
             <p className="text-xs sm:text-sm text-neutral-500 dark:text-blue-200/70">
-              Provide PDF files, DOCX, or spreadsheets for multi-modal parsing &amp; intelligence synthesis
+              Provide mixed evidence files (PDF, Scanned PDF, DOCX, CSV/XLSX, Images) for unified multi-file synthesis
             </p>
           </div>
         </div>
 
-        {fileName && (
+        {hasFiles && (
           <button
             id="btn-clear-document"
             type="button"
-            onClick={onClearFile}
+            onClick={onClearStagedFiles || onClearFile}
             disabled={isProcessing}
             className="self-start sm:self-auto text-xs sm:text-sm font-semibold text-neutral-500 hover:text-rose-500 dark:text-neutral-400 dark:hover:text-rose-400 flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-200 dark:border-blue-900/50 hover:border-rose-300 dark:hover:border-rose-900 transition-colors disabled:opacity-50"
           >
             <X className="w-4 h-4" />
-            Clear Document
+            Clear All
           </button>
         )}
       </div>
@@ -220,7 +238,78 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
       {/* 1. EXPANDED LARGE UPLOAD DOCUMENT BLOCK                                   */}
       {/* ========================================================================= */}
       <div className="mb-8">
-        {fileName ? (
+        {stagedFiles && stagedFiles.length > 0 ? (
+          /* Multi-File Staged Files Card */
+          <div className="flex flex-col gap-4 p-5 sm:p-6 rounded-2xl border-2 border-blue-500/40 bg-blue-50/40 dark:bg-blue-950/40 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-blue-200 dark:border-blue-900/50 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="font-outfit font-extrabold text-base sm:text-lg text-neutral-900 dark:text-white">
+                  Staged Source Documents ({stagedFiles.length})
+                </span>
+                <span className="text-[11px] uppercase font-extrabold tracking-wider px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/80 text-blue-700 dark:text-blue-300">
+                  Multi-File Job
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isProcessing}
+                  className="px-3 py-1.5 text-xs font-bold rounded-xl border border-blue-400 dark:border-blue-700 bg-white dark:bg-blue-900/40 text-blue-700 dark:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-800/60 transition cursor-pointer disabled:opacity-50"
+                >
+                  + Add More Files
+                </button>
+                <button
+                  type="button"
+                  onClick={onClearStagedFiles || onClearFile}
+                  disabled={isProcessing}
+                  className="px-3 py-1.5 text-xs font-bold rounded-xl border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:text-rose-500 dark:hover:text-rose-400 transition cursor-pointer disabled:opacity-50"
+                >
+                  Clear All
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-72 overflow-y-auto pr-1">
+              {stagedFiles.map((sf, idx) => {
+                const isItemPdf = sf.type?.includes('pdf') || sf.name.toLowerCase().endsWith('.pdf');
+                const isSpreadsheet = sf.type?.includes('sheet') || sf.type?.includes('csv') || sf.name.toLowerCase().endsWith('.csv') || sf.name.toLowerCase().endsWith('.xlsx') || sf.name.toLowerCase().endsWith('.xls');
+                return (
+                  <div key={sf.id || idx} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-white/80 dark:bg-[#0c1729] border border-blue-200 dark:border-blue-900/60 shadow-xs">
+                    <div className="flex items-center gap-3 overflow-hidden">
+                      <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-600 text-white flex-shrink-0">
+                        {isItemPdf ? <FileText className="w-5 h-5" /> : isSpreadsheet ? <FileSpreadsheet className="w-5 h-5" /> : <FileBox className="w-5 h-5" />}
+                      </div>
+                      <div className="truncate">
+                        <div className="text-xs font-bold text-neutral-900 dark:text-white truncate">
+                          {sf.name}
+                        </div>
+                        <div className="text-[11px] text-neutral-500 dark:text-blue-300/70 flex items-center gap-2">
+                          <span>{formatFileSize(sf.size)}</span>
+                          <span>•</span>
+                          <span className="text-emerald-500 font-semibold flex items-center gap-1">
+                            <FileCheck className="w-3 h-3" /> Ready
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    {onRemoveStagedFile && (
+                      <button
+                        type="button"
+                        onClick={() => onRemoveStagedFile(sf.id)}
+                        disabled={isProcessing}
+                        className="p-1 rounded-lg text-neutral-400 hover:text-rose-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition cursor-pointer disabled:opacity-50"
+                        title="Remove this file"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : fileName ? (
           /* High-Profile Selected File Card */
           <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-5 p-5 sm:p-6 rounded-2xl border-2 border-blue-500/40 bg-blue-50/40 dark:bg-blue-950/40 shadow-sm">
             <div className="flex items-center gap-4.5 overflow-hidden">
@@ -295,10 +384,10 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
             </div>
 
             <h3 className="font-outfit text-lg sm:text-2xl font-bold text-neutral-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors text-center">
-              Drag &amp; drop your PDF or document here
+              Drag &amp; drop multiple documents here
             </h3>
             <p className="text-xs sm:text-base text-neutral-500 dark:text-neutral-400 mt-1.5 text-center max-w-md">
-              High-speed multi-modal parsing for PDF, DOCX, TXT, and CSV files (up to 25MB)
+              High-speed multi-modal parsing for PDF, DOCX, CSV, XLSX, and image files (up to 50MB per file)
             </p>
 
             <div className="mt-6 inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl text-sm font-bold bg-neutral-900 text-white dark:bg-blue-600 dark:text-white shadow-md group-hover:bg-blue-600 dark:group-hover:bg-blue-500 transition-all duration-200">
@@ -346,7 +435,8 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
           id="file-upload-input"
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.doc,.docx,.txt,.md,.csv,application/pdf,text/plain"
+          multiple
+          accept=".pdf,.doc,.docx,.csv,.xlsx,.xls,.png,.jpg,.jpeg,.txt,.tsv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/*,text/plain"
           onChange={handleFileChange}
           className="hidden"
         />

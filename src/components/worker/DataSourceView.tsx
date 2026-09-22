@@ -5,7 +5,7 @@ import {
   X
 } from 'lucide-react';
 import { UploadZone } from './UploadZone';
-import { SampleDocument } from './types';
+import { SampleDocument, UploadedDataSourceFile } from './types';
 
 interface DataSourceViewProps {
   fileName: string;
@@ -15,6 +15,10 @@ interface DataSourceViewProps {
   onCustomPromptChange: (prompt: string) => void;
   onFileSelected: (file: File) => void;
   onClearFile: () => void;
+  stagedFiles?: UploadedDataSourceFile[];
+  onFilesSelected?: (files: File[]) => void;
+  onRemoveStagedFile?: (fileId: string) => void;
+  onClearStagedFiles?: () => void;
   onSelectSample?: (sample: SampleDocument) => void;
   onGenerate: () => void;
   canGenerate: boolean;
@@ -30,6 +34,10 @@ export const DataSourceView: React.FC<DataSourceViewProps> = ({
   onCustomPromptChange,
   onFileSelected,
   onClearFile,
+  stagedFiles,
+  onFilesSelected,
+  onRemoveStagedFile,
+  onClearStagedFiles,
   onSelectSample,
   onGenerate,
   canGenerate,
@@ -81,6 +89,10 @@ export const DataSourceView: React.FC<DataSourceViewProps> = ({
           onCustomPromptChange={onCustomPromptChange}
           onFileSelected={onFileSelected}
           onClearFile={onClearFile}
+          stagedFiles={stagedFiles}
+          onFilesSelected={onFilesSelected}
+          onRemoveStagedFile={onRemoveStagedFile}
+          onClearStagedFiles={onClearStagedFiles}
           onSelectSample={onSelectSample}
           onGenerate={onGenerate}
           canGenerate={canGenerate}

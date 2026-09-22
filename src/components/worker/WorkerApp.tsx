@@ -178,7 +178,103 @@ export function WorkerApp() {
     }
   }, [reportsHistory]);
 
-  // Handle file selection in Data Source Upload Document & Ingest
+  // Staged files for multi-file upload in Data Source
+  const [stagedFiles, setStagedFiles] = useState<UploadedDataSourceFile[]>([]);
+
+  // Handle multiple files selection in Data Source Upload Document & Ingest
+  const handleFilesSelected = (files: File[]) => {
+    setErrorMessage(null);
+    files.forEach((file) => {
+      const isBinary = file.type.includes('pdf') || 
+                       file.type.includes('image') || 
+                       file.name.endsWith('.docx') || 
+                       file.name.endsWith('.xlsx') || 
+                       file.name.endsWith('.xls') || 
+                       file.name.endsWith('.doc');
+
+      const reader = new FileReader();
+      if (isBinary) {
+        reader.onload = () => {
+          const result = reader.result as string;
+          const newDoc: UploadedDataSourceFile = {
+            id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            name: file.name,
+            type: file.type || 'application/octet-stream',
+            size: file.size,
+            uploadedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', Today',
+            fileBase64: result,
+            file,
+          };
+          setStagedFiles((prev) => [...prev.filter((f) => f.name !== file.name), newDoc]);
+          setUploadedFiles((prev) => [newDoc, ...prev.filter((f) => f.name !== file.name)]);
+          setFileName((prev) => prev || file.name);
+          setFileType((prev) => prev || file.type || 'application/octet-stream');
+          setFileSize((prev) => prev ?? file.size);
+          setFileBase64((prev) => prev || result);
+          setActiveFileId(newDoc.id);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        reader.onload = () => {
+          const text = reader.result as string;
+          const newDoc: UploadedDataSourceFile = {
+            id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            name: file.name,
+            type: file.type || 'text/plain',
+            size: file.size,
+            uploadedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', Today',
+            rawText: text,
+            file,
+          };
+          setStagedFiles((prev) => [...prev.filter((f) => f.name !== file.name), newDoc]);
+          setUploadedFiles((prev) => [newDoc, ...prev.filter((f) => f.name !== file.name)]);
+          setFileName((prev) => prev || file.name);
+          setFileType((prev) => prev || file.type || 'text/plain');
+          setFileSize((prev) => prev ?? file.size);
+          setRawText((prev) => prev || text);
+          setActiveFileId(newDoc.id);
+        };
+        reader.readAsText(file);
+      }
+    });
+    showToast(`${files.length} document${files.length > 1 ? 's' : ''} staged for ingestion!`);
+  };
+
+  const handleRemoveStagedFile = (fileId: string) => {
+    setStagedFiles((prev) => {
+      const filtered = prev.filter((f) => f.id !== fileId);
+      if (filtered.length === 0) {
+        setFileName('');
+        setFileType('');
+        setFileSize(undefined);
+        setFileBase64('');
+        setRawText('');
+        setActiveFileId(null);
+      } else if (activeFileId === fileId) {
+        const next = filtered[0];
+        setFileName(next.name);
+        setFileType(next.type);
+        setFileSize(next.size);
+        setFileBase64(next.fileBase64 || '');
+        setRawText(next.rawText || '');
+        setActiveFileId(next.id);
+      }
+      return filtered;
+    });
+  };
+
+  const handleClearStagedFiles = () => {
+    setStagedFiles([]);
+    setFileName('');
+    setFileType('');
+    setFileSize(undefined);
+    setFileBase64('');
+    setRawText('');
+    setActiveFileId(null);
+    setErrorMessage(null);
+  };
+
+  // Handle file selection in Data Source Upload Document & Ingest (single file)
   const handleFileSelected = (file: File) => {
     setFileName(file.name);
     setFileType(file.type || 'application/octet-stream');
@@ -187,7 +283,7 @@ export function WorkerApp() {
 
     const reader = new FileReader();
 
-    if (file.type.includes('pdf') || file.type.includes('image')) {
+    if (file.type.includes('pdf') || file.type.includes('image') || file.name.endsWith('.docx') || file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.doc')) {
       reader.onload = () => {
         const result = reader.result as string;
         setFileBase64(result);
@@ -200,8 +296,10 @@ export function WorkerApp() {
           size: file.size,
           uploadedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', Today',
           fileBase64: result,
+          file,
         };
         setUploadedFiles((prev) => [newDoc, ...prev.filter((f) => f.name !== file.name)]);
+        setStagedFiles([newDoc]);
         setActiveFileId(newDoc.id);
         showToast(`Document "${file.name}" ingested and added to repository!`);
       };
@@ -220,8 +318,10 @@ export function WorkerApp() {
           size: file.size,
           uploadedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', Today',
           rawText: text,
+          file,
         };
         setUploadedFiles((prev) => [newDoc, ...prev.filter((f) => f.name !== file.name)]);
+        setStagedFiles([newDoc]);
         setActiveFileId(newDoc.id);
         showToast(`Document "${file.name}" ingested and added to repository!`);
       };
@@ -235,6 +335,7 @@ export function WorkerApp() {
     setFileSize(undefined);
     setFileBase64('');
     setRawText('');
+    setStagedFiles([]);
     setActiveFileId(null);
     setErrorMessage(null);
   };
@@ -296,15 +397,40 @@ export function WorkerApp() {
     fileBase64?: string;
     rawText?: string;
   }) => {
-    const finalName = targetFile?.name ?? fileName;
-    const finalType = targetFile?.type ?? fileType ?? 'text/plain';
-    const finalBase64 = targetFile ? targetFile.fileBase64 : fileBase64;
-    const finalRawText = targetFile ? targetFile.rawText : rawText;
+    let filesPayload: Array<{ name: string; type: string; fileBase64?: string; rawText?: string }> = [];
 
-    if (!finalBase64 && (!finalRawText || finalRawText.trim().length === 0)) {
+    if (targetFile) {
+      filesPayload = [{
+        name: targetFile.name,
+        type: targetFile.type,
+        fileBase64: targetFile.fileBase64,
+        rawText: targetFile.rawText,
+      }];
+    } else if (stagedFiles.length > 0) {
+      filesPayload = stagedFiles.map((sf) => ({
+        name: sf.name,
+        type: sf.type,
+        fileBase64: sf.fileBase64,
+        rawText: sf.rawText,
+      }));
+    } else if (fileBase64 || (rawText && rawText.trim().length > 0)) {
+      filesPayload = [{
+        name: fileName || 'Direct Text Input',
+        type: fileType || 'text/plain',
+        fileBase64: fileBase64 || undefined,
+        rawText: rawText || undefined,
+      }];
+    }
+
+    if (filesPayload.length === 0) {
       setErrorMessage('Please upload a document or enter source text to analyze.');
       return;
     }
+
+    const finalName = targetFile?.name ?? (stagedFiles.length > 1 ? `${stagedFiles.length} Ingested Documents (${stagedFiles.slice(0, 2).map(f => f.name).join(', ')}${stagedFiles.length > 2 ? '...' : ''})` : (stagedFiles[0]?.name || fileName || 'Ingested Document'));
+    const finalType = targetFile?.type ?? (stagedFiles[0]?.type || fileType || 'text/plain');
+    const finalBase64 = targetFile ? targetFile.fileBase64 : (stagedFiles[0]?.fileBase64 || fileBase64);
+    const finalRawText = targetFile ? targetFile.rawText : (stagedFiles[0]?.rawText || rawText);
 
     setIsProcessing(true);
     setErrorMessage(null);
@@ -326,6 +452,7 @@ export function WorkerApp() {
           fileType: finalType || 'text/plain',
           fileBase64: finalBase64 || undefined,
           rawText: finalRawText || undefined,
+          files: filesPayload,
           reportType,
           depth,
           tone,
@@ -341,8 +468,9 @@ export function WorkerApp() {
       const data = await response.json();
 
       const newReport: GeneratedReport = {
-        id: data.job_id || `rpt-${Date.now().toString(36)}`,
+        id: data.report_id || data.job_id || `rpt-${Date.now().toString(36)}`,
         jobId: data.job_id,
+        reportId: data.report_id,
         fileName: finalName || 'Direct Text Input',
         fileType: finalType,
         reportMarkdown: data.reportMarkdown,
@@ -366,43 +494,63 @@ export function WorkerApp() {
     await executeReportGeneration();
   };
 
-  // Real backend document export downloader
+  // Real backend report artifact downloader
   const handleDownloadExport = async (format: 'pdf' | 'docx') => {
     try {
-      showToast(`Generating and downloading ${format.toUpperCase()} report...`);
+      showToast(`Retrieving generated ${format.toUpperCase()} report...`);
+      const targetReportId = currentReport?.reportId || '';
       const targetJobId = currentReport?.jobId || (currentReport?.id?.startsWith('job_') ? currentReport.id : '');
-      let downloadUrl = `/api/reports/download/${format}`;
-      if (targetJobId) {
-        downloadUrl += `?job_id=${encodeURIComponent(targetJobId)}`;
-      }
       const token = authService.getToken();
-      const response = await fetch(downloadUrl, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
-      let resToUse = response;
-      if (!response.ok) {
-        const altResp = await fetch(`/api/export/${format}${targetJobId ? `?job_id=${encodeURIComponent(targetJobId)}` : ''}`);
-        if (!altResp.ok) {
-          throw new Error(`Export download returned ${response.status}`);
+      let response: Response | null = null;
+
+      // 1. Prefer existing Phase 7/8 report artifact download endpoint: /api/reports/{report_id}/download?format={format}
+      if (targetReportId) {
+        const reportUrl = `/api/reports/${encodeURIComponent(targetReportId)}/download?format=${format}`;
+        const res = await fetch(reportUrl, { headers });
+        if (res.ok) {
+          response = res;
         }
-        resToUse = altResp;
       }
 
-      const blob = await resToUse.blob();
+      // 2. Secondary check via existing Phase 7/8 format endpoint with job_id: /api/reports/download/{format}?job_id={job_id}
+      if (!response && targetJobId) {
+        const jobUrl = `/api/reports/download/${format}?job_id=${encodeURIComponent(targetJobId)}`;
+        const res = await fetch(jobUrl, { headers });
+        if (res.ok) {
+          response = res;
+        }
+      }
+
+      // 3. If artifact does not exist, return error and do NOT download original uploaded file
+      if (!response || !response.ok) {
+        let errorDetail = `Generated ${format.toUpperCase()} report artifact does not exist or has not been compiled yet.`;
+        if (response) {
+          try {
+            const errJson = await response.json();
+            if (errJson.detail) errorDetail = errJson.detail;
+          } catch {}
+        }
+        throw new Error(errorDetail);
+      }
+
+      const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const baseName = (fileName || currentReport?.fileName || 'Ministry_of_Coal_Report').replace(/\.[^/.]+$/, '');
-      a.download = `${baseName}.${format}`;
+      const baseName = (currentReport?.fileName || fileName || 'MineIntel_Executive_Report')
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[^\w\-]+/g, '_');
+      a.download = `${baseName}_Report.${format}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      showToast(`${format.toUpperCase()} document downloaded successfully!`);
+      showToast(`${format.toUpperCase()} report downloaded successfully!`);
     } catch (err: any) {
       console.error('Export download failed:', err);
-      showToast(`Export failed: ${err.message || 'Could not download report'}`);
+      showToast(`Download error: ${err.message || 'Could not download report'}`);
     }
   };
 
@@ -503,7 +651,7 @@ export function WorkerApp() {
     scrollToTop();
   };
 
-  const canGenerate = Boolean(fileBase64 || rawText.trim().length > 0);
+  const canGenerate = Boolean(stagedFiles.length > 0 || fileBase64 || rawText.trim().length > 0);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#f4f8ff] dark:bg-[#070e1c] text-neutral-900 dark:text-neutral-50 transition-colors duration-200">
@@ -520,8 +668,8 @@ export function WorkerApp() {
           onNavigateProfile={handleSelectProfile}
           activeView={activeView}
           hasReport={Boolean(currentReport || reportsHistory.length > 0)}
-          hasDataSource={Boolean(fileName || rawText.trim().length > 0)}
-          dataSourceName={fileName}
+          hasDataSource={Boolean(stagedFiles.length > 0 || fileName || rawText.trim().length > 0)}
+          dataSourceName={stagedFiles.length > 1 ? `${stagedFiles.length} files selected` : (stagedFiles[0]?.name || fileName)}
         />
       </div>
 
@@ -550,8 +698,8 @@ export function WorkerApp() {
               }}
               activeView={activeView}
               hasReport={Boolean(currentReport || reportsHistory.length > 0)}
-              hasDataSource={Boolean(fileName || rawText.trim().length > 0)}
-              dataSourceName={fileName}
+              hasDataSource={Boolean(stagedFiles.length > 0 || fileName || rawText.trim().length > 0)}
+              dataSourceName={stagedFiles.length > 1 ? `${stagedFiles.length} files selected` : (stagedFiles[0]?.name || fileName)}
             />
           </div>
         </div>
@@ -613,21 +761,28 @@ export function WorkerApp() {
               <SettingsView healthComponents={[]} />
             </div>
           ) : activeView === 'preview' ? (
-            /* VIEW 2: PREVIEW PAGE VIEW (Untouched, rendered directly in app) */
+            /* VIEW 2: PREVIEW PAGE VIEW (Shows generated report artifact) */
             <PdfSlidePreviewView
-              fileName={fileName || currentReport?.fileName || uploadedFiles[0]?.name || ''}
-              fileType={fileType || 'application/pdf'}
+              fileName={currentReport?.fileName || fileName || ''}
+              fileType={currentReport?.fileType || fileType || 'application/pdf'}
               fileSize={fileSize}
-              rawText={rawText || currentReport?.reportMarkdown || uploadedFiles[0]?.rawText || ''}
+              rawText={currentReport?.reportMarkdown || ''}
               currentReport={currentReport}
               onJumpToExport={() => {
                 setActiveView('export');
                 scrollToTop();
               }}
-              onUpdateRawText={(updatedText) => setRawText(updatedText)}
+              onUpdateRawText={(updatedText) => {
+                if (currentReport) {
+                  setCurrentReport({
+                    ...currentReport,
+                    reportMarkdown: updatedText,
+                  });
+                }
+              }}
             />
           ) : activeView === 'export' ? (
-            /* VIEW 3: EXPORT SECTION (Untouched, PDF and DOCX options, nothing selected by default) */
+            /* VIEW 3: EXPORT SECTION (PDF and DOCX options) */
             <ExportSection
               fileName={fileName || currentReport?.fileName || uploadedFiles[0]?.name || ''}
               fileSize={fileSize}
@@ -639,7 +794,7 @@ export function WorkerApp() {
               onDownload={handleDownloadExport}
             />
           ) : activeView === 'datasource' ? (
-            /* VIEW 4: DATA SOURCE SECTION (New Ingestion View) */
+            /* VIEW 4: DATA SOURCE SECTION (Multi-file Ingestion View) */
             <DataSourceView
               fileName={fileName}
               fileType={fileType}
@@ -648,6 +803,10 @@ export function WorkerApp() {
               onCustomPromptChange={setCustomFocus}
               onFileSelected={handleFileSelected}
               onClearFile={handleClearFile}
+              stagedFiles={stagedFiles}
+              onFilesSelected={handleFilesSelected}
+              onRemoveStagedFile={handleRemoveStagedFile}
+              onClearStagedFiles={handleClearStagedFiles}
               onSelectSample={handleSelectSample}
               onGenerate={handleGenerateReport}
               canGenerate={canGenerate}

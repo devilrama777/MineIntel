@@ -300,6 +300,30 @@ class AuthService {
   }
 
   /**
+   * Verify Master Officer credentials before opening user creation form.
+   */
+  public async verifyMaster(
+    master_officer_id: string,
+    master_password: string
+  ): Promise<{ success: boolean; authenticated: boolean; message: string }> {
+    const payload = {
+      master_officer_id: (master_officer_id || '').trim().replace(/^["']|["']$/g, ''),
+      master_password: (master_password || '').trim().replace(/^["']|["']$/g, ''),
+    };
+    const resp = await fetch(`${API_BASE}/api/auth/verify-master`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const resData = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(resData.detail || 'Master authentication failed: Invalid Master Officer ID or Enclave Password.');
+    }
+    return resData;
+  }
+
+  /**
    * Create a new normal user account. Requires Master Officer credentials for authorization.
    */
   public async createUser(data: {

@@ -25,7 +25,7 @@ from backend.services.chart_models import ChartConfig, ChartType
 
 logger = logging.getLogger("mineintel.chart_renderer")
 
-CHARTS_DIR = config.BASE_DIR / "outputs" / "charts"
+CHARTS_DIR = config.OUTPUTS_DIR / "charts"
 
 # Modern curated color palettes
 PALETTE = [
@@ -61,7 +61,10 @@ class ChartRenderer:
     """Renders charts using headless Matplotlib with custom MineIntel styling."""
 
     def __init__(self):
-        CHARTS_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            CHARTS_DIR.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
 
     @classmethod
     def _apply_theme(cls, fig, ax, theme_name: str):
@@ -86,7 +89,10 @@ class ChartRenderer:
         Renders chart to PNG and SVG files.
         Returns (png_path, svg_path).
         """
-        CHARTS_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            CHARTS_DIR.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
         chart_id = chart_config.chart_id
         chart_type = chart_config.chart_type
         theme_name = chart_config.theme or "mineintel_dark"

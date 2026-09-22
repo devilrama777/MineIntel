@@ -25,6 +25,7 @@ export interface ReportMetadata {
 export interface GeneratedReport {
   id: string;
   jobId?: string;
+  reportId?: string;
   fileName: string;
   fileType?: string;
   reportMarkdown: string;
@@ -56,4 +57,6 @@ export interface UploadedDataSourceFile {
   uploadedAt: string;
   fileBase64?: string;
   rawText?: string;
+  file?: File;
 }
+

@@ -44,14 +44,17 @@ from backend.services.report_canvas import NumberedReportCanvas
 
 logger = logging.getLogger("mineintel.long_doc_builder")
 
-REPORTS_DIR = config.BASE_DIR / "outputs" / "reports"
+REPORTS_DIR = config.REPORTS_DIR
 
 
 class LongDocumentBuilder:
     """Compiles multi-page PDF, DOCX, and Markdown dossiers from a Report Plan."""
 
     def __init__(self):
-        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
         self.styles = getSampleStyleSheet()
         self._init_custom_styles()
 

@@ -83,6 +83,11 @@ class LoginRequest(BaseModel):
 
 
 
+class MasterVerifyRequest(BaseModel):
+    master_officer_id: str
+    master_password: str
+
+
 class CreateUserRequest(BaseModel):
     master_officer_id: str
     master_password: str
@@ -292,6 +297,40 @@ def auth_login(req: LoginRequest):
     }
 
 
+@app.post("/api/auth/verify-master")
+def auth_verify_master(req: MasterVerifyRequest):
+    """
+    Verifies Master Officer credentials before opening the user creation form.
+    Rejects invalid Master credentials with 401.
+    """
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    master_secret = config.get_auth_secret_password().strip().strip("\"'").strip()
+
+    if not master_officer or not master_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Master authentication is unconfigured on the server."
+        )
+
+    req_master_id = req.master_officer_id.strip().strip("\"'").strip()
+    req_master_pw = req.master_password.strip().strip("\"'").strip()
+
+    valid_master_id = secrets.compare_digest(req_master_id.lower(), master_officer.lower())
+    valid_master_pw = secrets.compare_digest(req_master_pw, master_secret)
+
+    if not (valid_master_id and valid_master_pw):
+        raise HTTPException(
+            status_code=401,
+            detail="Master authentication failed: Invalid Master Officer ID or Enclave Password."
+        )
+
+    return {
+        "success": True,
+        "authenticated": True,
+        "message": "Master Officer credentials verified."
+    }
+
+
 @app.post("/api/auth/users")
 def auth_create_user(req: CreateUserRequest):
     """
@@ -382,9 +421,7 @@ def auth_verify(authorization: Optional[str] = Header(None), token: Optional[str
     if not session:
         raise HTTPException(status_code=401, detail="Session token invalid or expired.")
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (session.get("role") == "Senior Operational Auditor") or (
-        bool(master_officer) and secrets.compare_digest(session.get("officer_id", "").lower(), master_officer.lower())
-    )
+    is_master = bool(master_officer) and secrets.compare_digest(session.get("officer_id", "").lower(), master_officer.lower())
     return {
         "authenticated": True,
         "officer_id": session["officer_id"],
@@ -2184,11 +2221,19 @@ async def run_full_pipeline(
         )
 
 
+class WorkerFilePayload(BaseModel):
+    name: str
+    type: Optional[str] = "application/pdf"
+    fileBase64: Optional[str] = None
+    rawText: Optional[str] = None
+
+
 class WorkerGenerateReportRequest(BaseModel):
     fileName: Optional[str] = "Uploaded Document"
     fileType: Optional[str] = "application/pdf"
     fileBase64: Optional[str] = None
     rawText: Optional[str] = None
+    files: Optional[List[WorkerFilePayload]] = None
     reportType: Optional[str] = "executive"
     depth: Optional[str] = "standard"
     tone: Optional[str] = "analytical"
@@ -2199,90 +2244,136 @@ class WorkerGenerateReportRequest(BaseModel):
 async def generate_worker_report(req: WorkerGenerateReportRequest):
     """
     Worker Report Generation API adapter.
-    Bridges Final_w_UI's frontend contract directly to MineIntel's sequential DocumentPipeline.
-    Ensures genuine deterministic mathematical verification and multi-format document generation.
+    Executes the unified multi-file Phase 1–9 backend pipeline:
+    - Phase 1: Multi-file evidence ingestion and normalization
+    - Phase 4: Intelligence dossier organization
+    - Phase 5: Chart & table detection
+    - Phase 6: Systematic report planning
+    - Phase 7: Long-document report compilation (PDF, DOCX, Markdown)
     """
-    if not req.fileBase64 and (not req.rawText or not req.rawText.strip()):
+    payload_files: List[Tuple[str, bytes]] = []
+
+    if req.files and len(req.files) > 0:
+        for f_item in req.files:
+            fname = f_item.name or "document.pdf"
+            f_bytes = b""
+            if f_item.fileBase64:
+                b64 = f_item.fileBase64.strip()
+                if "," in b64:
+                    b64 = b64.split(",", 1)[1]
+                try:
+                    f_bytes = base64.b64decode(b64)
+                except Exception as b64_err:
+                    logger.warning(f"Failed to decode base64 for file '{fname}': {b64_err}")
+            elif f_item.rawText:
+                f_bytes = f_item.rawText.encode("utf-8")
+            if f_bytes:
+                payload_files.append((fname, f_bytes))
+    elif req.fileBase64 or req.rawText:
+        fname = req.fileName or "Uploaded_Document.pdf"
+        f_bytes = b""
+        if req.fileBase64:
+            b64 = req.fileBase64.strip()
+            if "," in b64:
+                b64 = b64.split(",", 1)[1]
+            try:
+                f_bytes = base64.b64decode(b64)
+            except Exception as b64_err:
+                logger.warning(f"Failed to decode base64 for file '{fname}': {b64_err}")
+        elif req.rawText:
+            f_bytes = req.rawText.encode("utf-8")
+        if f_bytes:
+            payload_files.append((fname, f_bytes))
+
+    if not payload_files:
         raise HTTPException(
             status_code=400,
-            detail="Please provide either a document file (PDF/Excel/CSV/Text) or document text to analyze."
+            detail="Please provide at least one valid document file or document text to analyze."
         )
 
-    # 1. Determine safe filename and extension
-    orig_name = req.fileName or "Uploaded_Document.pdf"
-    safe_name = "".join(c for c in orig_name if c.isalnum() or c in "._- ").strip()
-    if not safe_name:
-        safe_name = "Uploaded_Document.pdf"
-    file_stem = Path(safe_name).stem
-    suffix = Path(safe_name).suffix.lower()
-
-    file_id = f"{uuid.uuid4().hex[:8]}_{safe_name}"
-    save_path = config.UPLOADS_DIR / file_id
-
-    # 2. Decode fileBase64 or write rawText
-    if req.fileBase64:
-        clean_b64 = req.fileBase64.strip()
-        if "," in clean_b64:
-            clean_b64 = clean_b64.split(",", 1)[1]
-        try:
-            file_bytes = base64.b64decode(clean_b64)
-            save_path.write_bytes(file_bytes)
-        except Exception as b64_err:
-            logger.error(f"Base64 decode error: {b64_err}")
-            raise HTTPException(status_code=400, detail="Invalid Base64 payload for document file.")
-    elif req.rawText:
-        if not suffix or suffix not in [".csv", ".tsv", ".txt", ".md"]:
-            save_path = config.UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{file_stem}.txt"
-        save_path.write_text(req.rawText, encoding="utf-8")
-
-    # 3. Construct custom focus instructions
-    report_type_descriptions = {
-        "executive": "Executive Briefing focusing on strategic takeaways, critical decisions, and executive summary.",
-        "technical": "Technical Audit evaluating methodology, infrastructure, system performance, and technical validation.",
-        "strategic": "Strategic Analysis covering positioning, risk mitigation, and execution roadmap.",
-        "financial": "Financial Audit analyzing revenue metrics, cost structures, variance, and projections.",
-        "brief": "One-Page Overview capturing essential findings and key metrics.",
-        "research": "Analytical Research Paper with methodology review, data interpretation, and findings.",
-    }
-    type_desc = report_type_descriptions.get(req.reportType or "executive", "Executive Intelligence Report")
-    custom_instruction = f"Report Type: {type_desc}. Depth: {req.depth}. Tone: {req.tone}."
-    if req.customFocus and req.customFocus.strip():
-        custom_instruction += f" Specific Focus: {req.customFocus.strip()}."
-
-    # 4. Execute the pipeline
+    owner_id = "LOCAL_OFFICER"
     try:
-        pipeline_output = pipeline_service.process_file(
-            file_path=save_path,
-            custom_report_cmd=custom_instruction,
-            custom_llama_cmd=req.customFocus
+        # Phase 1: Unified Multi-File Evidence Ingestion Engine
+        manifest = ingestion_engine.create_ingestion_job(owner_id=owner_id, files=payload_files)
+        job_id = manifest["job_id"]
+
+        # Phase 4: Intelligence Organization
+        try:
+            intelligence_service.organize_job_evidence(job_id=job_id, owner_id=owner_id)
+        except Exception as ie:
+            logger.warning(f"Phase 4 intelligence organization warning for job {job_id}: {ie}")
+
+        # Phase 5: Chart & Table Detection
+        try:
+            chart_service.detect_tables(job_id=job_id, owner_id=owner_id)
+        except Exception as ce:
+            logger.warning(f"Phase 5 chart detection warning for job {job_id}: {ce}")
+
+        # Phase 6: Report Planning
+        report_title = (
+            Path(payload_files[0][0]).stem.replace("_", " ").title() + " Report"
+            if len(payload_files) == 1
+            else f"Executive Synthesis ({len(payload_files)} Sources)"
+        )
+        plan_res = planner_service.generate_plan(
+            job_id=job_id,
+            owner_id=owner_id,
+            title=report_title,
+            use_ai=False,
+            custom_instruction=req.customFocus
+        )
+        plan_id = plan_res.get("plan", {}).get("plan_id") if isinstance(plan_res, dict) else getattr(plan_res, "plan_id", None)
+
+        # Phase 7: Long-Document Generation (PDF, DOCX, Markdown)
+        gen_res = report_generator_service.generate_report(
+            job_id=job_id,
+            owner_id=owner_id,
+            plan_id=plan_id,
+            formats=["pdf", "docx", "md"],
+            title_override=report_title
         )
 
-        job_id = pipeline_output.get("job_id", "")
-        final_report = (
-            pipeline_output.get("final_report")
-            or pipeline_output.get("llama_analysis")
-            or "# Executive Intelligence Report\n\nReport synthesis completed successfully."
-        )
+        report_id = gen_res.get("report_id") or f"rep_{job_id}"
+        md_path = gen_res.get("md_path")
+        report_markdown = ""
+        if md_path and Path(md_path).exists():
+            try:
+                report_markdown = Path(md_path).read_text(encoding="utf-8")
+            except Exception:
+                report_markdown = ""
 
-        word_count = len(final_report.split())
+        if not report_markdown:
+            report_markdown = (
+                f"# {report_title}\n\n"
+                f"**Report Reference:** MIN/REP/{job_id}/v1\n\n"
+                f"---\n\n"
+                f"## Executive Summary\n\n"
+                f"Analysis completed successfully across {len(payload_files)} evidence source(s).\n"
+            )
+
+        word_count = len(report_markdown.split())
         reading_time = max(1, round(word_count / 200))
 
         return {
             "success": True,
             "job_id": job_id,
-            "reportMarkdown": final_report,
+            "report_id": report_id,
+            "reportMarkdown": report_markdown,
+            "pdf_path": gen_res.get("pdf_path"),
+            "docx_path": gen_res.get("docx_path"),
             "metadata": {
-                "title": file_stem.replace("_", " ").title(),
+                "title": report_title,
                 "reportType": req.reportType or "executive",
                 "depth": req.depth or "standard",
                 "tone": req.tone or "analytical",
                 "wordCount": word_count,
                 "readingTimeMinutes": reading_time,
+                "totalFiles": len(payload_files),
                 "generatedAt": datetime.now(timezone.utc).isoformat()
             }
         }
     except Exception as e:
-        logger.error(f"Worker report generation error: {e}")
+        logger.error(f"Worker report generation error: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Report generation failed: {str(e)}"
@@ -2911,12 +3002,40 @@ def download_report_format(fmt: str, template: Optional[str] = None, job_id: Opt
 
     effective_job_id = job_id if isinstance(job_id, str) and job_id.strip() else None
 
-    # 1. If job_id provided, look in job-isolated directory first
+    # 1. If job_id provided, look in Phase 7/8 report store and report directories
     if effective_job_id:
-        job_dirs = [config.OUTPUTS_DIR / effective_job_id, config.REPORTS_DIR / effective_job_id]
+        from backend.services.report_generator_store import get_report as get_p7_report, list_reports_for_job
+        rep = get_p7_report(effective_job_id)
+        if not rep and effective_job_id.startswith("ingest_"):
+            reps = list_reports_for_job(effective_job_id)
+            if reps:
+                rep = reps[0]
+        if rep:
+            target_path = None
+            if fmt == "pdf":
+                target_path = rep.get("pdf_path")
+            elif fmt in ("docx", "word"):
+                target_path = rep.get("docx_path")
+            elif fmt in ("md", "markdown"):
+                target_path = rep.get("md_path")
+            if target_path and Path(target_path).exists() and Path(target_path).stat().st_size > 0:
+                out_name = f"{rep.get('title', 'MineIntel_Report').replace(' ', '_')}.{fmt}"
+                return FileResponse(
+                    path=target_path,
+                    filename=out_name,
+                    media_type=media_type,
+                    headers={"Content-Disposition": f'attachment; filename="{out_name}"'}
+                )
+
+        # Search job directories exclusively for generated report files (never raw uploaded files)
+        job_dirs = [config.REPORTS_DIR / effective_job_id, config.OUTPUTS_DIR / effective_job_id]
         for jd in job_dirs:
             if jd.exists():
-                matching = [f for f in jd.glob(f"*.{fmt}") if tpl_key in f.name.lower() and f.stat().st_size > 0]
+                matching = [
+                    f for f in jd.glob(f"*.{fmt}")
+                    if (f.name.lower().startswith("report_") or f.name.lower().startswith("ministry_") or tpl_key in f.name.lower())
+                    and f.stat().st_size > 0
+                ]
                 if matching:
                     return FileResponse(
                         path=matching[0],
@@ -2925,40 +3044,30 @@ def download_report_format(fmt: str, template: Optional[str] = None, job_id: Opt
                         headers={"Content-Disposition": f'attachment; filename="{matching[0].name}"'}
                     )
 
-        # If template not yet compiled for this job, attempt on-the-fly generation into job directory
-        job_dir = config.OUTPUTS_DIR / effective_job_id
-        if job_dir.exists():
-            try:
-                gen_path = None
-                if fmt == "pdf":
-                    gen_path = document_generator.generate_pdf_report(template_name=tpl_key, report_id=effective_job_id, job_id=effective_job_id)
-                elif fmt == "docx":
-                    gen_path = document_generator.generate_docx_report(template_name=tpl_key, report_id=effective_job_id, job_id=effective_job_id)
-                elif fmt == "xlsx":
-                    gen_path = document_generator.generate_excel_workbook(template_name=tpl_key, report_id=effective_job_id, job_id=effective_job_id)
-                if gen_path and Path(gen_path).exists() and Path(gen_path).stat().st_size > 0:
-                    return FileResponse(
-                        path=gen_path,
-                        filename=Path(gen_path).name,
-                        media_type=media_type,
-                        headers={"Content-Disposition": f'attachment; filename="{Path(gen_path).name}"'}
-                    )
-            except Exception as e:
-                logger.warning(f"On-the-fly report generation error for job {effective_job_id}: {e}")
+        # Check if matching report exists in REPORTS_DIR keyed specifically by effective_job_id
+        if config.REPORTS_DIR.exists():
+            clean_jid = effective_job_id.replace("ingest_", "").replace("job_", "")
+            matching = [
+                f for f in config.REPORTS_DIR.glob(f"*.{fmt}")
+                if (clean_jid in f.name or effective_job_id in f.name)
+                and (f.name.lower().startswith("report_") or f.name.lower().startswith("ministry_"))
+                and f.stat().st_size > 0
+            ]
+            if matching:
+                return FileResponse(
+                    path=matching[0],
+                    filename=matching[0].name,
+                    media_type=media_type,
+                    headers={"Content-Disposition": f'attachment; filename="{matching[0].name}"'}
+                )
 
-            # Fallback to any existing file of requested format in job directory
-            for jd in job_dirs:
-                if jd.exists():
-                    for f in jd.glob(f"*.{fmt}"):
-                        if f.stat().st_size > 0:
-                            return FileResponse(
-                                path=f,
-                                filename=f.name,
-                                media_type=media_type,
-                                headers={"Content-Disposition": f'attachment; filename="{f.name}"'}
-                            )
+        # Per requirement: Do NOT generate/compile during download, and never return uploaded source files.
+        raise HTTPException(
+            status_code=404,
+            detail=f"Final generated {fmt.upper()} report artifact not found for job '{effective_job_id}'. Please generate the report first."
+        )
 
-    # 2. Search candidates in standard report directories
+    # 2. Search candidates in standard report directories (only pre-existing static artifacts, no on-the-fly generation)
     search_dirs = [config.REPORTS_DIR, getattr(config, "STATIC_REPORTS_DIR", None)]
     search_dirs = [d for d in search_dirs if d is not None and d.exists()]
 
@@ -2971,25 +3080,6 @@ def download_report_format(fmt: str, template: Optional[str] = None, job_id: Opt
                 media_type=media_type,
                 headers={"Content-Disposition": f'attachment; filename="{target_fname}"'}
             )
-
-    # If specific template not found yet in standard directories, attempt on-the-fly generation
-    try:
-        gen_path = None
-        if fmt == "pdf":
-            gen_path = document_generator.generate_pdf_report(template_name=tpl_key)
-        elif fmt == "docx":
-            gen_path = document_generator.generate_docx_report(template_name=tpl_key)
-        elif fmt == "xlsx":
-            gen_path = document_generator.generate_excel_workbook(template_name=tpl_key)
-        if gen_path and Path(gen_path).exists() and Path(gen_path).stat().st_size > 0:
-            return FileResponse(
-                path=gen_path,
-                filename=Path(gen_path).name,
-                media_type=media_type,
-                headers={"Content-Disposition": f'attachment; filename="{Path(gen_path).name}"'}
-            )
-    except Exception as e:
-        logger.warning(f"Default report generation error: {e}")
 
     # Fallback to default format file
     for d in search_dirs:

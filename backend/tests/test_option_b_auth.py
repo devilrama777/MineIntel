@@ -20,9 +20,11 @@ from backend.main import (
     app,
     auth_login,
     auth_create_user,
+    auth_verify_master,
     auth_update_user_status,
     LoginRequest,
     CreateUserRequest,
+    MasterVerifyRequest,
     MasterUserActionRequest
 )
 from backend import auth_store
@@ -53,6 +55,20 @@ class TestOptionBAuthentication(unittest.TestCase):
         self.assertEqual(resp["role"], "Senior Operational Auditor")
         self.assertTrue(resp["is_master"])
         self.assertIn("token", resp)
+
+    def test_01b_verify_master_valid(self):
+        """Test auth_verify_master succeeds with valid Master credentials."""
+        req = MasterVerifyRequest(master_officer_id=TEST_OFFICER_ID, master_password=TEST_OFFICER_PW)
+        resp = auth_verify_master(req)
+        self.assertTrue(resp["success"])
+        self.assertTrue(resp["authenticated"])
+
+    def test_01c_verify_master_invalid(self):
+        """Test auth_verify_master rejects invalid Master credentials with 401."""
+        req = MasterVerifyRequest(master_officer_id=TEST_OFFICER_ID, master_password="WRONG_PASSWORD_XYZ")
+        with self.assertRaises(HTTPException) as ctx:
+            auth_verify_master(req)
+        self.assertEqual(ctx.exception.status_code, 401)
 
     def test_02_create_normal_user_unauthorized(self):
         """Test creating a normal user fails with invalid master credentials."""
