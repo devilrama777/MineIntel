@@ -17,7 +17,7 @@ interface ExportSectionProps {
   fileSize?: number;
   totalSlides?: number;
   onBackToPreview: () => void;
-  onDownload?: (format: 'pdf' | 'docx') => void;
+  onDownload?: (format: 'pdf' | 'docx') => Promise<void> | void;
 }
 
 export const ExportSection: React.FC<ExportSectionProps> = ({
@@ -33,23 +33,23 @@ export const ExportSection: React.FC<ExportSectionProps> = ({
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportCompleteMsg, setExportCompleteMsg] = useState<string | null>(null);
 
-  const handleExecuteDownload = () => {
+  const handleExecuteDownload = async () => {
     if (!selectedFormat) return;
 
     setIsExporting(true);
     setExportCompleteMsg(null);
 
-    // Call optional callback so the user can easily plug in backend logic
-    if (onDownload) {
-      onDownload(selectedFormat);
-    }
-
-    // Provide clean UI confirmation
-    setTimeout(() => {
-      setIsExporting(false);
+    try {
+      if (onDownload) {
+        await onDownload(selectedFormat);
+      }
       const ext = selectedFormat.toUpperCase();
       setExportCompleteMsg(`Ready for download: ${fileName.replace(/\.[^/.]+$/, '')}.${selectedFormat} (${ext})`);
-    }, 600);
+    } catch {
+      // Errors handled by caller toast
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (

@@ -342,7 +342,7 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
                   <MineIntelLogo size={24} />
                   <div className="h-4 w-px bg-neutral-300 dark:bg-blue-900/60" />
                   <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-blue-300/80">
-                    {fileName || 'Executive Document'}
+                    {currentReport?.fileName || fileName || 'Executive Report'}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">

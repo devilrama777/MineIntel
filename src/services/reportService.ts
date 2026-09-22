@@ -458,21 +458,30 @@ class LocalDesktopService {
     return [...this.dataSources];
   }
 
-  async runPipelineWithFile(
-    file: File,
-    customCommand?: string
+  async runPipelineWithFiles(
+    files: File[],
+    customCommand?: string,
+    title?: string
   ): Promise<{
     job_id: string;
+    report_id: string;
     filename: string;
     markdown_content: string;
     llama_analysis: string;
     math_audit: any;
     report_text: string;
-    output_files: { pdf?: string; docx?: string; xlsx?: string };
+    output_files: { pdf?: string; docx?: string; md?: string };
+    metadata?: any;
   }> {
-    // 1. Unified Multi-File Evidence Ingestion Endpoint (Phase 1)
+    if (!files || files.length === 0) {
+      throw new Error('At least one file must be provided for ingestion.');
+    }
+
+    // 1. Phase 1: Ingestion - Submit ALL selected files together as ONE job
     const formData = new FormData();
-    formData.append('files', file);
+    for (const f of files) {
+      formData.append('files', f);
+    }
 
     const ingestHeaders = authService.getAuthHeader();
     const res = await fetch(`${API_BASE}/api/ingest/jobs`, {
@@ -489,7 +498,7 @@ class LocalDesktopService {
     const ingestResult = await res.json();
     const jobId = ingestResult.job_id;
 
-    // 2. Trigger Phase 4 Intelligence Organization
+    // 2. Phase 4: Intelligence Analysis
     try {
       await fetch(`${API_BASE}/api/intelligence/analyze/${jobId}`, {
         method: 'POST',
@@ -499,7 +508,7 @@ class LocalDesktopService {
       // Non-blocking
     }
 
-    // 3. Trigger Phase 5 Chart Detection
+    // 3. Phase 5: Chart Detection
     try {
       await fetch(`${API_BASE}/api/charts/detect/${jobId}`, {
         method: 'POST',
@@ -509,15 +518,16 @@ class LocalDesktopService {
       // Non-blocking
     }
 
-    // 4. Trigger Phase 6 Report Planner
+    // 4. Phase 6: AI Report Planner (autonomous with use_ai: true)
     let planId: string | undefined = undefined;
+    const reportTitle = title || (files.length === 1 ? `Executive Audit: ${files[0].name}` : `Multi-Source Dossier (${files.length} documents)`);
     try {
       const planRes = await fetch(`${API_BASE}/api/planner/generate`, {
         method: 'POST',
         headers: this.getAuthHeaders(),
         body: JSON.stringify({
           job_id: jobId,
-          title: `Executive Audit: ${file.name}`,
+          title: reportTitle,
           use_ai: true,
           custom_instruction: customCommand,
         }),
@@ -530,9 +540,10 @@ class LocalDesktopService {
       // Non-blocking
     }
 
-    // 5. Trigger Phase 7 Long-Document Report Generation
-    let outputFiles: { pdf?: string; docx?: string; xlsx?: string } = {};
-    let reportText = '';
+    // 5. Phase 7: Long-Document Report Generation
+    let outputFiles: { pdf?: string; docx?: string; md?: string } = {};
+    let reportId = '';
+    let reportMarkdown = '';
     try {
       const repRes = await fetch(`${API_BASE}/api/reports/generate-long`, {
         method: 'POST',
@@ -540,30 +551,67 @@ class LocalDesktopService {
         body: JSON.stringify({
           job_id: jobId,
           plan_id: planId,
-          title: `Executive Audit: ${file.name}`,
+          title: reportTitle,
           formats: ['pdf', 'docx', 'md'],
         }),
       });
       if (repRes.ok) {
         const repData = await repRes.json();
+        reportId = repData.report_id || '';
         outputFiles = {
           pdf: repData.pdf_path,
           docx: repData.docx_path,
+          md: repData.md_path,
         };
+        if (repData.report_markdown) {
+          reportMarkdown = repData.report_markdown;
+        }
       }
     } catch {
       // Non-blocking
     }
 
-    // 6. Record in persistent history
+    // 6. Obtain generated markdown using existing report download API
+    if (reportId) {
+      try {
+        const mdRes = await fetch(`${API_BASE}/api/reports/${encodeURIComponent(reportId)}/download?format=md`, {
+          headers: this.getAuthHeaders(),
+        });
+        if (mdRes.ok) {
+          const text = await mdRes.text();
+          if (text && text.trim().length > 0) {
+            reportMarkdown = text;
+          }
+        }
+      } catch {
+        // Fallback
+      }
+    }
+    if (!reportMarkdown && jobId) {
+      try {
+        const mdRes = await fetch(`${API_BASE}/api/reports/download/md?job_id=${encodeURIComponent(jobId)}`, {
+          headers: this.getAuthHeaders(),
+        });
+        if (mdRes.ok) {
+          const text = await mdRes.text();
+          if (text && text.trim().length > 0) {
+            reportMarkdown = text;
+          }
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
+
+    // 7. Record in persistent history
     const historyItem = {
-      id: jobId,
-      title: `Executive Audit: ${file.name}`,
+      id: reportId || jobId,
+      title: reportTitle,
       template: 'formal_audit',
       template_name: 'Formal Statutory Audit',
       theme: 'coal_sovereign',
-      records_count: 1,
-      summary_snippet: `Evidence dossier analyzed from ${file.name}.`,
+      records_count: files.length,
+      summary_snippet: `Evidence dossier analyzed from ${files.map((f) => f.name).join(', ')}.`,
       job_id: jobId,
     };
     try {
@@ -578,13 +626,84 @@ class LocalDesktopService {
 
     return {
       job_id: jobId,
-      filename: file.name,
-      markdown_content: `# Evidence Ingested: ${file.name}\n`,
-      llama_analysis: `Analysis completed for ${file.name} using sovereign local inference.`,
-      math_audit: { verified: true, record_count: 1 },
-      report_text: reportText || `Report generated from ${file.name}.`,
+      report_id: reportId || jobId,
+      filename: files.map((f) => f.name).join(', '),
+      markdown_content: reportMarkdown,
+      llama_analysis: `Analysis completed for ${files.length} documents using sovereign local inference.`,
+      math_audit: { verified: true, record_count: files.length },
+      report_text: reportMarkdown,
       output_files: outputFiles,
+      metadata: {
+        job_id: jobId,
+        report_id: reportId || jobId,
+        title: reportTitle,
+        files_count: files.length,
+      },
     };
+  }
+
+  async runPipelineWithFile(
+    file: File,
+    customCommand?: string
+  ): Promise<{
+    job_id: string;
+    filename: string;
+    markdown_content: string;
+    llama_analysis: string;
+    math_audit: any;
+    report_text: string;
+    output_files: { pdf?: string; docx?: string; xlsx?: string };
+  }> {
+    const res = await this.runPipelineWithFiles([file], customCommand, `Executive Audit: ${file.name}`);
+    return {
+      job_id: res.job_id,
+      filename: res.filename,
+      markdown_content: res.markdown_content,
+      llama_analysis: res.llama_analysis,
+      math_audit: res.math_audit,
+      report_text: res.report_text,
+      output_files: res.output_files,
+    };
+  }
+
+  async downloadReportArtifact(
+    reportId: string,
+    jobId: string,
+    format: 'pdf' | 'docx'
+  ): Promise<Blob> {
+    const headers = this.getAuthHeaders();
+    delete headers['Content-Type'];
+
+    let response: Response | null = null;
+
+    if (reportId) {
+      const reportUrl = `${API_BASE}/api/reports/${encodeURIComponent(reportId)}/download?format=${format}`;
+      const res = await fetch(reportUrl, { headers }).catch(() => null);
+      if (res && res.ok) {
+        response = res;
+      }
+    }
+
+    if (!response && jobId) {
+      const jobUrl = `${API_BASE}/api/reports/download/${format}?job_id=${encodeURIComponent(jobId)}`;
+      const res = await fetch(jobUrl, { headers }).catch(() => null);
+      if (res && res.ok) {
+        response = res;
+      }
+    }
+
+    if (!response || !response.ok) {
+      let errorDetail = `Generated ${format.toUpperCase()} report artifact does not exist or has not been compiled yet.`;
+      if (response) {
+        try {
+          const errJson = await response.json();
+          if (errJson.detail) errorDetail = errJson.detail;
+        } catch {}
+      }
+      throw new Error(errorDetail);
+    }
+
+    return await response.blob();
   }
 
   async addDataSource(fileData: Partial<DataSourceItem>): Promise<DataSourceItem> {

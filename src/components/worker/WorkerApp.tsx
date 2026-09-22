@@ -62,6 +62,28 @@ import {
 } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { useAuth } from '../../context/AuthContext';
+import { desktopService } from '../../services/reportService';
+
+function ensureFileObject(item: { name: string; type?: string; file?: File; fileBase64?: string; rawText?: string }): File {
+  if (item.file instanceof File) {
+    return item.file;
+  }
+  if (item.fileBase64 && item.fileBase64.startsWith('data:')) {
+    const arr = item.fileBase64.split(',');
+    const mime = arr[0].match(/:(.*?);/)?.[1] || item.type || 'application/octet-stream';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], item.name, { type: mime });
+  }
+  const content = item.rawText || '';
+  return new File([content], item.name.endsWith('.md') || item.name.endsWith('.txt') ? item.name : `${item.name}.txt`, {
+    type: item.type || 'text/plain',
+  });
+}
 
 export function WorkerApp() {
   const { user, logout } = useAuth();
@@ -396,85 +418,50 @@ export function WorkerApp() {
     type: string;
     fileBase64?: string;
     rawText?: string;
+    file?: File;
   }) => {
-    let filesPayload: Array<{ name: string; type: string; fileBase64?: string; rawText?: string }> = [];
+    let filesToProcess: File[] = [];
 
     if (targetFile) {
-      filesPayload = [{
-        name: targetFile.name,
-        type: targetFile.type,
-        fileBase64: targetFile.fileBase64,
-        rawText: targetFile.rawText,
-      }];
+      filesToProcess = [ensureFileObject(targetFile)];
     } else if (stagedFiles.length > 0) {
-      filesPayload = stagedFiles.map((sf) => ({
-        name: sf.name,
-        type: sf.type,
-        fileBase64: sf.fileBase64,
-        rawText: sf.rawText,
-      }));
+      filesToProcess = stagedFiles.map(ensureFileObject);
     } else if (fileBase64 || (rawText && rawText.trim().length > 0)) {
-      filesPayload = [{
+      filesToProcess = [ensureFileObject({
         name: fileName || 'Direct Text Input',
         type: fileType || 'text/plain',
         fileBase64: fileBase64 || undefined,
         rawText: rawText || undefined,
-      }];
+      })];
     }
 
-    if (filesPayload.length === 0) {
+    if (filesToProcess.length === 0) {
       setErrorMessage('Please upload a document or enter source text to analyze.');
       return;
     }
 
-    const finalName = targetFile?.name ?? (stagedFiles.length > 1 ? `${stagedFiles.length} Ingested Documents (${stagedFiles.slice(0, 2).map(f => f.name).join(', ')}${stagedFiles.length > 2 ? '...' : ''})` : (stagedFiles[0]?.name || fileName || 'Ingested Document'));
-    const finalType = targetFile?.type ?? (stagedFiles[0]?.type || fileType || 'text/plain');
-    const finalBase64 = targetFile ? targetFile.fileBase64 : (stagedFiles[0]?.fileBase64 || fileBase64);
-    const finalRawText = targetFile ? targetFile.rawText : (stagedFiles[0]?.rawText || rawText);
+    const reportTitle = targetFile?.name ?? (stagedFiles.length > 1 ? `${stagedFiles.length} Ingested Documents (${stagedFiles.slice(0, 2).map(f => f.name).join(', ')}${stagedFiles.length > 2 ? '...' : ''})` : (stagedFiles[0]?.name || fileName || 'Executive Audit Report'));
 
     setIsProcessing(true);
     setErrorMessage(null);
 
     try {
-      const token = authService.getToken();
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const response = await fetch('/api/generate-report', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          fileName: finalName,
-          fileType: finalType || 'text/plain',
-          fileBase64: finalBase64 || undefined,
-          rawText: finalRawText || undefined,
-          files: filesPayload,
-          reportType,
-          depth,
-          tone,
-          customFocus,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || errorData.error || `Server responded with status ${response.status}`);
-      }
-
-      const data = await response.json();
+      // Execute the sovereign pipeline:
+      // Phase 1 Ingestion (ALL files submitted together) -> Phase 4 Intelligence -> Phase 5 Charts -> Phase 6 AI Planner -> Phase 7 Long Report Generation
+      const result = await desktopService.runPipelineWithFiles(
+        filesToProcess,
+        customFocus,
+        reportTitle
+      );
 
       const newReport: GeneratedReport = {
-        id: data.report_id || data.job_id || `rpt-${Date.now().toString(36)}`,
-        jobId: data.job_id,
-        reportId: data.report_id,
-        fileName: finalName || 'Direct Text Input',
-        fileType: finalType,
-        reportMarkdown: data.reportMarkdown,
-        metadata: data.metadata,
+        id: result.report_id || result.job_id,
+        jobId: result.job_id,
+        reportId: result.report_id,
+        fileName: reportTitle,
+        fileType: 'application/pdf',
+        reportMarkdown: result.markdown_content,
+        metadata: result.metadata,
         customFocus,
       };
 
@@ -482,6 +469,7 @@ export function WorkerApp() {
       setActiveView('preview');
       setReportsHistory((prev) => [newReport, ...prev.slice(0, 19)]); // keep last 20
       showToast('Executive report synthesized successfully! Viewing in Preview.');
+      scrollToTop();
     } catch (err: any) {
       console.error('Report synthesis failed:', err);
       setErrorMessage(err.message || 'Failed to synthesize document into report. Please check API credentials.');
@@ -498,44 +486,14 @@ export function WorkerApp() {
   const handleDownloadExport = async (format: 'pdf' | 'docx') => {
     try {
       showToast(`Retrieving generated ${format.toUpperCase()} report...`);
-      const targetReportId = currentReport?.reportId || '';
+      const targetReportId = currentReport?.reportId || (currentReport?.id && !currentReport.id.startsWith('job_') ? currentReport.id : '');
       const targetJobId = currentReport?.jobId || (currentReport?.id?.startsWith('job_') ? currentReport.id : '');
-      const token = authService.getToken();
-      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
-      let response: Response | null = null;
-
-      // 1. Prefer existing Phase 7/8 report artifact download endpoint: /api/reports/{report_id}/download?format={format}
-      if (targetReportId) {
-        const reportUrl = `/api/reports/${encodeURIComponent(targetReportId)}/download?format=${format}`;
-        const res = await fetch(reportUrl, { headers });
-        if (res.ok) {
-          response = res;
-        }
+      if (!targetReportId && !targetJobId) {
+        throw new Error('No generated report artifact found to download.');
       }
 
-      // 2. Secondary check via existing Phase 7/8 format endpoint with job_id: /api/reports/download/{format}?job_id={job_id}
-      if (!response && targetJobId) {
-        const jobUrl = `/api/reports/download/${format}?job_id=${encodeURIComponent(targetJobId)}`;
-        const res = await fetch(jobUrl, { headers });
-        if (res.ok) {
-          response = res;
-        }
-      }
-
-      // 3. If artifact does not exist, return error and do NOT download original uploaded file
-      if (!response || !response.ok) {
-        let errorDetail = `Generated ${format.toUpperCase()} report artifact does not exist or has not been compiled yet.`;
-        if (response) {
-          try {
-            const errJson = await response.json();
-            if (errJson.detail) errorDetail = errJson.detail;
-          } catch {}
-        }
-        throw new Error(errorDetail);
-      }
-
-      const blob = await response.blob();
+      const blob = await desktopService.downloadReportArtifact(targetReportId, targetJobId, format);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -551,6 +509,7 @@ export function WorkerApp() {
     } catch (err: any) {
       console.error('Export download failed:', err);
       showToast(`Download error: ${err.message || 'Could not download report'}`);
+      throw err;
     }
   };
 
@@ -589,7 +548,7 @@ export function WorkerApp() {
   const handleSelectDashboard = () => {
     setActiveView('editor');
     setIsMobileSidebarOpen(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollToTop();
   };
 
   const scrollToTop = () => {
@@ -720,7 +679,8 @@ export function WorkerApp() {
         </div>
 
         {/* Natural Vertical Scrollable Main Content Container */}
-        <main id="main-content-scroll" className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-6 lg:px-8 py-6 sm:py-8 max-w-7xl mx-auto w-full">
+        <main id="main-content-scroll" className="flex-1 overflow-y-auto min-h-0 w-full">
+          <div className="px-4 sm:px-6 lg:px-8 py-6 sm:py-8 max-w-7xl mx-auto w-full">
           {/* Toast feedback banner */}
           {toastMessage && (
             <div className="mb-6 p-4 rounded-2xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/95 dark:bg-blue-950/70 text-blue-900 dark:text-blue-100 text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 shadow-xs animate-fade-in">
@@ -784,7 +744,7 @@ export function WorkerApp() {
           ) : activeView === 'export' ? (
             /* VIEW 3: EXPORT SECTION (PDF and DOCX options) */
             <ExportSection
-              fileName={fileName || currentReport?.fileName || uploadedFiles[0]?.name || ''}
+              fileName={currentReport?.fileName || fileName || uploadedFiles[0]?.name || ''}
               fileSize={fileSize}
               totalSlides={6}
               onBackToPreview={() => {
@@ -910,6 +870,7 @@ export function WorkerApp() {
               </div>
             </div>
           )}
+          </div>
         </main>
       </div>
 
