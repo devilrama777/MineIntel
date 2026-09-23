@@ -974,97 +974,161 @@ def trigger_evidence_extraction(
 
 
 # -------------------------------------------------------------------------
-# PHASE 3: LOCAL AI & PROVIDER-NEUTRAL INFERENCE ENDPOINTS
+# PHASE 3: AGENT EXECUTION LAYER ENDPOINTS
 # -------------------------------------------------------------------------
-@app.get("/api/ai/status")
-def get_ai_status_endpoint(
-    auth: Dict[str, Any] = Depends(require_auth)
+from fastapi import BackgroundTasks
+
+from backend.services.agent.agent_coordinator import AgentCoordinator
+from backend.services.agent.agent_store import get_agent_store
+
+
+class AgentTaskRequest(BaseModel):
+    job_id: str
+    instruction: Optional[str] = None
+
+
+def _run_agent_task(
+    job_id: str,
+    owner_id: str,
+    instruction: str,
+) -> None:
+    """
+    Background Agent execution.
+
+    The authenticated owner identity is captured server-side and passed
+    directly to the coordinator.
+    """
+    try:
+        coordinator = AgentCoordinator(owner_id=owner_id)
+        coordinator.process_task(
+            job_id=job_id,
+            prompt=instruction,
+        )
+    except Exception as exc:
+        logger.error(
+            "Background Agent task failed for job %s: %s",
+            job_id,
+            exc,
+            exc_info=True,
+        )
+
+
+@app.post("/api/agent/tasks", status_code=201)
+def create_agent_task(
+    req: AgentTaskRequest,
+    background_tasks: BackgroundTasks,
+    auth: Dict[str, Any] = Depends(require_auth),
 ):
     """
-    Detects and returns active AI provider capabilities, Ollama daemon status,
-    local model availability (qwen3:8b, qwen3-vl:8b), and registered providers.
-    Enforces Phase 0 authenticated access.
+    Creates an Agent task owned by the authenticated user.
     """
-    status = get_active_ai_status()
+
+    if not req.job_id.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="job_id is required.",
+        )
+
+    owner_id = auth["officer_id"]
+
+    instruction = (
+        req.instruction.strip()
+        if isinstance(req.instruction, str) and req.instruction.strip()
+        else "Synthesize a comprehensive report based on the provided evidence."
+    )
+
+    store = get_agent_store()
+
+    existing = store.get_task(
+        job_id=req.job_id,
+        owner_id=owner_id,
+    )
+
+    if existing:
+        return {
+            "success": True,
+            "task_id": existing.job_id,
+            "status": existing.status.value,
+            "message": "Agent task already exists for this owner and job.",
+        }
+
+    task = store.create_task(
+        owner_id=owner_id,
+        job_id=req.job_id,
+        instruction=instruction,
+    )
+
+    background_tasks.add_task(
+        _run_agent_task,
+        task.job_id,
+        owner_id,
+        instruction,
+    )
+
     return {
         "success": True,
-        "ai_status": status
+        "task_id": task.job_id,
+        "status": task.status.value,
+        "message": "Agent task started successfully.",
     }
 
 
-@app.post("/api/ai/reason")
-def generate_job_reasoning_endpoint(
-    payload: AIReasoningRequest,
-    auth: Dict[str, Any] = Depends(require_auth)
+@app.get("/api/agent/tasks/{task_id}")
+def get_agent_task_details(
+    task_id: str,
+    auth: Dict[str, Any] = Depends(require_auth),
 ):
     """
-    Synthesizes provider-neutral reasoning analysis over Phase 2 structured evidence.
-    Grounds prompt in LOCKED FACT, CALCULATED VALUE, and SUMMARIZABLE TEXT.
-    Persists derived AI ANALYSIS evidence items linked back to source facts.
-    Enforces Phase 0 ownership isolation. Gracefully handles model unavailability (no synthetic fallback).
+    Retrieves an Agent task strictly belonging to the authenticated owner.
     """
-    job = ingestion_store.get_job(payload.job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Ingestion job '{payload.job_id}' not found.")
 
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") == "Senior Officer") or (
-        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
-    )
-    if not is_master and job.get("owner_id") != auth["officer_id"]:
-        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job for AI reasoning.")
+    owner_id = auth["officer_id"]
 
-    result = ai_inference_service.generate_job_reasoning(
-        job_id=payload.job_id,
-        owner_id=auth["officer_id"],
-        provider_name=payload.provider,
-        model_name=payload.model,
-        custom_instruction=payload.custom_instruction,
-        temperature=payload.temperature or 0.2
+    task = get_agent_store().get_task(
+        job_id=task_id,
+        owner_id=owner_id,
     )
 
-    if not result.get("success"):
-        status_code = 503 if result.get("status") == "model_unavailable" else 400
-        return JSONResponse(status_code=status_code, content=result)
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail="Agent task not found.",
+        )
 
-    return result
+    return {
+        "success": True,
+        "task": task.model_dump(),
+    }
 
 
-@app.post("/api/ai/multimodal/caption")
-def generate_image_caption_endpoint(
-    payload: AIMultimodalRequest,
-    auth: Dict[str, Any] = Depends(require_auth)
+@app.get("/api/agent/tasks/{task_id}/status")
+def get_agent_task_status(
+    task_id: str,
+    auth: Dict[str, Any] = Depends(require_auth),
 ):
     """
-    Generates structured AI-GENERATED CAPTION for visual evidence items using Qwen3-VL-8B.
-    Enforces Phase 0 ownership isolation. Gracefully handles model unavailability (no synthetic fallback).
+    Retrieves high-level Agent task status for polling.
     """
-    evidence_item = evidence_store.get_evidence_by_id(payload.evidence_id)
-    if not evidence_item:
-        raise HTTPException(status_code=404, detail=f"Evidence item '{payload.evidence_id}' not found.")
 
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (auth.get("role") == "Senior Officer") or (
-        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
-    )
-    if not is_master and evidence_item.get("owner_id") != auth["officer_id"]:
-        raise HTTPException(status_code=403, detail="Forbidden: Access denied to evidence item for multimodal captioning.")
+    owner_id = auth["officer_id"]
 
-    result = ai_inference_service.generate_image_caption(
-        evidence_id=payload.evidence_id,
-        owner_id=auth["officer_id"],
-        provider_name=payload.provider,
-        model_name=payload.model,
-        custom_instruction=payload.custom_instruction
+    task = get_agent_store().get_task(
+        job_id=task_id,
+        owner_id=owner_id,
     )
 
-    if not result.get("success"):
-        status_code = 503 if result.get("status") == "model_unavailable" else 400
-        return JSONResponse(status_code=status_code, content=result)
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail="Agent task not found.",
+        )
 
-    return result
-
-
+    return {
+        "success": True,
+        "task_id": task.job_id,
+        "status": task.status.value,
+        "structured_state": task.structured_state,
+    }
 # -------------------------------------------------------------------------
 # PHASE 4: INTELLIGENCE & ORGANIZATION LAYER ENDPOINTS
 # -------------------------------------------------------------------------
