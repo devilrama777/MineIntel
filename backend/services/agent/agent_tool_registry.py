@@ -44,21 +44,77 @@ def get_all_tool_schemas() -> List[Dict[str, Any]]:
     ]
 
 
-def execute_tool(name: str, args: Dict[str, Any], owner_id: str, job_id: str) -> Dict[str, Any]:
+def execute_tool(
+    name: str,
+    args: Dict[str, Any],
+    owner_id: str,
+    job_id: str,
+) -> Dict[str, Any]:
+    """
+    Execute a registered MineIntel tool.
+
+    Tool failures are raised so the AgentCoordinator can perform
+    bounded retry handling. A failed tool must never be reported
+    as a successful execution.
+    """
+
     tool = get_tool(name)
+
     if not tool:
-        raise ValueError(f"Tool '{name}' not found in registry.")
+        raise ValueError(
+            f"Tool '{name}' not found in registry."
+        )
 
-    # Always inject owner_id and job_id for security and context
-    # If the handler doesn't support them, the wrapper must handle it.
+    if not owner_id:
+        raise ValueError(
+            "owner_id is required for tool execution."
+        )
+
+    if not job_id:
+        raise ValueError(
+            "job_id is required for tool execution."
+        )
+
+    if not isinstance(args, dict):
+        raise ValueError(
+            "Tool arguments must be a JSON object."
+        )
+
     try:
-        logger.info(f"Executing tool {name} for owner {owner_id}, job {job_id}")
-        result = tool.handler(owner_id=owner_id, job_id=job_id, **args)
-        return {"status": "success", "result": result}
-    except Exception as e:
-        logger.error(f"Error executing tool {name}: {str(e)}")
-        return {"status": "error", "error": str(e)}
+        logger.info(
+            "Executing tool %s for owner %s, job %s",
+            name,
+            owner_id,
+            job_id,
+        )
 
+        result = tool.handler(
+            owner_id=owner_id,
+            job_id=job_id,
+            **args,
+        )
+
+        return {
+            "status": "success",
+            "result": result,
+        }
+
+    except Exception as exc:
+        logger.error(
+            "Tool %s failed for job %s: %s",
+            name,
+            job_id,
+            exc,
+            exc_info=True,
+        )
+
+        # IMPORTANT:
+        # Do not convert failures into successful-looking results.
+        # The coordinator must receive the exception so it can
+        # transition to RETRYING and eventually FAILED.
+        raise RuntimeError(
+            f"Tool '{name}' execution failed: {exc}"
+        ) from exc
 
 # -----------------------------------------------------------------------------
 # Tool Handlers Wrapping Existing Services
