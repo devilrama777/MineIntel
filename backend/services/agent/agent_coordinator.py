@@ -1,193 +1,363 @@
+import json
 import logging
 import uuid
-import json
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from backend.services.agent.agent_models import AgentTaskState, AgentTaskStatus
-from backend.services.agent.agent_store import get_agent_state, save_agent_state
+from backend.services.agent.agent_models import (
+    AgentTaskState,
+    AgentTaskStatus,
+)
+from backend.services.agent.agent_store import get_agent_store
+from backend.services.agent.agent_tool_registry import (
+    execute_tool,
+    get_all_tool_schemas,
+)
+from backend.services.agent.agent_validator import (
+    AgentValidationError,
+    parse_and_validate_model_response,
+)
 from backend.services.ai_inference_service import ai_inference_service
-from backend.services.agent.agent_tool_registry import get_all_tool_schemas, execute_tool
 
 logger = logging.getLogger("mineintel.agent_coordinator")
+
 
 class AgentCoordinator:
     """
     Orchestration layer for the MineIntel Agent.
-    Coordinates between the human request, existing AI inference layer,
-    and deterministic MineIntel services (tools).
+
+    Coordinates the human request, Qwen inference, and existing
+    deterministic MineIntel tools.
     """
 
     def __init__(self, owner_id: str):
-        """
-        Initializes the coordinator.
-        The owner_id is strictly required to enforce isolation at the agent level.
-        """
         if not owner_id:
-            raise ValueError("owner_id is strictly required for AgentCoordinator isolation.")
-        self.owner_id = owner_id
+            raise ValueError(
+                "owner_id is strictly required for AgentCoordinator isolation."
+            )
 
-    def initialize_task(self, job_id: Optional[str] = None) -> AgentTaskState:
-        """Initializes a new task state."""
+        self.owner_id = owner_id
+        self.store = get_agent_store()
+
+    def initialize_task(
+        self,
+        job_id: Optional[str] = None,
+        instruction: str = "",
+    ) -> AgentTaskState:
+        """
+        Initialize and persist a new Agent task.
+        """
+
         if not job_id:
             job_id = str(uuid.uuid4())
-            
-        state = AgentTaskState(
-            job_id=job_id,
+
+        return self.store.create_task(
             owner_id=self.owner_id,
-            status=AgentTaskStatus.PENDING
+            job_id=job_id,
+            instruction=instruction,
         )
-        save_agent_state(state.dict())
-        return state
 
     def get_task_state(self, job_id: str) -> Optional[AgentTaskState]:
-        """Retrieves an existing task state, strictly checking owner_id."""
-        state_dict = get_agent_state(job_id, self.owner_id)
-        if state_dict:
-            return AgentTaskState(**state_dict)
-        return None
+        """
+        Retrieve task state with owner isolation.
+        """
+
+        return self.store.get_task(
+            job_id=job_id,
+            owner_id=self.owner_id,
+        )
 
     def _build_system_prompt(self) -> str:
         tools = get_all_tool_schemas()
-        return f"""You are the MineIntel Agent, a strict reasoning engine.
-You have access to the following deterministic tools:
+
+        return f"""
+You are the MineIntel Agent orchestration engine.
+
+You do NOT directly manipulate files, databases, reports, or application state.
+You may only request execution through registered MineIntel tools.
+
+Available tools:
 {json.dumps(tools, indent=2)}
 
-You must respond in valid JSON matching one of these two structures:
+You MUST respond with exactly one JSON object using this structure:
 
-To call a tool:
 {{
-  "action": "tool_call",
-  "tool_name": "<name_of_tool>",
-  "args": {{...}},
-  "reasoning": "Why you are calling this tool"
+  "status": "IN_PROGRESS",
+  "selected_action": {{
+    "tool": "tool_name",
+    "parameters": {{}}
+  }},
+  "concise_rationale": "Short explanation of the selected action.",
+  "completion_signal": false
 }}
 
-To complete the task:
-{{
-  "action": "completed",
-  "result": "<final answer or summary>",
-  "reasoning": "Why the task is complete"
-}}
+Supported selected_action.tool values:
 
-CONFLICT POLICY:
-- If you detect conflicting information, document both sources in your output.
-- NEVER silently choose a value. NEVER invent a resolution.
+- call_tool
+- synthesize_text
+- request_clarification
+- declare_complete
+
+Rules:
+
+1. Never return raw chain-of-thought.
+2. Never use fields named reasoning, thought_process, analysis,
+   or chain_of_thought.
+3. Use concise_rationale only.
+4. Never invent tool capabilities.
+5. Never invent source data or numerical values.
+6. Conflicting source values must be preserved and flagged.
+7. Do not silently resolve conflicting evidence.
+8. All application actions must go through registered tools.
 """
 
-    def process_task(self, job_id: str, prompt: str, images: Optional[List[str]] = None) -> AgentTaskState:
+
+    def _save(self, state: AgentTaskState) -> AgentTaskState:
+        return self.store.update_task(state)
+
+
+    def process_task(
+        self,
+        job_id: str,
+        prompt: str,
+        images: Optional[List[str]] = None,
+    ) -> AgentTaskState:
         """
-        Main execution loop.
-        Phase 2: Full orchestration with tool calls and retries.
+        Execute the Agent task using a bounded orchestration loop.
         """
+
         state = self.get_task_state(job_id)
+
         if not state:
-            logger.error(f"Task {job_id} not found for owner {self.owner_id}")
             raise ValueError("Task not found or unauthorized.")
 
-        if state.status in [AgentTaskStatus.COMPLETED, AgentTaskStatus.FAILED]:
-            logger.info(f"Task {job_id} is already in terminal state: {state.status}")
+        if state.status in {
+            AgentTaskStatus.COMPLETED,
+            AgentTaskStatus.FAILED,
+        }:
             return state
 
         state.status = AgentTaskStatus.RUNNING
-        save_agent_state(state.dict())
-        
-        logger.info(f"Agent Coordinator: starting execution for job {job_id}")
-        
+        self._save(state)
+
         system_instruction = self._build_system_prompt()
+
         max_retries = 3
         retry_count = 0
-        
-        # We loop up to 10 iterations to prevent infinite loops
         max_iterations = 10
         iterations = 0
-        
-        while state.status == AgentTaskStatus.RUNNING and iterations < max_iterations:
+
+        while (
+            state.status == AgentTaskStatus.RUNNING
+            and iterations < max_iterations
+        ):
             iterations += 1
-            
-            # Construct the prompt history
-            history_text = "\n".join([json.dumps(h) for h in state.execution_history])
-            full_prompt = f"Objective: {prompt}\n\nHistory:\n{history_text}\n\nRespond with JSON."
-            
+
+            history_text = "\n".join(
+                json.dumps(event)
+                for event in state.execution_history
+            )
+
+            full_prompt = (
+                f"Objective:\n{prompt}\n\n"
+                f"Execution history:\n{history_text}\n\n"
+                "Return only the required JSON object."
+            )
+
             try:
-                # Use the existing AI inference provider registry via AIInferenceService
                 provider = ai_inference_service._get_provider()
+
                 from backend.services.ai_providers.base import AIRequest
-                req = AIRequest(
+
+                request = AIRequest(
                     prompt=full_prompt,
                     system_instruction=system_instruction,
                     temperature=0.1,
                     job_id=job_id,
                     owner_id=self.owner_id,
-                    images=images if images else []
+                    images=images if images and iterations == 1 else [],
                 )
-                
-                if images and iterations == 1: # Only send images on the first prompt to avoid overloading context
-                    resp = provider.generate_multimodal(req)
+
+                if images and iterations == 1:
+                    response = provider.generate_multimodal(request)
                 else:
-                    req.images = [] # Clear images for subsequent calls
-                    resp = provider.generate(req)
-                    
-                if not resp.success:
-                    raise Exception(f"AI Provider failed: {resp.error}")
-                
-                # Parse JSON
-                try:
-                    raw_text = resp.text.strip()
-                    if raw_text.startswith("```json"):
-                        raw_text = raw_text[7:]
-                    elif raw_text.startswith("```"):
-                        raw_text = raw_text[3:]
-                    if raw_text.endswith("```"):
-                        raw_text = raw_text[:-3]
-                    decision = json.loads(raw_text.strip())
-                except json.JSONDecodeError:
-                    raise ValueError(f"AI did not return valid JSON. Raw output: {resp.text}")
+                    response = provider.generate(request)
 
-                action = decision.get("action")
-                reasoning = decision.get("reasoning", "")
-                
-                state.execution_history.append({"role": "agent", "content": decision})
-                save_agent_state(state.dict())
+                if not response.success:
+                    raise RuntimeError(
+                        f"AI provider failed: {response.error}"
+                    )
 
-                if action == "tool_call":
-                    tool_name = decision.get("tool_name")
-                    args = decision.get("args", {})
-                    
-                    logger.info(f"Agent executing tool {tool_name}")
-                    result = execute_tool(tool_name, args, self.owner_id, job_id)
-                    
-                    state.execution_history.append({"role": "tool", "tool_name": tool_name, "result": result})
-                    save_agent_state(state.dict())
-                    # State remains RUNNING to loop again
-                    retry_count = 0 # reset retries on successful loop iteration
-                    
-                elif action == "completed":
+                decision = parse_and_validate_model_response(
+                    response.text
+                )
+
+                action = decision["selected_action"]
+                tool = action["tool"]
+                parameters = action["parameters"]
+
+                # Persist only safe structured execution data.
+                state.execution_history.append(
+                    {
+                        "type": "agent_decision",
+                        "tool": tool,
+                        "parameters": parameters,
+                        "concise_rationale": decision[
+                            "concise_rationale"
+                        ],
+                        "completion_signal": decision[
+                            "completion_signal"
+                        ],
+                    }
+                )
+
+                self._save(state)
+
+                if tool == "call_tool":
+                    tool_name = parameters.get("tool_name")
+                    tool_parameters = parameters.get("parameters", {})
+
+                    if not isinstance(tool_name, str) or not tool_name:
+                        raise AgentValidationError(
+                            "call_tool requires parameters.tool_name."
+                        )
+
+                    if not isinstance(tool_parameters, dict):
+                        raise AgentValidationError(
+                            "call_tool parameters.parameters must be an object."
+                        )
+
+                    result = execute_tool(
+                        tool_name,
+                        tool_parameters,
+                        self.owner_id,
+                        job_id,
+                    )
+
+                    state.execution_history.append(
+                        {
+                            "type": "tool_observation",
+                            "tool": tool_name,
+                            "result": result,
+                        }
+                    )
+
+                    self._save(state)
+
+                    retry_count = 0
+                    continue
+
+                if tool == "synthesize_text":
+                    synthesis = parameters.get("text")
+
+                    if not isinstance(synthesis, str):
+                        raise AgentValidationError(
+                            "synthesize_text requires parameters.text."
+                        )
+
+                    state.structured_state["synthesized_text"] = synthesis
+                    state.execution_history.append(
+                        {
+                            "type": "synthesis",
+                            "result": synthesis,
+                        }
+                    )
+
+                    self._save(state)
+
+                    if decision["completion_signal"]:
+                        state.status = AgentTaskStatus.COMPLETED
+                        self._save(state)
+
+                    continue
+
+                if tool == "request_clarification":
+                    state.status = AgentTaskStatus.AWAITING_INPUT
+
+                    state.structured_state[
+                        "clarification_request"
+                    ] = parameters.get("question", "")
+
+                    state.execution_history.append(
+                        {
+                            "type": "clarification_requested",
+                            "question": parameters.get("question", ""),
+                        }
+                    )
+
+                    self._save(state)
+                    break
+
+                if tool == "declare_complete":
                     state.status = AgentTaskStatus.COMPLETED
-                    state.structured_state["final_result"] = decision.get("result")
-                    save_agent_state(state.dict())
-                    break
-                else:
-                    raise ValueError(f"Unknown action: {action}")
 
-            except Exception as e:
-                logger.warning(f"Error during agent loop: {str(e)}")
+                    state.structured_state["final_result"] = (
+                        parameters.get("result", "")
+                    )
+
+                    state.execution_history.append(
+                        {
+                            "type": "completed",
+                            "result": parameters.get("result", ""),
+                        }
+                    )
+
+                    self._save(state)
+                    break
+
+                raise AgentValidationError(
+                    f"Unsupported validated action: {tool}"
+                )
+
+            except Exception as exc:
+                logger.warning(
+                    "Agent execution error for %s: %s",
+                    job_id,
+                    exc,
+                )
+
                 state.status = AgentTaskStatus.RETRYING
-                state.execution_history.append({"role": "system", "error": str(e)})
-                save_agent_state(state.dict())
-                retry_count += 1
-                if retry_count >= max_retries:
-                    logger.error(f"Max retries reached for task {job_id}")
-                    state.status = AgentTaskStatus.FAILED
-                    save_agent_state(state.dict())
-                    break
-                else:
-                    # Transition back to RUNNING to retry parsing/prompting
-                    state.status = AgentTaskStatus.RUNNING
 
-        if iterations >= max_iterations and state.status == AgentTaskStatus.RUNNING:
-            logger.error(f"Max iterations reached for task {job_id}")
+                state.execution_history.append(
+                    {
+                        "type": "execution_error",
+                        "error": str(exc),
+                        "retry_count": retry_count + 1,
+                    }
+                )
+
+                self._save(state)
+
+                retry_count += 1
+
+                if retry_count >= max_retries:
+                    state.status = AgentTaskStatus.FAILED
+
+                    state.execution_history.append(
+                        {
+                            "type": "terminal_error",
+                            "error": "Maximum retry count reached.",
+                        }
+                    )
+
+                    self._save(state)
+                    break
+
+                state.status = AgentTaskStatus.RUNNING
+                self._save(state)
+
+        if (
+            iterations >= max_iterations
+            and state.status == AgentTaskStatus.RUNNING
+        ):
             state.status = AgentTaskStatus.FAILED
-            state.execution_history.append({"role": "system", "error": "Max agent iterations reached."})
-            save_agent_state(state.dict())
-            
+
+            state.execution_history.append(
+                {
+                    "type": "terminal_error",
+                    "error": "Maximum agent iterations reached.",
+                }
+            )
+
+            self._save(state)
+
         return state
