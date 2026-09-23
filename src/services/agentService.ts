@@ -9,64 +9,65 @@
  */
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, "") || "";
+  import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '') || '';
 
 export type AgentTaskStatus =
-  | "PENDING"
-  | "RUNNING"
-  | "AWAITING_INPUT"
-  | "VALIDATING"
-  | "RETRYING"
-  | "COMPLETED"
-  | "FAILED";
+  | 'PENDING'
+  | 'RUNNING'
+  | 'AWAITING_INPUT'
+  | 'VALIDATING'
+  | 'RETRYING'
+  | 'COMPLETED'
+  | 'FAILED';
 
 export interface CreateAgentTaskRequest {
-  goal: string;
-  file_ids?: string[];
-  context?: Record<string, unknown>;
+  job_id: string;
+  instruction?: string;
 }
 
-export interface AgentTaskResponse {
+export interface CreateAgentTaskResponse {
+  success: boolean;
   task_id: string;
   status: AgentTaskStatus;
-  owner_id?: string;
-  created_at?: string;
-  updated_at?: string;
-  result?: Record<string, unknown> | null;
-  error?: string | null;
+  message?: string;
 }
 
 export interface AgentTaskStatusResponse {
+  success: boolean;
   task_id: string;
   status: AgentTaskStatus;
-  result?: Record<string, unknown> | null;
-  error?: string | null;
+  structured_state?: Record<string, unknown>;
+}
+
+export interface AgentTaskDetailsResponse {
+  success: boolean;
+  task: Record<string, unknown>;
 }
 
 function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem("token");
+  const token = localStorage.getItem('token');
 
   return {
-    "Content-Type": "application/json",
+    'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
-  const contentType = response.headers.get("content-type") || "";
+  const contentType = response.headers.get('content-type') || '';
 
-  const body = contentType.includes("application/json")
+  const body = contentType.includes('application/json')
     ? await response.json()
     : await response.text();
 
   if (!response.ok) {
     const message =
-      typeof body === "object" &&
+      typeof body === 'object' &&
       body !== null &&
-      "detail" in body &&
-      typeof body.detail === "string"
+      'detail' in body &&
+      typeof body.detail === 'string'
         ? body.detail
-        : typeof body === "string"
+        : typeof body === 'string'
           ? body
           : `Agent request failed with HTTP ${response.status}`;
 
@@ -76,51 +77,42 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return body as T;
 }
 
-/**
- * Create a new Agent task.
- */
 export async function createAgentTask(
   request: CreateAgentTaskRequest,
-): Promise<AgentTaskResponse> {
+): Promise<CreateAgentTaskResponse> {
   const response = await fetch(`${API_BASE_URL}/api/agent/tasks`, {
-    method: "POST",
+    method: 'POST',
     headers: getAuthHeaders(),
     body: JSON.stringify(request),
   });
 
-  return parseResponse<AgentTaskResponse>(response);
+  return parseResponse<CreateAgentTaskResponse>(response);
 }
 
-/**
- * Fetch complete Agent task details.
- */
-export async function getAgentTask(
-  taskId: string,
-): Promise<AgentTaskResponse> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/agent/tasks/${encodeURIComponent(taskId)}`,
-    {
-      method: "GET",
-      headers: getAuthHeaders(),
-    },
-  );
-
-  return parseResponse<AgentTaskResponse>(response);
-}
-
-/**
- * Fetch lightweight Agent task status.
- */
 export async function getAgentTaskStatus(
   taskId: string,
 ): Promise<AgentTaskStatusResponse> {
   const response = await fetch(
     `${API_BASE_URL}/api/agent/tasks/${encodeURIComponent(taskId)}/status`,
     {
-      method: "GET",
+      method: 'GET',
       headers: getAuthHeaders(),
     },
   );
 
   return parseResponse<AgentTaskStatusResponse>(response);
+}
+
+export async function getAgentTask(
+  taskId: string,
+): Promise<AgentTaskDetailsResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/agent/tasks/${encodeURIComponent(taskId)}`,
+    {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    },
+  );
+
+  return parseResponse<AgentTaskDetailsResponse>(response);
 }
