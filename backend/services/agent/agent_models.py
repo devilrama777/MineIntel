@@ -26,8 +26,15 @@ class AgentTaskState(BaseModel):
     # Conflict policy metadata
     conflict_logs: List[Dict[str, Any]] = Field(default_factory=list, description="Logs documenting conflicts detected across sources.")
     
-    # Agent execution history / traces
-    execution_history: List[Dict[str, Any]] = Field(default_factory=list, description="History of thoughts, tool calls, and transitions.")
+# Agent execution history / safe structured events
+execution_history: List[Dict[str, Any]] = Field(
+    default_factory=list,
+    description=(
+        "Safe structured execution events including tool calls, "
+        "observations, concise rationale, validation results, "
+        "state transitions, and errors. Raw model reasoning is never stored."
+    )
+)
     
     created_at: int = Field(default=0, description="Creation timestamp in milliseconds.")
     updated_at: int = Field(default=0, description="Last update timestamp in milliseconds.")
