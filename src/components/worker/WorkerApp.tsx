@@ -58,7 +58,10 @@ import {
   FileText, 
   ShieldCheck, 
   Zap, 
-  AlertCircle
+  AlertCircle,
+  CheckCircle2,
+  Layers,
+  FileCheck
 } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { useAuth } from '../../context/AuthContext';
@@ -154,18 +157,7 @@ export function WorkerApp() {
     }
   }, [uploadedFiles]);
 
-  // Set default active file on first load if available
-  useEffect(() => {
-    if (uploadedFiles.length > 0 && !fileName) {
-      const first = uploadedFiles[0];
-      setFileName(first.name);
-      setFileType(first.type);
-      setFileSize(first.size);
-      setFileBase64(first.fileBase64 || '');
-      setRawText(first.rawText || '');
-      setActiveFileId(first.id);
-    }
-  }, []);
+  // Initial workspace starts clean with no pre-selected documents
 
   // Configuration State
   const [reportType, setReportType] = useState<ReportType>('executive');
@@ -175,7 +167,7 @@ export function WorkerApp() {
 
   // Execution & Output State
   const [activeView, setActiveView] = useState<ActiveView>('editor');
-  const [taskStatus, setTaskStatus] = useState<'IDLE' | 'PENDING' | 'RUNNING' | 'VALIDATING' | 'COMPLETED' | 'FAILED'>('IDLE');
+  const [taskStatus, setTaskStatus] = useState<'IDLE' | 'PENDING' | 'RUNNING' | 'AWAITING_INPUT' | 'VALIDATING' | 'RETRYING' | 'COMPLETED' | 'FAILED'>('IDLE');
   const isProcessing = taskStatus !== 'IDLE' && taskStatus !== 'COMPLETED' && taskStatus !== 'FAILED';
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentReport, setCurrentReport] = useState<GeneratedReport | null>(null);
@@ -203,6 +195,47 @@ export function WorkerApp() {
 
   // Staged files for multi-file upload in Data Source
   const [stagedFiles, setStagedFiles] = useState<UploadedDataSourceFile[]>([]);
+
+  // Multi-document selection in New Report repository (starts empty)
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  const [currentTool, setCurrentTool] = useState<string>('');
+  const [currentStage, setCurrentStage] = useState<string>('');
+  const [progressReason, setProgressReason] = useState<string>('');
+
+  useEffect(() => {
+    setSelectedFileIds((prev) => prev.filter((id) => uploadedFiles.some((f) => f.id === id)));
+  }, [uploadedFiles]);
+
+  const toggleSelectFile = (fileId: string) => {
+    setSelectedFileIds((prev) =>
+      prev.includes(fileId) ? prev.filter((id) => id !== fileId) : [...prev, fileId]
+    );
+  };
+
+  const handleSelectAllFiles = () => {
+    setSelectedFileIds(uploadedFiles.map((f) => f.id));
+  };
+
+  const handleClearFileSelection = () => {
+    setSelectedFileIds([]);
+  };
+
+  const handleGenerateSelectedReports = async () => {
+    const selected = uploadedFiles.filter((f) => selectedFileIds.includes(f.id));
+    if (selected.length === 0) {
+      setErrorMessage('Please select at least one document to generate a report.');
+      return;
+    }
+    await executeReportGeneration({ selectedDocs: selected });
+  };
+
+  const handleGenerateAllReports = async () => {
+    if (uploadedFiles.length === 0) {
+      setErrorMessage('No documents available in repository to generate a report.');
+      return;
+    }
+    await executeReportGeneration({ selectedDocs: uploadedFiles });
+  };
 
   // Handle multiple files selection in Data Source Upload Document & Ingest
   const handleFilesSelected = (files: File[]) => {
@@ -414,19 +447,49 @@ export function WorkerApp() {
   };
 
   // Core Report Generation
-  const executeReportGeneration = async (targetFile?: {
-    name: string;
-    type: string;
-    fileBase64?: string;
-    rawText?: string;
-    file?: File;
+  const executeReportGeneration = async (options?: {
+    targetFile?: {
+      name: string;
+      type: string;
+      fileBase64?: string;
+      rawText?: string;
+      file?: File;
+    };
+    selectedDocs?: UploadedDataSourceFile[];
   }) => {
     let filesToProcess: File[] = [];
+    let reportTitle = '';
 
-    if (targetFile) {
-      filesToProcess = [ensureFileObject(targetFile)];
+    if (options?.targetFile) {
+      // 1. Single document passed explicitly (e.g. from table row action)
+      filesToProcess = [ensureFileObject(options.targetFile)];
+      reportTitle = `Executive Audit: ${options.targetFile.name}`;
+    } else if (options?.selectedDocs && options.selectedDocs.length > 0) {
+      // 2. Specific multi-document set passed explicitly
+      filesToProcess = options.selectedDocs.map(ensureFileObject);
+      reportTitle = filesToProcess.length === 1
+        ? `Executive Audit: ${options.selectedDocs[0].name}`
+        : `Multi-Source Dossier (${filesToProcess.length} Ingested Documents)`;
+    } else if (selectedFileIds.length > 0) {
+      // 3. User selected documents from multi-select checkboxes
+      const selected = uploadedFiles.filter((f) => selectedFileIds.includes(f.id));
+      if (selected.length > 0) {
+        filesToProcess = selected.map(ensureFileObject);
+        reportTitle = filesToProcess.length === 1
+          ? `Executive Audit: ${selected[0].name}`
+          : `Multi-Source Dossier (${filesToProcess.length} Ingested Documents)`;
+      }
     } else if (stagedFiles.length > 0) {
       filesToProcess = stagedFiles.map(ensureFileObject);
+      reportTitle = stagedFiles.length === 1
+        ? `Executive Audit: ${stagedFiles[0].name}`
+        : `Multi-Source Dossier (${stagedFiles.length} Ingested Documents)`;
+    } else if (activeFileId) {
+      const active = uploadedFiles.find((f) => f.id === activeFileId);
+      if (active) {
+        filesToProcess = [ensureFileObject(active)];
+        reportTitle = `Executive Audit: ${active.name}`;
+      }
     } else if (fileBase64 || (rawText && rawText.trim().length > 0)) {
       filesToProcess = [ensureFileObject({
         name: fileName || 'Direct Text Input',
@@ -434,16 +497,18 @@ export function WorkerApp() {
         fileBase64: fileBase64 || undefined,
         rawText: rawText || undefined,
       })];
+      reportTitle = `Executive Audit: ${fileName || 'Direct Text Input'}`;
     }
 
     if (filesToProcess.length === 0) {
-      setErrorMessage('Please upload a document or enter source text to analyze.');
+      setErrorMessage('Please upload or select at least one document to analyze.');
       return;
     }
 
-    const reportTitle = targetFile?.name ?? (stagedFiles.length > 1 ? `${stagedFiles.length} Ingested Documents (${stagedFiles.slice(0, 2).map(f => f.name).join(', ')}${stagedFiles.length > 2 ? '...' : ''})` : (stagedFiles[0]?.name || fileName || 'Executive Audit Report'));
-
     setTaskStatus('PENDING');
+    setCurrentTool('');
+    setCurrentStage('');
+    setProgressReason('');
     setErrorMessage(null);
 
     try {
@@ -452,8 +517,17 @@ export function WorkerApp() {
         filesToProcess,
         customFocus,
         reportTitle,
-        (status) => {
+        (status, detail) => {
           setTaskStatus(status);
+          if (detail?.currentTool !== undefined) {
+            setCurrentTool(detail.currentTool || '');
+          }
+          if (detail?.currentStage !== undefined) {
+            setCurrentStage(detail.currentStage || '');
+          }
+          if (detail?.progressReason !== undefined) {
+            setProgressReason(detail.progressReason || '');
+          }
         }
       );
 
@@ -522,10 +596,13 @@ export function WorkerApp() {
   const handleGenerateReportForFile = async (fileItem: UploadedDataSourceFile) => {
     handleSelectUploadedFile(fileItem);
     await executeReportGeneration({
-      name: fileItem.name,
-      type: fileItem.type,
-      fileBase64: fileItem.fileBase64,
-      rawText: fileItem.rawText,
+      targetFile: {
+        name: fileItem.name,
+        type: fileItem.type,
+        fileBase64: fileItem.fileBase64,
+        rawText: fileItem.rawText,
+        file: fileItem.file,
+      },
     });
   };
 
@@ -570,9 +647,13 @@ export function WorkerApp() {
     setCurrentReport(null);
     handleClearFile();
     setCustomFocus('');
+    setSelectedFileIds([]);
+    setTaskStatus('IDLE');
+    setCurrentTool('');
+    setErrorMessage(null);
     setActiveView('editor');
     setIsMobileSidebarOpen(false);
-    showToast('Ready to create a new report! Upload a document to begin.');
+    showToast('Ready to create a new report! Select documents from the repository below.');
     scrollToTop();
   };
 
@@ -616,7 +697,18 @@ export function WorkerApp() {
     scrollToTop();
   };
 
-  const canGenerate = Boolean(stagedFiles.length > 0 || fileBase64 || rawText.trim().length > 0);
+  const canGenerate = Boolean(
+    selectedFileIds.length > 0 ||
+    stagedFiles.length > 0 ||
+    Boolean(activeFileId) ||
+    Boolean(fileName && (fileBase64 || rawText.trim().length > 0))
+  );
+
+  const activeTargetName = selectedFileIds.length > 1
+    ? `${selectedFileIds.length} Selected Documents`
+    : (selectedFileIds.length === 1
+        ? (uploadedFiles.find((f) => f.id === selectedFileIds[0])?.name || fileName)
+        : (fileName || (activeFileId ? uploadedFiles.find((f) => f.id === activeFileId)?.name : '')));
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#f4f8ff] dark:bg-[#070e1c] text-neutral-900 dark:text-neutral-50 transition-colors duration-200">
@@ -843,8 +935,116 @@ export function WorkerApp() {
                 </div>
               </div>
 
+              {/* Multi-Document Selection & Batch Synthesis Panel */}
+              {uploadedFiles.length > 0 && (
+                <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-[#0b162a] border border-blue-900/20 dark:border-blue-500/20 shadow-sm space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 rounded-2xl bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-900/60">
+                        <Layers className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-outfit text-base sm:text-lg font-extrabold text-neutral-900 dark:text-white">
+                            Multi-Document Report Synthesis
+                          </h3>
+                          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900">
+                            {selectedFileIds.length} of {uploadedFiles.length} Selected
+                          </span>
+                        </div>
+                        <p className="text-xs text-neutral-500 dark:text-blue-200/70 mt-0.5">
+                          Select multiple ingested documents to generate a single unified executive intelligence dossier with the Agent.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Quick selection actions */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSelectAllFiles}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-neutral-100 hover:bg-neutral-200 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-neutral-800 dark:text-blue-200 border border-neutral-200 dark:border-blue-900/60 transition-all cursor-pointer"
+                      >
+                        Select All ({uploadedFiles.length})
+                      </button>
+                      {selectedFileIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleClearFileSelection}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold text-neutral-500 hover:text-neutral-700 dark:text-blue-300/70 dark:hover:text-blue-200 transition-all cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Multi-select Document Checkbox Chips */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+                    {uploadedFiles.map((doc) => {
+                      const isSelected = selectedFileIds.includes(doc.id);
+                      return (
+                        <label
+                          key={doc.id}
+                          className={`flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer select-none ${
+                            isSelected
+                              ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/50 ring-1 ring-blue-500/40 text-blue-900 dark:text-blue-100'
+                              : 'border-neutral-200 dark:border-blue-900/30 hover:border-neutral-300 dark:hover:border-blue-800/50 bg-neutral-50/40 dark:bg-[#070e1c]/40 text-neutral-700 dark:text-neutral-300'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectFile(doc.id)}
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-neutral-300 dark:border-blue-800 cursor-pointer"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold truncate" title={doc.name}>
+                              {doc.name}
+                            </p>
+                            <p className="text-[11px] text-neutral-400 dark:text-blue-300/60 truncate">
+                              {doc.type.includes('pdf') ? 'PDF' : doc.name.split('.').pop()?.toUpperCase() || 'DOC'} • {doc.uploadedAt || 'Ingested'}
+                            </p>
+                          </div>
+                          {isSelected && <CheckCircle2 className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />}
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {/* Synthesis Action Buttons */}
+                  <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-neutral-100 dark:border-blue-900/40">
+                    <button
+                      type="button"
+                      id="btn-generate-selected-reports"
+                      onClick={() => handleGenerateSelectedReports()}
+                      disabled={isProcessing || selectedFileIds.length === 0}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-blue-600/20 transition-all cursor-pointer"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      <span>
+                        Generate Report from Selected Documents ({selectedFileIds.length})
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      id="btn-generate-all-reports"
+                      onClick={() => handleGenerateAllReports()}
+                      disabled={isProcessing || uploadedFiles.length === 0}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold text-neutral-800 dark:text-blue-200 bg-neutral-100 hover:bg-neutral-200 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 border border-neutral-200 dark:border-blue-900/60 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                    >
+                      <FileCheck className="w-4 h-4 text-emerald-500" />
+                      <span>
+                        Generate Report from All Ingested Documents ({uploadedFiles.length})
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Source Documents Repository from Data Source */}
-              <div className="w-full">
+              <div id="uploaded-repository-container" className="w-full">
                 <UploadedFilesList
                   files={uploadedFiles}
                   activeFileId={activeFileId}
@@ -859,7 +1059,7 @@ export function WorkerApp() {
               {/* AI Auto Prompt Generator & Search Engine */}
               <div className="w-full">
                 <AIGenerateEngine
-                  fileName={fileName}
+                  fileName={activeTargetName}
                   customPrompt={customFocus}
                   onCustomPromptChange={setCustomFocus}
                   onGenerate={handleGenerateReport}
@@ -867,7 +1067,11 @@ export function WorkerApp() {
                   isProcessing={isProcessing}
                   onFocusFileSelection={() => {
                     if (uploadedFiles.length > 0) {
-                      handleSelectUploadedFile(uploadedFiles[0]);
+                      showToast('Please select one or more documents from the repository above.');
+                      const repoEl = document.getElementById('uploaded-repository-container');
+                      if (repoEl) {
+                        repoEl.scrollIntoView({ behavior: 'smooth' });
+                      }
                     } else {
                       handleSelectDataSource();
                     }
@@ -880,13 +1084,19 @@ export function WorkerApp() {
         </main>
       </div>
 
-      {/* Active Processing Overlay with animated funnel & MineIntel logo */}
+      {/* Active Processing Overlay with real Agent status */}
       {isProcessing && (
         <ProcessingOverlay
-          fileName={fileName}
+          fileName={
+            activeTargetName || (uploadedFiles.length > 1 ? `${uploadedFiles.length} Ingested Documents` : 'Source Document')
+          }
           isDark={isDark}
           onCancel={() => setTaskStatus('IDLE')}
-          statusMessage={`Agent Status: ${taskStatus}`}
+          agentStatus={taskStatus}
+          currentTool={currentTool}
+          currentStage={currentStage}
+          progressReason={progressReason}
+          statusMessage={errorMessage || undefined}
         />
       )}
 

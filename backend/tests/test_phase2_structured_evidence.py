@@ -83,25 +83,25 @@ class TestPhase2StructuredEvidence(unittest.TestCase):
         evidence_store.EVIDENCE_FILE = config.DATA_DIR / "structured_evidence.json"
 
         cls.master_officer = os.environ["MINEINTEL_OFFICER_ID"]
-        cls.master_token = create_session_token(cls.master_officer, role="Senior Operational Auditor")
+        cls.master_token = create_session_token(cls.master_officer, role="Senior Senior Officer")
 
         if not auth_store.get_user_by_id("MOC-PHASE2-A"):
             auth_store.create_user(
                 officer_id="MOC-PHASE2-A",
                 password="AuditorPassword123!",
                 display_name="Auditor Alpha 2",
-                role="Operational Auditor"
+                role="Senior Officer"
             )
-        cls.user_a_token = create_session_token("MOC-PHASE2-A", role="Operational Auditor")
+        cls.user_a_token = create_session_token("MOC-PHASE2-A", role="Senior Officer")
 
         if not auth_store.get_user_by_id("MOC-PHASE2-B"):
             auth_store.create_user(
                 officer_id="MOC-PHASE2-B",
                 password="AuditorPassword456!",
                 display_name="Auditor Beta 2",
-                role="Operational Auditor"
+                role="Senior Officer"
             )
-        cls.user_b_token = create_session_token("MOC-PHASE2-B", role="Operational Auditor")
+        cls.user_b_token = create_session_token("MOC-PHASE2-B", role="Senior Officer")
 
     @classmethod
     def tearDownClass(cls):
@@ -441,7 +441,7 @@ class TestPhase2StructuredEvidence(unittest.TestCase):
             UploadFile(filename="clearance.docx", file=io.BytesIO(docx_bytes))
         ]
 
-        auth_user_a = {"officer_id": "MOC-PHASE2-A", "role": "Operational Auditor"}
+        auth_user_a = {"officer_id": "MOC-PHASE2-A", "role": "Senior Officer"}
 
         # Ingest files (automatically extracts and persists structured evidence)
         res = asyncio.run(create_ingestion_job(files=upload_files, auth=auth_user_a))
@@ -487,9 +487,9 @@ class TestPhase2StructuredEvidence(unittest.TestCase):
 
         csv_bytes = self._create_sample_csv()
         upload_files = [UploadFile(filename="confidential_audit.csv", file=io.BytesIO(csv_bytes))]
-        auth_user_a = {"officer_id": "MOC-PHASE2-A", "role": "Operational Auditor"}
-        auth_user_b = {"officer_id": "MOC-PHASE2-B", "role": "Operational Auditor"}
-        auth_master = {"officer_id": self.master_officer, "role": "Senior Operational Auditor"}
+        auth_user_a = {"officer_id": "MOC-PHASE2-A", "role": "Senior Officer"}
+        auth_user_b = {"officer_id": "MOC-PHASE2-B", "role": "Senior Officer"}
+        auth_master = {"officer_id": self.master_officer, "role": "Senior Senior Officer"}
 
         # User A creates job
         res = asyncio.run(create_ingestion_job(files=upload_files, auth=auth_user_a))

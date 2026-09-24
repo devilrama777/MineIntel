@@ -381,6 +381,14 @@ class IngestionEngine:
                 continue
 
         if df is None:
+            if raw_path.suffix.lower() in [".txt", ".md"]:
+                content = raw_path.read_text(encoding="utf-8", errors="replace")
+                lines = [l for l in content.splitlines() if l.strip()]
+                prov_list = [
+                    ProvenanceRecord(source_type="text", provenance=f"Para {i+1}", snippet=line[:150])
+                    for i, line in enumerate(lines[:100])
+                ]
+                return content, "text", prov_list, {"line_count": len(lines)}
             df = pd.read_csv(raw_path, sep=None, engine="python")
 
         row_count, col_count = df.shape

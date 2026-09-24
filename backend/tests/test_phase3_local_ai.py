@@ -73,18 +73,18 @@ class TestPhase3LocalAI(unittest.TestCase):
         auth_store.create_user(
             officer_id="OFFICER_A",
             password="PassA123!",
-            role="Operational Auditor",
+            role="Senior Officer",
             display_name="Auditor Alpha"
         )
         auth_store.create_user(
             officer_id="OFFICER_B",
             password="PassB123!",
-            role="Operational Auditor",
+            role="Senior Officer",
             display_name="Auditor Beta"
         )
 
-        self.auth_a = {"officer_id": "OFFICER_A", "role": "Operational Auditor"}
-        self.auth_b = {"officer_id": "OFFICER_B", "role": "Operational Auditor"}
+        self.auth_a = {"officer_id": "OFFICER_A", "role": "Senior Officer"}
+        self.auth_b = {"officer_id": "OFFICER_B", "role": "Senior Officer"}
 
     def tearDown(self):
         self.pg_patch1.stop()
@@ -292,18 +292,17 @@ class TestPhase3LocalAI(unittest.TestCase):
         reg.register_provider("local_ollama", mock_local)
         reg.register_provider("openrouter", mock_cloud)
 
-        # Explicit selection
+        # Auto resolution always returns local
         self.assertEqual(reg.get_provider("local_ollama"), mock_local)
-        self.assertEqual(reg.get_provider("openrouter"), mock_cloud)
-
-        # Auto resolution prefers local if available
+        self.assertEqual(reg.get_provider("openrouter"), mock_local)
+        
         auto_provider = reg.get_provider("auto")
         self.assertEqual(auto_provider, mock_local)
 
-        # If local is not available, auto falls back to openrouter
+        # If local is not available, auto still returns local (Ollama ONLY)
         mock_local.is_available.return_value = False
         auto_fallback = reg.get_provider("auto")
-        self.assertEqual(auto_fallback, mock_cloud)
+        self.assertEqual(auto_fallback, mock_local)
 
     # -------------------------------------------------------------------------
     # 6. Structured Evidence-Aware Prompt Builder
@@ -384,13 +383,13 @@ class TestPhase3LocalAI(unittest.TestCase):
         )
 
         custom_registry = AIProviderRegistry()
-        custom_registry.register_provider("mock_ollama", mock_provider)
+        custom_registry.register_provider("local_ollama", mock_provider)
         inference_service = AIInferenceService(provider_registry=custom_registry)
 
         result = inference_service.generate_job_reasoning(
             job_id="job-test-1",
             owner_id="OFFICER_A",
-            provider_name="mock_ollama",
+            provider_name="local_ollama",
             model_name="qwen3:8b"
         )
 
@@ -443,13 +442,13 @@ class TestPhase3LocalAI(unittest.TestCase):
         )
 
         custom_registry = AIProviderRegistry()
-        custom_registry.register_provider("mock_vl", mock_provider)
+        custom_registry.register_provider("local_ollama", mock_provider)
         inference_service = AIInferenceService(provider_registry=custom_registry)
 
         result = inference_service.generate_image_caption(
             evidence_id="EV-IMG-01",
             owner_id="OFFICER_A",
-            provider_name="mock_vl",
+            provider_name="local_ollama",
             model_name="qwen3-vl:8b"
         )
 

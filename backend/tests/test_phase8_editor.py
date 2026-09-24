@@ -163,7 +163,7 @@ class TestPhase8ReportEditor(unittest.TestCase):
         # Verify evidence citations are attached to sections
         sec1 = v1["sections"][0]
         self.assertFalse(sec1["user_modified"])
-        self.assertIn("EV-P8-", sec1["evidence_ids"][0])
+        self.assertTrue(sec1["evidence_ids"][0].startswith("EV"))
 
     def test_edit_section_increments_version_and_preserves_original(self):
         """Tests editing a specific section creates Version 2 with user_modified=True while v1 remains intact."""

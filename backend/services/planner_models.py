@@ -61,6 +61,7 @@ class PlannedSection:
     chronology_period: Optional[str] = None
     validation_status: str = "supported"  # "supported", "insufficient", "flagged"
     validation_notes: List[str] = field(default_factory=list)
+    content_text: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -78,7 +79,8 @@ class PlannedSection:
             "provenance_citations": self.provenance_citations,
             "chronology_period": self.chronology_period,
             "validation_status": self.validation_status,
-            "validation_notes": self.validation_notes
+            "validation_notes": self.validation_notes,
+            "content_text": self.content_text
         }
 
     @classmethod
@@ -102,7 +104,8 @@ class PlannedSection:
             provenance_citations=data.get("provenance_citations", []),
             chronology_period=data.get("chronology_period"),
             validation_status=data.get("validation_status", "supported"),
-            validation_notes=data.get("validation_notes", [])
+            validation_notes=data.get("validation_notes", []),
+            content_text=data.get("content_text", "")
         )
 
 

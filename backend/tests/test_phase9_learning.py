@@ -133,7 +133,8 @@ class TestPhase9Learning(unittest.TestCase):
 
         # Edit section: systematically replace 'pit' with 'excavation_quarry' and add bullets
         orig_text = v1["sections"][0]["content_text"]
-        new_text = "Verified Audit Findings:\n- Total FY24 coal extracted was 14.5 MT from quarry #3.\n- Environmental clearance active."
+        bullets = "\n".join([f"- Bullet point {i}" for i in range(25)])
+        new_text = f"Verified Audit Findings:\n{bullets}\n- Total FY24 coal extracted was 14.5 MT from quarry #3.\n- Environmental clearance active."
 
         edit_res = report_editor_service.edit_section(
             report_id=self.report_id,

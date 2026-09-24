@@ -51,7 +51,7 @@ class PlannerAdvisor:
                 system_instruction="You are an expert mining report structural planner. Respond in strict JSON.",
                 temperature=0.2,
                 max_tokens=400,
-                model=getattr(config, "LOCAL_MODEL_QWEN3", "qwen2.5-coder:1.5b-base"),
+                model=getattr(config, "LOCAL_MODEL_QWEN25", "qwen2.5:7b"),
                 job_id=plan.job_id,
                 owner_id=plan.owner_id
             )

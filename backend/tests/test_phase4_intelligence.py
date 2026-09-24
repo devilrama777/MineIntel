@@ -76,18 +76,18 @@ class TestPhase4Intelligence(unittest.TestCase):
         auth_store.create_user(
             officer_id="OFFICER_ALPHA",
             password="PassA123!",
-            role="Operational Auditor",
+            role="Senior Officer",
             display_name="Auditor Alpha"
         )
         auth_store.create_user(
             officer_id="OFFICER_BETA",
             password="PassB123!",
-            role="Operational Auditor",
+            role="Senior Officer",
             display_name="Auditor Beta"
         )
 
-        self.auth_a = {"officer_id": "OFFICER_ALPHA", "role": "Operational Auditor"}
-        self.auth_b = {"officer_id": "OFFICER_BETA", "role": "Operational Auditor"}
+        self.auth_a = {"officer_id": "OFFICER_ALPHA", "role": "Senior Officer"}
+        self.auth_b = {"officer_id": "OFFICER_BETA", "role": "Senior Officer"}
 
     def tearDown(self):
         self.pg_p1.stop()

@@ -48,11 +48,11 @@ class TestOptionBAuthentication(unittest.TestCase):
                 pass
 
     def test_01_master_login(self):
-        """Test Master credentials authenticate and return Senior Operational Auditor role."""
+        """Test Master credentials authenticate and return Senior Officer role."""
         req = make_login_request(TEST_OFFICER_ID, TEST_OFFICER_PW)
         resp = auth_login(req)
         self.assertTrue(resp["authenticated"])
-        self.assertEqual(resp["role"], "Senior Operational Auditor")
+        self.assertEqual(resp["role"], "Senior Officer")
         self.assertTrue(resp["is_master"])
         self.assertIn("token", resp)
 
@@ -78,7 +78,7 @@ class TestOptionBAuthentication(unittest.TestCase):
             officer_id="field_auditor_1",
             password="auditor_pass_123",
             display_name="Field Auditor One",
-            role="Operational Auditor"
+            role="Worker"
         )
         with self.assertRaises(HTTPException) as ctx:
             auth_create_user(req)
@@ -92,12 +92,12 @@ class TestOptionBAuthentication(unittest.TestCase):
             officer_id="field_auditor_1",
             password="auditor_pass_123",
             display_name="Field Auditor One",
-            role="Operational Auditor"
+            role="Worker"
         )
         resp = auth_create_user(req)
         self.assertTrue(resp["success"])
         self.assertEqual(resp["user"]["officer_id"], "field_auditor_1")
-        self.assertEqual(resp["user"]["role"], "Operational Auditor")
+        self.assertEqual(resp["user"]["role"], "Worker")
 
     def test_04_normal_user_login(self):
         """Test newly created normal user logs in successfully via common auth_login endpoint."""
@@ -106,7 +106,7 @@ class TestOptionBAuthentication(unittest.TestCase):
         self.assertTrue(resp["authenticated"])
         self.assertEqual(resp["officer_id"], "field_auditor_1")
         self.assertEqual(resp["name"], "Field Auditor One")
-        self.assertEqual(resp["role"], "Operational Auditor")
+        self.assertEqual(resp["role"], "Worker")
         self.assertFalse(resp["is_master"])
         self.assertIn("token", resp)
 

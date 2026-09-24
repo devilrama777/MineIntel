@@ -8,8 +8,8 @@ services:
       - "8000:8000"
     environment:
       - OLLAMA_HOST=http://ollama:11434
-      - MINEINTEL_LOCAL_MODEL=qwen2.5:7b
-      - MINEINTEL_LOCAL_VL_MODEL=qwen2-vl:7b
+      - MINEINTEL_LOCAL_MODEL_QWEN25=qwen2.5:7b
+      - MINEINTEL_LOCAL_MODEL_QWEN2_VL=qwen2.5vl:7b
       # Required database configuration - MUST be set in environment or .env
       - DATABASE_URL=${DATABASE_URL:-}
       # Required authentication configuration - MUST be set in environment or .env
@@ -17,12 +17,12 @@ services:
       - MINEINTEL_AUTH_PASSWORD=${MINEINTEL_AUTH_PASSWORD:-}
       - MINEINTEL_JWT_SECRET=${MINEINTEL_JWT_SECRET:-}
       # Secure CORS - define explicitly in .env (e.g. https://your-vercel-app.vercel.app)
-      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
     volumes:
       # Optional: Persist uploads/outputs locally if needed. 
       # (Uncomment below to mount local directories instead of using ephemeral container storage)
-      # - ./uploads:/app/uploads
-      # - ./outputs:/app/outputs
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
     depends_on:
       ollama:
         condition: service_started

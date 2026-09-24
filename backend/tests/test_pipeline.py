@@ -75,8 +75,7 @@ class TestPipeline(unittest.TestCase):
         """Verify OpenRouter provider and model defaults are correctly configured."""
         from backend import config
         from backend.services.cloud_ai_client import CloudAIClient
-        self.assertEqual(config.AI_PROVIDER, "openrouter")
-        self.assertEqual(config.OPENROUTER_MODEL, "openrouter/free")
+        self.assertEqual(config.AI_PROVIDER, "local_ollama")
         
         # When no key is set, client correctly reports unavailable
         client_no_key = CloudAIClient(api_key="", provider="openrouter")

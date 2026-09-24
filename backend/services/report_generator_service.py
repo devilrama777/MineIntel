@@ -40,13 +40,14 @@ class ReportGeneratorService:
         owner_id: str,
         plan_id: Optional[str] = None,
         formats: Optional[List[str]] = None,
-        title_override: Optional[str] = None
+        title_override: Optional[str] = None,
+        skip_ai_synthesis: bool = False
     ) -> Dict[str, Any]:
         """
         Executes end-to-end report generation based on an active or specified Report Plan.
         """
         if not formats:
-            formats = ["pdf"]
+            formats = ["markdown"]
         normalized_formats = [f.lower().strip() for f in formats]
 
         # 1. Fetch Plan
@@ -98,57 +99,66 @@ class ReportGeneratorService:
         store_save_report(artifact.to_dict())
 
         # 3b. Real Ollama Evidence-Grounded Analytical Synthesis
-        from backend.services.ai_inference_service import ai_inference_service
-        logger.info(f"Executing Ollama analytical synthesis for report on job '{job_id}'...")
-        ai_res = ai_inference_service.generate_job_reasoning(
-            job_id=job_id,
-            owner_id=owner_id,
-            provider_name="local_ollama",
-            model_name=getattr(config, "LOCAL_MODEL_QWEN3", "qwen2.5-coder:1.5b-base")
-        )
+        # Check if plan already contains synthesized section content or if AI synthesis should be skipped
+        has_existing_content = any(bool(getattr(s, "content_text", "").strip()) for s in plan.sections)
+        if not skip_ai_synthesis and not has_existing_content:
+            from backend.services.ai_inference_service import ai_inference_service
+            logger.info(f"Executing Ollama analytical synthesis for report on job '{job_id}'...")
+            ai_res = ai_inference_service.generate_job_reasoning(
+                job_id=job_id,
+                owner_id=owner_id,
+                provider_name="local_ollama",
+                model_name=getattr(config, "LOCAL_MODEL_QWEN25", "qwen2.5:7b")
+            )
 
-        if not ai_res.get("success"):
-            err_msg = ai_res.get("error", "Local Ollama model unavailable.")
-            status_val = ai_res.get("status", "model_unavailable")
-            logger.error(f"Report generation aborted: Ollama inference failed ({status_val}): {err_msg}")
-            artifact.status = ReportGenerationStatus.FAILED.value
-            artifact.metadata["error"] = err_msg
-            store_save_report(artifact.to_dict())
-            return {
-                "success": False,
-                "status": "model_unavailable",
-                "error": f"Model Unavailable: {err_msg}"
-            }
+            if not ai_res.get("success"):
+                err_msg = ai_res.get("error", "Local Ollama model unavailable.")
+                status_val = ai_res.get("status", "model_unavailable")
+                logger.error(f"Report generation aborted: Ollama inference failed ({status_val}): {err_msg}")
+                artifact.status = ReportGenerationStatus.FAILED.value
+                artifact.metadata["error"] = err_msg
+                store_save_report(artifact.to_dict())
+                return {
+                    "success": False,
+                    "status": "model_unavailable",
+                    "error": f"Model Unavailable: {err_msg}"
+                }
 
-        ai_analysis_text = (ai_res.get("analysis_text") or "").strip()
-        ai_ev_id = ai_res.get("evidence_id")
-        ai_ev_item = ai_res.get("evidence_item")
+            ai_analysis_text = (ai_res.get("analysis_text") or "").strip()
+            ai_ev_id = ai_res.get("evidence_id")
+            ai_ev_item = ai_res.get("evidence_item")
 
-        if ai_ev_item:
-            evidence_items.insert(0, ai_ev_item)
+            if ai_ev_item:
+                evidence_items.insert(0, ai_ev_item)
 
-        if plan.sections:
-            exec_sec = plan.sections[0]
-            if ai_ev_id and ai_ev_id not in exec_sec.evidence_ids:
-                exec_sec.evidence_ids.insert(0, ai_ev_id)
-            exec_sec.content_text = ai_analysis_text
-            plan.metadata["ai_synthesis_model"] = ai_res.get("model")
-            plan.metadata["ai_synthesis_provider"] = ai_res.get("provider")
+            if plan.sections:
+                exec_sec = plan.sections[0]
+                if ai_ev_id and ai_ev_id not in exec_sec.evidence_ids:
+                    exec_sec.evidence_ids.insert(0, ai_ev_id)
+                exec_sec.content_text = ai_analysis_text
+                plan.metadata["ai_synthesis_model"] = ai_res.get("model")
+                plan.metadata["ai_synthesis_provider"] = ai_res.get("provider")
 
-        artifact.metadata["ai_model"] = ai_res.get("model")
-        artifact.metadata["ai_provider"] = ai_res.get("provider")
-        artifact.metadata["ai_analysis_length"] = len(ai_analysis_text)
+            artifact.metadata["ai_model"] = ai_res.get("model")
+            artifact.metadata["ai_provider"] = ai_res.get("provider")
+            artifact.metadata["ai_analysis_length"] = len(ai_analysis_text)
+        else:
+            logger.info(f"Deterministic compilation using pre-synthesized section content for report on job '{job_id}' (zero additional AI calls).")
 
         try:
-            # 4. Generate Primary PDF
-            pdf_path, page_count = long_document_builder.build_pdf(
-                plan=plan,
-                evidence_items=evidence_items,
-                charts=charts,
-                output_filename=f"Report_{job_id[:8]}_{report_id[-6:]}.pdf"
-            )
-            artifact.pdf_path = pdf_path
-            artifact.page_count = page_count
+            # 4. Generate Primary PDF if requested
+            if "pdf" in normalized_formats:
+                pdf_path, page_count = long_document_builder.build_pdf(
+                    plan=plan,
+                    evidence_items=evidence_items,
+                    charts=charts,
+                    output_filename=f"Report_{job_id[:8]}_{report_id[-6:]}.pdf"
+                )
+                artifact.pdf_path = pdf_path
+                artifact.page_count = page_count
+            else:
+                page_count = max(1, len(plan.sections))
+                artifact.page_count = page_count
 
             # 5. Generate Word DOCX if requested
             if "docx" in normalized_formats or "word" in normalized_formats:
@@ -185,7 +195,7 @@ class ReportGeneratorService:
             except Exception as rev_err:
                 logger.warning(f"Could not auto-initialize v1 revision for {report_id}: {rev_err}")
 
-            logger.info(f"Report generation complete: {report_id} ({page_count} pages)")
+            logger.info(f"Report generation complete: {report_id} ({artifact.page_count} pages)")
             return {
                 "success": True,
                 "report_id": report_id,

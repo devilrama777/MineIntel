@@ -76,25 +76,25 @@ class TestPhase1EvidenceIngestion(unittest.TestCase):
 
         # Create test users: User A, User B, Master User
         cls.master_officer = os.environ["MINEINTEL_OFFICER_ID"]
-        cls.master_token = create_session_token(cls.master_officer, role="Senior Operational Auditor")
+        cls.master_token = create_session_token(cls.master_officer, role="Senior Senior Officer")
 
         if not auth_store.get_user_by_id("MOC-AUDITOR-A"):
             auth_store.create_user(
                 officer_id="MOC-AUDITOR-A",
                 password="AuditorPassword123!",
                 display_name="Auditor Alpha",
-                role="Operational Auditor"
+                role="Senior Officer"
             )
-        cls.user_a_token = create_session_token("MOC-AUDITOR-A", role="Operational Auditor")
+        cls.user_a_token = create_session_token("MOC-AUDITOR-A", role="Senior Officer")
 
         if not auth_store.get_user_by_id("MOC-AUDITOR-B"):
             auth_store.create_user(
                 officer_id="MOC-AUDITOR-B",
                 password="AuditorPassword456!",
                 display_name="Auditor Beta",
-                role="Operational Auditor"
+                role="Senior Officer"
             )
-        cls.user_b_token = create_session_token("MOC-AUDITOR-B", role="Operational Auditor")
+        cls.user_b_token = create_session_token("MOC-AUDITOR-B", role="Senior Officer")
 
     @classmethod
     def tearDownClass(cls):
@@ -332,7 +332,7 @@ class TestPhase1EvidenceIngestion(unittest.TestCase):
             UploadFile(filename="inspection.docx", file=io.BytesIO(docx_bytes))
         ]
 
-        auth_user_a = {"officer_id": "MOC-AUDITOR-A", "role": "Operational Auditor"}
+        auth_user_a = {"officer_id": "MOC-AUDITOR-A", "role": "Senior Officer"}
 
         # Run async endpoint
         res = asyncio.run(create_ingestion_job(files=upload_files, auth=auth_user_a))
@@ -371,8 +371,8 @@ class TestPhase1EvidenceIngestion(unittest.TestCase):
 
         csv_bytes = self._create_test_csv()
         upload_files = [UploadFile(filename="secret_mine_data.csv", file=io.BytesIO(csv_bytes))]
-        auth_user_a = {"officer_id": "MOC-AUDITOR-A", "role": "Operational Auditor"}
-        auth_user_b = {"officer_id": "MOC-AUDITOR-B", "role": "Operational Auditor"}
+        auth_user_a = {"officer_id": "MOC-AUDITOR-A", "role": "Senior Officer"}
+        auth_user_b = {"officer_id": "MOC-AUDITOR-B", "role": "Senior Officer"}
 
         # User A creates job
         res = asyncio.run(create_ingestion_job(files=upload_files, auth=auth_user_a))
@@ -405,7 +405,7 @@ class TestPhase1EvidenceIngestion(unittest.TestCase):
         self.assertEqual(cm.exception.status_code, 403)
 
         # Master Auditor CAN access User A's job
-        auth_master = {"officer_id": self.master_officer, "role": "Senior Operational Auditor"}
+        auth_master = {"officer_id": self.master_officer, "role": "Senior Senior Officer"}
         master_job_res = get_ingestion_job_status(job_id=job_id, auth=auth_master)
         self.assertTrue(master_job_res["success"])
 

@@ -98,14 +98,14 @@ class TestRemediationSuite(unittest.TestCase):
     # -------------------------------------------------------------------------
     def test_01_auth_token_lifecycle(self):
         """Verify HMAC session token creation, verification, and expiration."""
-        token = create_session_token("MOC-7890", "Senior Operational Auditor")
+        token = create_session_token("MOC-7890", "Senior Officer")
         self.assertIsInstance(token, str)
         self.assertEqual(len(token.split(":")), 4)
 
         session = verify_session_token(token)
         self.assertIsNotNone(session)
         self.assertEqual(session["officer_id"], "MOC-7890")
-        self.assertEqual(session["role"], "Senior Operational Auditor")
+        self.assertEqual(session["role"], "Senior Officer")
 
         # Verify tampered token fails
         tampered = token[:-4] + "ffff"

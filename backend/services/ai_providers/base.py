@@ -25,7 +25,8 @@ class AIRequest:
         evidence_items: Optional[List[Dict[str, Any]]] = None,
         job_id: Optional[str] = None,
         owner_id: Optional[str] = None,
-        context_metadata: Optional[Dict[str, Any]] = None
+        context_metadata: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None
     ):
         self.prompt = prompt
         self.system_instruction = system_instruction or system_prompt
@@ -37,6 +38,7 @@ class AIRequest:
         self.job_id = job_id
         self.owner_id = owner_id
         self.context_metadata = context_metadata or {}
+        self.timeout = timeout
 
     @property
     def images_base64(self) -> List[str]:

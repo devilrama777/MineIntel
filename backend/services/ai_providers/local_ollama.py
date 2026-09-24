@@ -33,8 +33,8 @@ class LocalOllamaProvider(BaseAIProvider):
         timeout: Optional[int] = None
     ):
         self.host = (host or getattr(config, "OLLAMA_HOST", "http://localhost:11434")).rstrip("/")
-        self.default_text_model = default_model or default_text_model or getattr(config, "LOCAL_MODEL_QWEN3", "qwen3:8b")
-        self.default_vl_model = default_vl_model or getattr(config, "LOCAL_MODEL_QWEN3_VL", "qwen3-vl:8b")
+        self.default_text_model = default_model or default_text_model or getattr(config, "LOCAL_MODEL_QWEN25", "qwen2.5:7b")
+        self.default_vl_model = default_vl_model or getattr(config, "LOCAL_MODEL_QWEN2_VL", "qwen2.5vl:7b")
         self.timeout = timeout or getattr(config, "LOCAL_AI_TIMEOUT", 60)
 
     @property
@@ -150,11 +150,26 @@ class LocalOllamaProvider(BaseAIProvider):
         if req.system_instruction:
             payload["system"] = req.system_instruction
 
+        effective_timeout = req.timeout if req.timeout is not None else self.timeout
+        if effective_timeout is not None and effective_timeout <= 0:
+            dur_ms = int((time.time() - t0) * 1000)
+            return AIResponse(
+                success=False,
+                text="",
+                provider=self.provider_name,
+                model=target_model,
+                duration_ms=dur_ms,
+                status="timeout",
+                error=f"Local Ollama generation timed out before execution (timeout budget: {effective_timeout}s).",
+                evidence_classification=req.context_metadata.get("classification", "AI ANALYSIS"),
+                parent_evidence_ids=req.context_metadata.get("parent_evidence_ids", [])
+            )
+
         try:
             resp = requests.post(
                 f"{self.host}/api/generate",
                 json=payload,
-                timeout=self.timeout
+                timeout=effective_timeout
             )
             dur_ms = int((time.time() - t0) * 1000)
 
@@ -217,14 +232,15 @@ class LocalOllamaProvider(BaseAIProvider):
                 parent_evidence_ids=req.context_metadata.get("parent_evidence_ids", [])
             )
         except requests.exceptions.Timeout:
+            dur_ms = int((time.time() - t0) * 1000)
             return AIResponse(
                 success=False,
                 text="",
                 provider=self.provider_name,
                 model=target_model,
-                duration_ms=int((time.time() - t0) * 1000),
-                status="failed",
-                error=f"Local Ollama generation timed out after {self.timeout}s.",
+                duration_ms=dur_ms,
+                status="timeout",
+                error=f"Local Ollama generation timed out after {effective_timeout}s.",
                 evidence_classification=req.context_metadata.get("classification", "AI ANALYSIS"),
                 parent_evidence_ids=req.context_metadata.get("parent_evidence_ids", [])
             )
@@ -295,11 +311,26 @@ class LocalOllamaProvider(BaseAIProvider):
         if req.system_instruction:
             payload["system"] = req.system_instruction
 
+        effective_timeout = req.timeout if req.timeout is not None else self.timeout
+        if effective_timeout is not None and effective_timeout <= 0:
+            dur_ms = int((time.time() - t0) * 1000)
+            return AIResponse(
+                success=False,
+                text="",
+                provider=self.provider_name,
+                model=target_model,
+                duration_ms=dur_ms,
+                status="timeout",
+                error=f"Local Ollama multimodal generation timed out before execution (timeout budget: {effective_timeout}s).",
+                evidence_classification="AI-GENERATED CAPTION",
+                parent_evidence_ids=req.context_metadata.get("parent_evidence_ids", [])
+            )
+
         try:
             resp = requests.post(
                 f"{self.host}/api/generate",
                 json=payload,
-                timeout=self.timeout
+                timeout=effective_timeout
             )
             dur_ms = int((time.time() - t0) * 1000)
 
@@ -357,6 +388,19 @@ class LocalOllamaProvider(BaseAIProvider):
                 duration_ms=int((time.time() - t0) * 1000),
                 status="model_unavailable",
                 error=f"Local Ollama service unavailable at {self.host}. Please start it with 'ollama serve'.",
+                evidence_classification="AI-GENERATED CAPTION",
+                parent_evidence_ids=req.context_metadata.get("parent_evidence_ids", [])
+            )
+        except requests.exceptions.Timeout:
+            dur_ms = int((time.time() - t0) * 1000)
+            return AIResponse(
+                success=False,
+                text="",
+                provider=self.provider_name,
+                model=target_model,
+                duration_ms=dur_ms,
+                status="timeout",
+                error=f"Local Ollama multimodal generation timed out after {effective_timeout}s.",
                 evidence_classification="AI-GENERATED CAPTION",
                 parent_evidence_ids=req.context_metadata.get("parent_evidence_ids", [])
             )

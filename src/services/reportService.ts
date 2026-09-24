@@ -27,6 +27,7 @@ import {
 } from './mockData';
 import { getApiBaseUrl } from './config';
 import { authService } from './authService';
+import { agentService } from './agentService';
 
 const API_BASE = getApiBaseUrl();
 
@@ -462,7 +463,10 @@ class LocalDesktopService {
     files: File[],
     customCommand?: string,
     title?: string,
-    onProgress?: (status: 'PENDING' | 'RUNNING' | 'VALIDATING' | 'COMPLETED' | 'FAILED') => void
+    onProgress?: (
+      status: 'PENDING' | 'RUNNING' | 'AWAITING_INPUT' | 'VALIDATING' | 'RETRYING' | 'COMPLETED' | 'FAILED',
+      detail?: { currentTool?: string; currentStage?: string; progressReason?: string; message?: string }
+    ) => void
   ): Promise<{
     job_id: string;
     report_id: string;
@@ -499,75 +503,136 @@ class LocalDesktopService {
     const ingestResult = await res.json();
     const jobId = ingestResult.job_id;
 
-    // 2. PHASE 3 UPDATE: Submit to Agent and Poll
-    onProgress?.('PENDING');
-    const agentRes = await fetch(`${API_BASE}/api/agent/tasks`, {
-      method: 'POST',
-      headers: this.getAuthHeaders(),
-      body: JSON.stringify({
-        job_id: jobId,
-        instruction: customCommand || undefined,
-      }),
+    // 2. PHASE 3 UPDATE: Submit to Agent and Poll using agentService with bounded timeout
+    onProgress?.('PENDING', { message: 'Initiating Agent orchestration task...' });
+    await agentService.createAgentTask({
+      job_id: jobId,
+      task_id: jobId,
+      instruction: customCommand || undefined,
     });
-    
-    if (!agentRes.ok) {
-      const err = await agentRes.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to start Agent task.');
-    }
-    
-    const agentData = await agentRes.json();
-    const taskId = agentData.task_id;
-    
+
     let reportId = '';
     let reportMarkdown = '';
-    let outputFiles: any = {};
+    let outputFiles: { pdf?: string; docx?: string; md?: string } = {};
     const reportTitle = title || (files.length === 1 ? `Executive Audit: ${files[0].name}` : `Multi-Source Dossier (${files.length} documents)`);
-    
+
+    const POLL_INTERVAL_MS = 2000;
+    const MAX_POLL_DURATION_MS = 600000; // 10 minutes bounded wall-clock deadline
+    const MAX_CONSECUTIVE_NETWORK_ERRORS = 5;
+    const startTime = Date.now();
+    let consecutiveErrors = 0;
+    let lastNetworkErrorMsg = '';
+    let finalTaskState: any = null;
+
     while (true) {
-      await new Promise(r => setTimeout(r, 2000));
-      const statusRes = await fetch(`${API_BASE}/api/agent/tasks/${taskId}/status`, {
-        headers: this.getAuthHeaders(),
+      if (Date.now() - startTime > MAX_POLL_DURATION_MS) {
+        throw new Error('Agent task timed out while waiting for completion (exceeded 10-minute wall-clock deadline).');
+      }
+
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+      let statusData: any;
+      try {
+        statusData = await agentService.getAgentTaskStatus(jobId);
+        consecutiveErrors = 0;
+      } catch (err: any) {
+        consecutiveErrors++;
+        lastNetworkErrorMsg = err?.message || String(err);
+        if (consecutiveErrors >= MAX_CONSECUTIVE_NETWORK_ERRORS) {
+          throw new Error(`Agent polling failed after ${consecutiveErrors} consecutive network errors: ${lastNetworkErrorMsg}`);
+        }
+        continue;
+      }
+
+      const currentStatus = ((statusData.status || '').toUpperCase()) as
+        | 'PENDING'
+        | 'RUNNING'
+        | 'AWAITING_INPUT'
+        | 'VALIDATING'
+        | 'RETRYING'
+        | 'COMPLETED'
+        | 'FAILED';
+
+      const taskObj = statusData.task || statusData.job;
+      const structuredState = taskObj?.structured_state || {};
+      let activeTool = structuredState.current_tool || '';
+      const currentStage = structuredState.current_stage || '';
+      const progressReason = structuredState.progress_reason || '';
+
+      if (!activeTool && Array.isArray(taskObj?.execution_history)) {
+        for (let i = taskObj.execution_history.length - 1; i >= 0; i--) {
+          const h = taskObj.execution_history[i];
+          if (h.tool_name) {
+            activeTool = h.tool_name;
+            break;
+          }
+          if (h.content?.selected_action?.tool) {
+            activeTool = h.content.selected_action.tool;
+            break;
+          }
+        }
+      }
+
+      onProgress?.(currentStatus, {
+        currentTool: activeTool,
+        currentStage,
+        progressReason,
       });
-      
-      if (statusRes.ok) {
-        const statusData = await statusRes.json();
-        const currentStatus = statusData.status;
-        onProgress?.(currentStatus);
-        
-        if (currentStatus === 'COMPLETED') {
-          reportId = statusData.report_id || jobId;
-          break;
-        } else if (currentStatus === 'FAILED') {
-          throw new Error('Agent execution failed.');
+
+      if (currentStatus === 'COMPLETED') {
+        finalTaskState = taskObj;
+        break;
+      } else if (currentStatus === 'FAILED') {
+        let failureReason = structuredState.error?.message || structuredState.final_result;
+        if (!failureReason && Array.isArray(taskObj?.execution_history)) {
+          const sysErrors = taskObj.execution_history.filter((h: any) => h.error_message || h.error);
+          if (sysErrors.length > 0) {
+            failureReason = sysErrors[sysErrors.length - 1].error_message || sysErrors[sysErrors.length - 1].error;
+          }
+        }
+        throw new Error(`Agent execution failed: ${failureReason || 'Task failed explicitly by agent.'}`);
+      }
+    }
+
+    // 3. Resolve real report reference from agent task state or backend report service
+    let realReportId = finalTaskState?.structured_state?.report_id || '';
+    if (finalTaskState?.structured_state?.artifacts) {
+      outputFiles = finalTaskState.structured_state.artifacts;
+    }
+
+    // Fallback: inspect execution_history for generate_report tool result
+    if (!realReportId && Array.isArray(finalTaskState?.execution_history)) {
+      for (let i = finalTaskState.execution_history.length - 1; i >= 0; i--) {
+        const item = finalTaskState.execution_history[i];
+        if (item.tool_name === 'generate_report' && item.result) {
+          const toolRes = item.result.result || item.result;
+          if (toolRes && toolRes.report_id) {
+            realReportId = toolRes.report_id;
+            if (toolRes.artifacts) {
+              outputFiles = toolRes.artifacts;
+            }
+            break;
+          }
         }
       }
     }
 
-    // 6. Obtain generated markdown using existing report download API
-    if (reportId) {
+    // Fallback to existing backend job report history endpoint
+    if (!realReportId) {
       try {
-        const mdRes = await fetch(`${API_BASE}/api/reports/${encodeURIComponent(reportId)}/download?format=md`, {
+        const histRes = await fetch(`${API_BASE}/api/reports/job/${encodeURIComponent(jobId)}/history`, {
           headers: this.getAuthHeaders(),
         });
-        if (mdRes.ok) {
-          const text = await mdRes.text();
-          if (text && text.trim().length > 0) {
-            reportMarkdown = text;
-          }
-        }
-      } catch {
-        // Fallback
-      }
-    }
-    if (!reportMarkdown && jobId) {
-      try {
-        const mdRes = await fetch(`${API_BASE}/api/reports/download/md?job_id=${encodeURIComponent(jobId)}`, {
-          headers: this.getAuthHeaders(),
-        });
-        if (mdRes.ok) {
-          const text = await mdRes.text();
-          if (text && text.trim().length > 0) {
-            reportMarkdown = text;
+        if (histRes.ok) {
+          const histData = await histRes.json();
+          if (histData.reports && histData.reports.length > 0) {
+            const latest = histData.reports[histData.reports.length - 1];
+            realReportId = latest.report_id;
+            outputFiles = {
+              pdf: latest.pdf_path,
+              docx: latest.docx_path,
+              md: latest.md_path,
+            };
           }
         }
       } catch {
@@ -575,9 +640,30 @@ class LocalDesktopService {
       }
     }
 
-    // 7. Record in persistent history
+    // Requirement C6: Fail clearly if no valid report reference exists
+    if (!realReportId) {
+      throw new Error('Agent completed execution, but no valid report artifact reference was found in the task state.');
+    }
+
+    reportId = realReportId;
+
+    // 4. Retrieve the actual generated Markdown artifact
+    const mdRes = await fetch(`${API_BASE}/api/reports/${encodeURIComponent(reportId)}/download?format=md`, {
+      headers: this.getAuthHeaders(),
+    });
+
+    if (!mdRes.ok) {
+      throw new Error(`Failed to retrieve generated report markdown (${mdRes.status}): ${mdRes.statusText}`);
+    }
+
+    reportMarkdown = await mdRes.text();
+    if (!reportMarkdown || reportMarkdown.trim().length === 0) {
+      throw new Error('Retrieved report markdown artifact is empty.');
+    }
+
+    // 5. Record in persistent history
     const historyItem = {
-      id: reportId || jobId,
+      id: reportId,
       title: reportTitle,
       template: 'formal_audit',
       template_name: 'Formal Statutory Audit',
@@ -598,7 +684,7 @@ class LocalDesktopService {
 
     return {
       job_id: jobId,
-      report_id: reportId || jobId,
+      report_id: reportId,
       filename: files.map((f) => f.name).join(', '),
       markdown_content: reportMarkdown,
       llama_analysis: `Analysis completed for ${files.length} documents using sovereign local inference.`,
@@ -607,7 +693,7 @@ class LocalDesktopService {
       output_files: outputFiles,
       metadata: {
         job_id: jobId,
-        report_id: reportId || jobId,
+        report_id: reportId,
         title: reportTitle,
         files_count: files.length,
       },

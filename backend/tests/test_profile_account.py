@@ -22,7 +22,7 @@ class TestProfileAccount(unittest.TestCase):
         auth_store.USERS_FILE = Path(self.temp.name) / "users.json"
         self.user_id = "profile_test_user"
         auth_store.create_user(self.user_id, "OriginalPass123!", "Original Name", phone="111", email="old@example.com")
-        self.token = create_session_token(self.user_id, "Operational Auditor")
+        self.token = create_session_token(self.user_id, "Worker")
         self.auth = verify_session_token(self.token)
         self.assertIsNotNone(self.auth)
 
