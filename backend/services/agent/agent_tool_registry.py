@@ -162,27 +162,58 @@ register_tool(Tool(
     handler=_handle_detect_charts
 ))
 
-def _handle_render_chart(owner_id: str, task_id: str, chart_type: str, data: Dict[str, Any], title: str = "") -> Any:
+def _handle_render_chart(
+    owner_id: str,
+    task_id: str,
+    chart_type: str = "bar",
+    data: Optional[Dict[str, Any]] = None,
+    title: str = "",
+    file_id: Optional[str] = None,
+    x_col: Optional[str] = None,
+    y_cols: Optional[List[str]] = None,
+    **kwargs
+) -> Any:
+    d = data or {}
+    f_id = file_id or d.get("file_id")
+    x = x_col or d.get("x_col") or d.get("detected_time_column") or (d.get("detected_category_columns") or [None])[0]
+    y = y_cols or d.get("y_cols") or d.get("detected_metric_columns") or []
+    if isinstance(y, str):
+        y = [y]
+    t = title or d.get("title") or "Operational Metrics Chart"
+    c_type = chart_type or d.get("chart_type") or "bar"
+
+    if not x or not y:
+        return chart_service.generate_fallback_chart(
+            job_id=task_id,
+            owner_id=owner_id,
+            title=t,
+            error_message="Missing x_col or y_cols dimensions for deterministic chart generation; generated fallback visualization."
+        )
+
     return chart_service.generate_chart(
-        chart_type=chart_type, 
-        data=data, 
-        owner_id=owner_id, 
-        job_id=task_id, 
-        title=title, 
-        metadata={}
+        job_id=task_id,
+        owner_id=owner_id,
+        file_id=f_id,
+        x_col=x,
+        y_cols=y,
+        chart_type=c_type,
+        title=t,
+        allow_fallback=True
     )
 
 register_tool(Tool(
     name="render_chart",
-    description="Render a specific chart using the provided JSON data.",
+    description="Render a specific chart using the provided JSON data or column dimensions.",
     input_schema={
         "type": "object",
         "properties": {
             "chart_type": {"type": "string", "description": "e.g., 'bar', 'line', 'pie'"},
-            "data": {"type": "object", "description": "Chart data matching MineIntel schema"},
+            "file_id": {"type": "string", "description": "Source file ID for evidence table"},
+            "x_col": {"type": "string", "description": "Independent axis column"},
+            "y_cols": {"type": "array", "items": {"type": "string"}, "description": "Metric value columns"},
+            "data": {"type": "object", "description": "Optional chart candidate data dict"},
             "title": {"type": "string", "description": "Title of the chart"}
-        },
-        "required": ["chart_type", "data"]
+        }
     },
     output_schema={"type": "object"},
     handler=_handle_render_chart

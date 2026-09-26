@@ -22,6 +22,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 from typing import Dict, Any
+import uuid
 
 # Ensure test credentials
 os.environ["MINEINTEL_OFFICER_ID"] = "MOC-TEST-OFFICER-7890"
@@ -191,7 +192,7 @@ class TestPhase1EvidenceIngestion(unittest.TestCase):
 
     def test_02_duplicate_detection_without_deletion(self):
         """Verifies duplicate files are detected via hash, flagged, and NEVER deleted."""
-        csv_bytes = b"Colliery,Target\nSECL-1,1000\nSECL-2,2000\n"
+        csv_bytes = f"Colliery,Target\nSECL-1,1000\nSECL-2,2000\n# {uuid.uuid4().hex}\n".encode("utf-8")
         job_dir = config.OUTPUTS_DIR / "test_dup"
 
         # First upload

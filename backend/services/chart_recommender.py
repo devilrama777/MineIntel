@@ -1,7 +1,7 @@
 """
 MineIntel Phase 5: Chart Recommendation Engine
 
-Combines deterministic rule-based analysis with optional Phase 3 AI reasoning (Qwen3-8B).
+Combines deterministic rule-based analysis with optional Phase 3 AI reasoning (qwen2.5:7b).
 Recommends optimal chart types, titles, and visual emphasis for structured evidence tables.
 CRITICAL CONSTRAINT: AI is strictly restricted to schema/metadata advice.
 Zero AI-invented numerical values are permitted in charts.
@@ -30,7 +30,7 @@ class ChartRecommender:
     ) -> Dict[str, Any]:
         """
         Generates chart recommendations for a detected table candidate.
-        Returns deterministic advice, optionally enriched with Phase 3 Qwen3-8B suggestions.
+        Returns deterministic advice, optionally enriched with Phase 3 qwen2.5:7b suggestions.
         """
         heuristic_types = chart_detector.recommend_chart_types_for_table(table.columns, table.row_count)
         primary_chart_type = heuristic_types[0] if heuristic_types else "bar"
@@ -56,7 +56,7 @@ class ChartRecommender:
             "rationale": f"Selected {primary_chart_type.upper()} based on {len(table.columns)} columns ({len(metric_cols)} metrics, {1 if time_col else 0} time dimensions)."
         }
 
-        # Optionally consult Phase 3 Local AI (Qwen3-8B) for executive title/narrative advice ONLY
+        # Optionally consult Phase 3 Local AI (qwen2.5:7b) for executive title/narrative advice ONLY
         if use_ai and owner_id:
             try:
                 # Provide only column names, row counts, and data types (NEVER send raw numbers for AI to alter)

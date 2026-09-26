@@ -11,8 +11,9 @@ export const getApiBaseUrl = (): string => {
     return (window as any).__MINEINTEL_API_BASE__.replace(/\/+$/, '');
   }
   const meta = import.meta as any;
-  if (meta && meta.env && meta.env.VITE_API_BASE) {
-    return meta.env.VITE_API_BASE.replace(/\/+$/, '');
+  const envBase = meta?.env?.VITE_API_BASE;
+  if (envBase) {
+    return envBase.replace(/\/+$/, '');
   }
   // Default to relative root so calls like `${API_BASE}/api/...` become `/api/...`
   return '';

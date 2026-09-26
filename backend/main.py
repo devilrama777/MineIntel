@@ -21,16 +21,15 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from backend import config, auth_store
 from backend.services import ingestion_store, evidence_store
 from backend.services.converter import MarkdownConverter
 from backend.services.document_generator import DocumentGenerator, TEMPLATE_CONFIGS, get_active_dataset_metrics
 from backend.services.evidence_extractor import evidence_extractor
-from backend.services.gemma_client import GemmaClient
 from backend.services.history_manager import get_history, record_report
 from backend.services.ingestion_service import ingestion_engine
-from backend.services.llama_client import LlamaClient
 from backend.services.math_engine import MathEngine
 from backend.services.pipeline import DocumentPipeline
 from backend.services.captcha import create_challenge, verify_challenge
@@ -43,9 +42,50 @@ from backend.services.report_generator_service import report_generator_service
 from backend.services.report_editor_service import report_editor_service
 from backend.services.learning_service import learning_service
 
+from backend.routers.auth import (
+    router as auth_router,
+    require_auth,
+    create_session_token,
+    verify_session_token,
+    auth_captcha,
+    auth_login,
+    auth_verify_master,
+    auth_create_user,
+    auth_update_user_status,
+    auth_verify,
+    auth_profile,
+    auth_update_profile,
+    auth_change_password,
+    auth_list_users,
+    auth_logout,
+    LoginRequest,
+    MasterVerifyRequest,
+    CreateUserRequest,
+    MasterUserActionRequest,
+    ProfileUpdateRequest,
+    PasswordChangeRequest,
+)
+from backend.routers.ingest import (
+    router as ingest_router,
+    create_ingestion_job,
+    list_ingestion_jobs,
+    get_ingestion_job_status,
+    get_ingestion_job_manifest,
+    get_evidence_file_details,
+    download_raw_evidence_file,
+    get_normalized_evidence_content,
+)
+from backend.routers.agent import (
+    router as agent_router,
+    create_agent_task,
+    get_agent_tasks,
+    get_agent_task_status,
+    AgentTaskRequest,
+)
+
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
-    description="Multi-stage document processing backend converting CSV/PDF to Markdown, analyzing via OpenRouter single-model reasoning, verifying mathematics, and synthesizing executive reports.",
+    description="Multi-stage document processing backend converting CSV/PDF to Markdown, analyzing via Sovereign Local AI reasoning, verifying mathematics, and synthesizing executive reports.",
     version="1.0.0"
 )
 
@@ -62,59 +102,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Register Modular Feature Routers
+app.include_router(auth_router)
+app.include_router(ingest_router)
+app.include_router(agent_router)
+
 pipeline_service = DocumentPipeline()
 converter_service = MarkdownConverter()
-llama_client = LlamaClient()
 math_engine = MathEngine()
-gemma_client = GemmaClient()
 document_generator = DocumentGenerator()
 
 
 # -------------------------------------------------------------------------
-# AUTHENTICATION HELPERS & MODELS
+# AI REASONING REQUEST MODELS
 # -------------------------------------------------------------------------
-class LoginRequest(BaseModel):
-    officer_id: Optional[str] = None
-    username: Optional[str] = None
-    password: str
-    captcha_challenge_id: str
-    captcha_answer: str
-    remember_device: Optional[bool] = True
-
-
-
-class MasterVerifyRequest(BaseModel):
-    master_officer_id: str
-    master_password: str
-
-
-class CreateUserRequest(BaseModel):
-    master_officer_id: str
-    master_password: str
-    officer_id: str
-    password: str
-    display_name: Optional[str] = None
-    role: Optional[str] = "Worker"
-
-
-class MasterUserActionRequest(BaseModel):
-    master_officer_id: str
-    master_password: str
-    target_officer_id: str
-    is_active: bool
-
-
-class ProfileUpdateRequest(BaseModel):
-    display_name: str
-    phone: str = ""
-    email: str = ""
-
-
-class PasswordChangeRequest(BaseModel):
-    current_password: str
-    new_password: str
-
-
 class AIReasoningRequest(BaseModel):
     job_id: str
     custom_instruction: Optional[str] = None
@@ -128,36 +129,6 @@ class AIMultimodalRequest(BaseModel):
     custom_instruction: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None
-
-
-def create_session_token(officer_id: str, role: str = "Senior Officer") -> str:
-    """Creates a cryptographically signed session token with timestamp."""
-    timestamp = int(time.time() * 1000)
-    payload = f"{officer_id}:{timestamp}:{role}"
-    sig = hmac.new(config.JWT_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
-    return f"{payload}:{sig}"
-
-
-def verify_session_token(token: str) -> Optional[Dict[str, Any]]:
-    """Verifies HMAC signature and 24-hour expiration of session token."""
-    try:
-        parts = token.split(":")
-        if len(parts) != 4:
-            return None
-        officer_id, timestamp_str, role, sig = parts
-        timestamp = int(timestamp_str)
-        if (time.time() * 1000) - timestamp > 86400 * 1000:  # 24 hours expiry
-            return None
-        stored_user = auth_store.get_user_by_id(officer_id)
-        if stored_user and timestamp <= int(stored_user.get("session_invalidated_at", 0) or 0):
-            return None
-        payload = f"{officer_id}:{timestamp}:{role}"
-        expected_sig = hmac.new(config.JWT_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
-        if secrets.compare_digest(sig, expected_sig):
-            return {"officer_id": officer_id, "role": role, "timestamp": timestamp}
-        return None
-    except Exception:
-        return None
 
 
 # -------------------------------------------------------------------------
@@ -205,23 +176,9 @@ def save_uploaded_file(file: UploadFile, dest_path: Path, max_bytes: int = confi
 
 
 # Pydantic Request Models
-class LlamaRequest(BaseModel):
-    markdown_content: str
-    file_type: str = "pdf"
-    custom_command: Optional[str] = None
-    model_override: Optional[str] = None
-
-
 class MathRequest(BaseModel):
     analysis_text: str
     custom_calculations: Optional[List[Dict[str, Any]]] = None
-
-
-class GemmaRequest(BaseModel):
-    llama_analysis: str
-    math_audit_markdown: str
-    custom_instructions: Optional[str] = None
-    model_override: Optional[str] = None
 
 
 class ReportExportRequest(BaseModel):
@@ -235,293 +192,6 @@ class ReportExportRequest(BaseModel):
 class SystemOpenFileRequest(BaseModel):
     path: str
     reveal: bool = False
-
-
-# -------------------------------------------------------------------------
-# AUTHENTICATION ENDPOINTS
-# -------------------------------------------------------------------------
-@app.get("/api/auth/captcha")
-def auth_captcha(response: Response):
-    """Issues a short-lived, single-use login CAPTCHA challenge."""
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return create_challenge()
-
-
-@app.post("/api/auth/login")
-def auth_login(req: LoginRequest):
-    """Authenticates executive master officers and registered members against secure credential store."""
-    if not req.captcha_challenge_id.strip() or not req.captcha_answer.strip() or not verify_challenge(req.captcha_challenge_id, req.captcha_answer):
-        raise HTTPException(status_code=400, detail="CAPTCHA is missing, incorrect, expired, or already used.")
-    officer_id = (req.officer_id or req.username or "").strip().strip("\"'").strip()
-    password = req.password.strip().strip("\"'").strip()
-
-    officer_id_configured = config.get_auth_officer_id()
-    secret_pw_configured = config.get_auth_secret_password()
-
-    # If neither master environment credentials nor local users exist, report unconfigured
-    if not (officer_id_configured and secret_pw_configured) and not auth_store.load_users():
-        raise HTTPException(
-            status_code=503,
-            detail="Authentication is unconfigured. Production credentials must be supplied via MINEINTEL_OFFICER_ID and MINEINTEL_AUTH_PASSWORD environment variables."
-        )
-
-    auth_result = auth_store.authenticate_user(officer_id, password)
-    if not auth_result:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication failed: Invalid Officer Employee ID or Enclave Password."
-        )
-
-    if auth_result.get("error") == "USER_DISABLED":
-        raise HTTPException(
-            status_code=403,
-            detail=auth_result.get("message", "This account has been disabled or revoked.")
-        )
-
-    role = auth_result.get("role", "Worker")
-    if role not in ("Senior Officer", "Worker"):
-        role = "Senior Officer" if auth_result.get("is_master") else "Worker"
-    display_name = auth_result.get("display_name", officer_id)
-    token = create_session_token(auth_result["officer_id"], role=role)
-
-    return {
-        "success": True,
-        "authenticated": True,
-        "token": token,
-        "officer_id": auth_result["officer_id"],
-        "name": display_name,
-        "role": role,
-        "is_master": auth_result.get("is_master", False),
-        "department": "Ministry of Coal, Government of India",
-        "expires_in": 86400
-    }
-
-
-@app.post("/api/auth/verify-master")
-def auth_verify_master(req: MasterVerifyRequest):
-    """
-    Verifies Master Officer credentials before opening the user creation form.
-    Rejects invalid Master credentials with 401.
-    """
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    master_secret = config.get_auth_secret_password().strip().strip("\"'").strip()
-
-    if not master_officer or not master_secret:
-        raise HTTPException(
-            status_code=503,
-            detail="Master authentication is unconfigured on the server."
-        )
-
-    req_master_id = req.master_officer_id.strip().strip("\"'").strip()
-    req_master_pw = req.master_password.strip().strip("\"'").strip()
-
-    valid_master_id = secrets.compare_digest(req_master_id.lower(), master_officer.lower())
-    valid_master_pw = secrets.compare_digest(req_master_pw, master_secret)
-
-    if not (valid_master_id and valid_master_pw):
-        raise HTTPException(
-            status_code=401,
-            detail="Master authentication failed: Invalid Master Officer ID or Enclave Password."
-        )
-
-    return {
-        "success": True,
-        "authenticated": True,
-        "message": "Master Officer credentials verified."
-    }
-
-
-@app.post("/api/auth/users")
-def auth_create_user(req: CreateUserRequest):
-    """
-    Creates a new normal user account.
-    Requires Master Officer authentication.
-    """
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    master_secret = config.get_auth_secret_password().strip().strip("\"'").strip()
-
-    if not master_officer or not master_secret:
-        raise HTTPException(
-            status_code=503,
-            detail="Master authentication is unconfigured on the server."
-        )
-
-    req_master_id = req.master_officer_id.strip().strip("\"'").strip()
-    req_master_pw = req.master_password.strip().strip("\"'").strip()
-
-    valid_master_id = secrets.compare_digest(req_master_id.lower(), master_officer.lower())
-    valid_master_pw = secrets.compare_digest(req_master_pw, master_secret)
-
-    if not (valid_master_id and valid_master_pw):
-        raise HTTPException(
-            status_code=401,
-            detail="Master authentication failed: Invalid Master Officer ID or Enclave Password."
-        )
-
-    role_val = (req.role or "Worker").strip().strip("\"'").strip()
-    if role_val not in ("Senior Officer", "Worker"):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid role. Role must be 'Senior Officer' or 'Worker'."
-        )
-
-    try:
-        new_user = auth_store.create_user(
-            officer_id=req.officer_id.strip().strip("\"'").strip(),
-            password=req.password.strip().strip("\"'").strip(),
-            display_name=(req.display_name or "").strip().strip("\"'").strip() if req.display_name else None,
-            role=role_val
-        )
-        return {
-            "success": True,
-            "message": f"User '{new_user['officer_id']}' provisioned successfully as '{role_val}'.",
-            "user": new_user
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.patch("/api/auth/users/status")
-def auth_update_user_status(req: MasterUserActionRequest):
-    """
-    Enables or disables/revokes a user account.
-    Requires Master Officer authentication.
-    """
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    master_secret = config.get_auth_secret_password().strip().strip("\"'").strip()
-
-    if not master_officer or not master_secret:
-        raise HTTPException(status_code=503, detail="Master authentication is unconfigured.")
-
-    req_master_id = req.master_officer_id.strip().strip("\"'").strip()
-    req_master_pw = req.master_password.strip().strip("\"'").strip()
-
-    valid_master_id = secrets.compare_digest(req_master_id.lower(), master_officer.lower())
-    valid_master_pw = secrets.compare_digest(req_master_pw, master_secret)
-
-    if not (valid_master_id and valid_master_pw):
-        raise HTTPException(status_code=401, detail="Master authentication failed.")
-
-    success = auth_store.set_user_status(req.target_officer_id.strip().strip("\"'").strip(), req.is_active)
-    if not success:
-        raise HTTPException(status_code=404, detail=f"User '{req.target_officer_id}' not found.")
-
-    status_str = "activated" if req.is_active else "disabled/revoked"
-    return {
-        "success": True,
-        "message": f"User '{req.target_officer_id}' has been {status_str}."
-    }
-
-
-@app.get("/api/auth/verify")
-def auth_verify(authorization: Optional[str] = Header(None), token: Optional[str] = Query(None)):
-    """Verifies authenticity and timestamp of an active session token."""
-    raw_token = token if isinstance(token, str) and token.strip() else None
-    if not raw_token and isinstance(authorization, str) and authorization.strip():
-        if authorization.startswith("Bearer "):
-            raw_token = authorization.split("Bearer ", 1)[1].strip()
-        else:
-            raw_token = authorization.strip()
-    if not raw_token:
-        raise HTTPException(status_code=401, detail="Authentication token required.")
-    session = verify_session_token(raw_token)
-    if not session:
-        raise HTTPException(status_code=401, detail="Session token invalid or expired.")
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = bool(master_officer) and secrets.compare_digest(session.get("officer_id", "").lower(), master_officer.lower())
-    role = session.get("role", "Worker")
-    if is_master:
-        role = "Senior Officer"
-    elif role not in ("Senior Officer", "Worker"):
-        role = "Worker"
-    return {
-        "authenticated": True,
-        "officer_id": session["officer_id"],
-        "role": role,
-        "is_master": is_master or (role == "Senior Officer")
-    }
-
-
-def require_auth(
-    authorization: Optional[str] = Header(None),
-    token: Optional[str] = Query(None)
-) -> Dict[str, Any]:
-    """Dependency enforcing that protected operations require a valid cryptographic session token."""
-    raw_token = token if isinstance(token, str) and token.strip() else None
-    if not raw_token and isinstance(authorization, str) and authorization.strip():
-        if authorization.startswith("Bearer "):
-            raw_token = authorization.split("Bearer ", 1)[1].strip()
-        else:
-            raw_token = authorization.strip()
-    if not raw_token:
-        raise HTTPException(status_code=401, detail="Authentication token required for protected action.")
-    session = verify_session_token(raw_token)
-    if not session:
-        raise HTTPException(status_code=401, detail="Session token invalid, tampered, or expired.")
-    return session
-
-
-@app.get("/api/auth/profile")
-def auth_profile(auth: Dict[str, Any] = Depends(require_auth)):
-    """Returns the authenticated normal user's safe profile."""
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (
-        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
-    )
-    if is_master:
-        return {"officer_id": auth["officer_id"], "display_name": "Executive Master Auditor", "phone": "", "email": "", "role": "Senior Officer", "is_master": True}
-    user = auth_store.get_user_by_id(auth["officer_id"])
-    if not user:
-        raise HTTPException(status_code=404, detail="User profile not found.")
-    user_role = user.get("role", "Worker")
-    if user_role not in ("Senior Officer", "Worker"):
-        user_role = "Worker"
-    return {"officer_id": user["officer_id"], "display_name": user.get("display_name", user["officer_id"]), "phone": user.get("phone", ""), "email": user.get("email", ""), "role": user_role, "created_at": user.get("created_at"), "updated_at": user.get("updated_at"), "is_master": False}
-
-
-@app.patch("/api/auth/profile")
-def auth_update_profile(req: ProfileUpdateRequest, auth: Dict[str, Any] = Depends(require_auth)):
-    """Updates only the current user's permitted profile fields."""
-    if auth.get("role") == "Senior Officer":
-        raise HTTPException(status_code=403, detail="The provisioned master profile is managed by server configuration.")
-    try:
-        user = auth_store.update_user_profile(auth["officer_id"], req.display_name, req.phone, req.email)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not user:
-        raise HTTPException(status_code=404, detail="User profile not found.")
-    return {"success": True, "profile": {"officer_id": user["officer_id"], "display_name": user["display_name"], "phone": user.get("phone", ""), "email": user.get("email", ""), "role": user.get("role", "Worker"), "updated_at": user.get("updated_at")}}
-
-
-@app.post("/api/auth/password")
-def auth_change_password(req: PasswordChangeRequest, auth: Dict[str, Any] = Depends(require_auth)):
-    """Changes a normal user's password and invalidates sessions issued before the change."""
-    if auth.get("role") == "Senior Officer":
-        raise HTTPException(status_code=403, detail="The master password is managed by server configuration.")
-    try:
-        changed = auth_store.change_user_password(auth["officer_id"], req.current_password, req.new_password)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not changed:
-        raise HTTPException(status_code=401, detail="Current password is incorrect.")
-    return {"success": True, "session_invalidated": True, "message": "Password changed. Please sign in again."}
-
-
-@app.get("/api/auth/users")
-def auth_list_users(auth: Dict[str, Any] = Depends(require_auth)):
-    """Lists registered users for authorized inspectors."""
-    return {
-        "success": True,
-        "users": auth_store.get_all_users_safe()
-    }
-
-
-@app.post("/api/auth/logout")
-def auth_logout():
-    """Terminates active enclave session."""
-    return {"success": True, "message": "Enclave session terminated."}
 
 
 @app.get("/api/health/live")
@@ -609,223 +279,6 @@ async def upload_file(file: UploadFile = File(...)):
         "filename": file.filename,
         "file_type": ext.lstrip("."),
         "file_path": str(save_path)
-    }
-
-
-# -------------------------------------------------------------------------
-# PHASE 1: EVIDENCE INGESTION FOUNDATION ENDPOINTS
-# -------------------------------------------------------------------------
-@app.post("/api/ingest/jobs", status_code=201)
-async def create_ingestion_job(
-    files: List[UploadFile] = File(...),
-    auth: Dict[str, Any] = Depends(require_auth)
-):
-    """
-    Unified multi-file evidence ingestion endpoint.
-    Accepts PDF, scanned PDF, PNG/JPG/JPEG, CSV, XLSX, and DOCX files.
-    Computes cryptographic SHA-256 hashes, detects duplicates without deleting originals,
-    preserves immutable raw files, generates normalized markdown with granular source provenance,
-    and returns the multi-file job manifest.
-    """
-    if not files:
-        raise HTTPException(status_code=400, detail="At least one evidence file must be provided.")
-
-    uploaded_payloads: List[Tuple[str, bytes]] = []
-    for f in files:
-        if not f.filename:
-            continue
-        ext = Path(f.filename).suffix.lower()
-        if ext not in config.ALLOWED_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file format '{ext}' for file '{f.filename}'. Allowed: {', '.join(sorted(config.ALLOWED_EXTENSIONS))}"
-            )
-        content = await f.read()
-        if len(content) == 0:
-            raise HTTPException(status_code=400, detail=f"Uploaded file '{f.filename}' is empty (0 bytes).")
-        if len(content) > config.MAX_UPLOAD_SIZE_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File '{f.filename}' exceeds upload size limit of {config.MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)}MB."
-            )
-        uploaded_payloads.append((f.filename, content))
-
-    if not uploaded_payloads:
-        raise HTTPException(status_code=400, detail="No valid non-empty files were provided.")
-
-    owner_id = auth["officer_id"]
-    manifest = ingestion_engine.create_ingestion_job(owner_id=owner_id, files=uploaded_payloads)
-    return {
-        "success": True,
-        "job_id": manifest["job_id"],
-        "status": manifest["status"],
-        "total_files": manifest["total_files"],
-        "completed_files": manifest["completed_files"],
-        "failed_files": manifest["failed_files"],
-        "manifest": manifest
-    }
-
-
-@app.get("/api/ingest/jobs")
-def list_ingestion_jobs(
-    owner_id: Optional[str] = Query(None),
-    auth: Dict[str, Any] = Depends(require_auth)
-):
-    """
-    Lists ingestion jobs.
-    Enforces Phase 0 ownership isolation: normal officers can only view their own jobs.
-    Master officers can view all jobs or filter by owner_id.
-    """
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (
-        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
-    )
-    filter_owner = auth["officer_id"] if not is_master else (owner_id or None)
-    jobs = ingestion_store.list_jobs(owner_id=filter_owner)
-    return {
-        "success": True,
-        "jobs": jobs
-    }
-
-
-@app.get("/api/ingest/jobs/{job_id}")
-def get_ingestion_job_status(
-    job_id: str,
-    auth: Dict[str, Any] = Depends(require_auth)
-):
-    """
-    Retrieves status, file progress, and manifest summary for a specific ingestion job.
-    Enforces Phase 0 ownership isolation.
-    """
-    job = ingestion_store.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
-
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (
-        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
-    )
-    if not is_master and job.get("owner_id") != auth["officer_id"]:
-        raise HTTPException(status_code=403, detail="Forbidden: You do not have ownership access to this ingestion job.")
-
-    return {
-        "success": True,
-        "job": job
-    }
-
-
-@app.get("/api/ingest/jobs/{job_id}/manifest")
-def get_ingestion_job_manifest(
-    job_id: str,
-    auth: Dict[str, Any] = Depends(require_auth)
-):
-    """Retrieves the full manifest JSON for an ingestion job."""
-    job = ingestion_store.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Ingestion job '{job_id}' not found.")
-
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (
-        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
-    )
-    if not is_master and job.get("owner_id") != auth["officer_id"]:
-        raise HTTPException(status_code=403, detail="Forbidden: Access denied to job manifest.")
-
-    manifest_path = Path(job.get("manifest_path", ""))
-    if manifest_path.exists():
-        try:
-            return json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return job
-
-
-@app.get("/api/ingest/files/{file_id}")
-def get_evidence_file_details(
-    file_id: str,
-    auth: Dict[str, Any] = Depends(require_auth)
-):
-    """
-    Retrieves metadata, cryptographic hash, duplicate status, and source provenance for an evidence file.
-    Enforces Phase 0 ownership isolation.
-    """
-    rec = ingestion_store.get_evidence_file(file_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail=f"Evidence file '{file_id}' not found.")
-
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (
-        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
-    )
-    if not is_master and rec.get("owner_id") != auth["officer_id"]:
-        raise HTTPException(status_code=403, detail="Forbidden: Access denied to evidence file.")
-
-    return {
-        "success": True,
-        "file": rec
-    }
-
-
-@app.get("/api/ingest/files/{file_id}/raw")
-def download_raw_evidence_file(
-    file_id: str,
-    auth: Dict[str, Any] = Depends(require_auth)
-):
-    """Downloads the immutable raw uploaded evidence file."""
-    rec = ingestion_store.get_evidence_file(file_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail=f"Evidence file '{file_id}' not found.")
-
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (
-        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
-    )
-    if not is_master and rec.get("owner_id") != auth["officer_id"]:
-        raise HTTPException(status_code=403, detail="Forbidden: Access denied to raw evidence file.")
-
-    raw_path = Path(rec.get("raw_path", ""))
-    if not raw_path.exists():
-        raise HTTPException(status_code=404, detail="Raw evidence file is not present on disk.")
-
-    return FileResponse(
-        path=str(raw_path),
-        filename=rec.get("filename", raw_path.name),
-        media_type="application/octet-stream"
-    )
-
-
-@app.get("/api/ingest/files/{file_id}/normalized")
-def get_normalized_evidence_content(
-    file_id: str,
-    auth: Dict[str, Any] = Depends(require_auth)
-):
-    """Retrieves the normalized Markdown representation of an ingested evidence file."""
-    rec = ingestion_store.get_evidence_file(file_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail=f"Evidence file '{file_id}' not found.")
-
-    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
-    is_master = (
-        bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
-    )
-    if not is_master and rec.get("owner_id") != auth["officer_id"]:
-        raise HTTPException(status_code=403, detail="Forbidden: Access denied to normalized evidence.")
-
-    norm_path = Path(rec.get("normalized_path", ""))
-    content = ""
-    if norm_path.exists():
-        try:
-            content = norm_path.read_text(encoding="utf-8")
-        except Exception:
-            pass
-
-    return {
-        "success": True,
-        "file_id": file_id,
-        "filename": rec.get("filename"),
-        "file_type": rec.get("file_type"),
-        "normalized_markdown": content,
-        "provenance": rec.get("provenance", [])
     }
 
 
@@ -994,7 +447,7 @@ def get_ai_status_endpoint(
 ):
     """
     Detects and returns active AI provider capabilities, Ollama daemon status,
-    local model availability (qwen3:8b, qwen3-vl:8b), and registered providers.
+    local model availability (qwen2.5:7b, qwen2.5vl:7b), and registered providers.
     Enforces Phase 0 authenticated access.
     """
     status = get_active_ai_status()
@@ -1048,7 +501,7 @@ def generate_image_caption_endpoint(
     auth: Dict[str, Any] = Depends(require_auth)
 ):
     """
-    Generates structured AI-GENERATED CAPTION for visual evidence items using Qwen3-VL-8B.
+    Generates structured AI-GENERATED CAPTION for visual evidence items using qwen2.5vl:7b.
     Enforces Phase 0 ownership isolation. Gracefully handles model unavailability (no synthetic fallback).
     """
     evidence_item = evidence_store.get_evidence_by_id(payload.evidence_id)
@@ -1299,7 +752,7 @@ def recommend_chart_endpoint(
 ):
     """
     Recommends optimal chart type, title, and axes for a detected table.
-    Optionally enriches with Phase 3 Qwen3-8B AI advice (never allows AI to invent numbers).
+    Optionally enriches with Phase 3 qwen2.5:7b AI advice (never allows AI to invent numbers).
     Enforces Phase 0 user ownership isolation.
     """
     job = ingestion_store.get_job(payload.job_id)
@@ -2230,36 +1683,12 @@ def convert_to_markdown(file_id: str = Form(...)):
         raise HTTPException(status_code=500, detail=f"Conversion error: {str(e)}")
 
 
-@app.post("/api/process/llama")
-def run_llama_analysis(req: LlamaRequest):
-    """Runs Stage 1 local LLaMA 3.1 analysis on Markdown content."""
-    result = llama_client.analyze_document(
-        markdown_content=req.markdown_content,
-        file_type=req.file_type,
-        custom_command=req.custom_command,
-        model=req.model_override
-    )
-    return result
-
-
 @app.post("/api/process/math")
 def run_math_audit(req: MathRequest):
     """Runs Stage 2 deterministic math calculation engine."""
     result = math_engine.process_math_checks(
         analysis_text=req.analysis_text,
         custom_calculations=req.custom_calculations
-    )
-    return result
-
-
-@app.post("/api/process/report")
-def run_gemma_report(req: GemmaRequest):
-    """Runs Stage 3 Gemma systematic report synthesis."""
-    result = gemma_client.generate_systematic_report(
-        llama_analysis=req.llama_analysis,
-        math_audit_markdown=req.math_audit_markdown,
-        custom_instructions=req.custom_instructions,
-        model_override=req.model_override
     )
     return result
 
@@ -2692,50 +2121,6 @@ async def auto_generate_prompt(
 
 
 
-class ReportRevisionRequest(BaseModel):
-    report_id: Optional[str] = None
-    template: Optional[str] = "bento_grid"
-    current_content: Optional[str] = None
-    revision_prompt: str
-    gemma_model: Optional[str] = None
-
-
-@app.post("/api/reports/revise")
-async def revise_report_with_gemma(req: ReportRevisionRequest):
-    """Revises a compiled report using Gemma 4 according to user feedback directives."""
-    summary_path = config.PROCESSED_OUTPUT_DIR / f"llama_summary_{req.report_id or 'rev'}.md"
-    current_md = req.current_content or ""
-    if not current_md:
-        fallback_path = config.PROCESSED_OUTPUT_DIR / "llama_summary.md"
-        if fallback_path.exists():
-            current_md = fallback_path.read_text(encoding="utf-8")
-
-    result = gemma_client.revise_report(
-        current_report_markdown=current_md,
-        user_revision_prompt=req.revision_prompt,
-        model_override=req.gemma_model,
-        template=req.template
-    )
-
-    revised_text = result.get("revised_report", "")
-    if revised_text:
-        try:
-            summary_path.write_text(revised_text, encoding="utf-8")
-        except Exception:
-            pass
-
-    return {
-        "success": not result.get("fallback", True),
-        "report_id": req.report_id or "REP-2026-REV",
-        "template": req.template,
-        "model_used": result.get("model_used", config.OPENROUTER_MODEL),
-        "revised_content": revised_text,
-        "revision_prompt": req.revision_prompt,
-        "fallback": result.get("fallback", True),
-        "message": "Report revised successfully via OpenRouter." if not result.get("fallback", True) else "Report revised using deterministic fallback. AI service was unavailable."
-    }
-
-
 @app.get("/api/reports/latest-summary")
 def get_latest_summary():
     """Returns the latest summary and converted Markdown with safe fallback resolution."""
@@ -2836,20 +2221,7 @@ def fill_template_content(template_id: str, req: Optional[TemplateFillRequest] =
     if req and req.custom_focus:
         full_prompt += f"\n\nADDITIONAL FOCUS DIRECTIVE:\n{req.custom_focus}"
 
-    # Check if Cloud AI (OpenRouter) is accessible
     ai_generated_text = None
-    if llama_client.cloud_client.is_available():
-        try:
-            cloud_res = llama_client.cloud_client.generate(
-                prompt=f"Data Summary:\n{data_summary}\n\nPlease generate the template sections.",
-                system_instruction=system_prompt + (f"\n\nADDITIONAL FOCUS DIRECTIVE:\n{req.custom_focus}" if req and req.custom_focus else ""),
-                temperature=0.2,
-                model_override=req.model if req and req.model else None
-            )
-            if cloud_res.get("success") and cloud_res.get("text"):
-                ai_generated_text = cloud_res["text"]
-        except Exception as e:
-            logger.debug(f"Cloud AI template fill error: {e}")
 
     sections = []
     if ai_generated_text and len(ai_generated_text.strip()) > 50:
@@ -3608,104 +2980,25 @@ def get_analytics_summary(job_id: Optional[str] = Query(None)):
         "state_aggregates": metrics.get("state_aggregates", {})
     }
 
-
 # -------------------------------------------------------------------------
-# PHASE 3: AGENT EXECUTION LAYER ENDPOINTS
+# PHASE 3: AGENT EXECUTION LAYER ENDPOINTS (Migrated to backend/routers/agent.py)
 # -------------------------------------------------------------------------
-from fastapi import BackgroundTasks
-from backend.services.agent.agent_store import list_tasks
 
-class AgentTaskRequest(BaseModel):
-    task_id: str
-    instruction: Optional[str] = None
 
-@app.post("/api/agent/tasks", status_code=201)
-def create_agent_task(
-    req: AgentTaskRequest,
-    background_tasks: BackgroundTasks,
-    auth: Dict[str, Any] = Depends(require_auth)
-):
-    """Creates a new autonomous Agent Task and runs it in the background."""
-    from backend.services.agent.agent_coordinator import AgentCoordinator
-    from backend.services.agent.agent_store import get_active_task_for_job
 
-    owner_id = auth["officer_id"]
-    # Check for existing active task for this job to prevent duplicate execution
-    active_task = get_active_task_for_job(owner_id=owner_id, job_id=req.task_id)
-    if active_task:
-        return {
-            "success": True,
-            "task_id": active_task["task_id"],
-            "status": active_task["status"],
-            "message": "Existing active agent task returned."
-        }
-
-    # Owner ID is injected directly from the authenticated session.
-    coordinator = AgentCoordinator(owner_id=owner_id)
-    state = coordinator.initialize_task(task_id=req.task_id)
-    
-    background_tasks.add_task(
-        coordinator.process_task, 
-        state.task_id, 
-        req.instruction or "Synthesize a comprehensive report based on the provided evidence."
-    )
-    
-    return {
-        "success": True,
-        "task_id": state.task_id,
-        "status": state.status.value,
-        "message": "Agent task started successfully."
-    }
-
-@app.get("/api/agent/tasks")
-def get_agent_tasks(
-    auth: Dict[str, Any] = Depends(require_auth)
-):
-    """Lists all Agent Tasks for the authenticated owner."""
-    owner_id = auth["officer_id"]
-    tasks = list_tasks(owner_id)
-    return {
-        "success": True,
-        "tasks": tasks
-    }
-
-@app.get("/api/agent/tasks/{task_id}")
-def get_agent_task_status(
-    task_id: str,
-    auth: Dict[str, Any] = Depends(require_auth)
-):
-    """Retrieves full details of an Agent Task with startup watchdog check."""
-    from backend.services.agent.agent_coordinator import AgentCoordinator
-    from backend.services.agent.agent_models import AgentTaskStatus, WorkflowStage
-    
-    coordinator = AgentCoordinator(owner_id=auth["officer_id"])
-    state = coordinator.get_task_state(task_id)
-    if not state:
-        raise HTTPException(status_code=404, detail="Agent task not found.")
-
-    # Startup watchdog: check if stuck in PENDING beyond 30 seconds
-    now = int(time.time() * 1000)
-    if state.status == AgentTaskStatus.PENDING and (now - state.created_at) > 30000:
-        state = coordinator._fail_task(
-            state,
-            code="STARTUP_TIMEOUT",
-            message=f"Agent task remained in PENDING state longer than the 30-second startup deadline (elapsed {int((now - state.created_at)/1000)}s). Background worker may have terminated or hung.",
-            stage=WorkflowStage.LOAD_MANIFEST,
-            retryable=False
-        )
-            
-    return {
-        "success": True,
-        "task_id": task_id,
-        "status": state.status.value,
-        "task": state.model_dump()
-    }
-
+# Mount backend static directory for charts and media assets
+backend_static_dir = getattr(config, "STATIC_DIR", Path(__file__).resolve().parent / "static")
+backend_static_dir.mkdir(parents=True, exist_ok=True)
+charts_dir = getattr(config, "STATIC_CHARTS_DIR", backend_static_dir / "charts")
+charts_dir.mkdir(parents=True, exist_ok=True)
+if not config.IS_VERCEL and backend_static_dir.exists():
+    from starlette.staticfiles import StaticFiles
+    app.mount("/static", StaticFiles(directory=str(backend_static_dir)), name="backend_static")
 
 # Mount static directory for frontend UI (when NOT in serverless mode)
 static_dir = Path(__file__).resolve().parent.parent / "dist"
 if not static_dir.exists():
-    static_dir = Path(__file__).resolve().parent / "static"
+    static_dir = backend_static_dir
 if not config.IS_VERCEL and static_dir.exists():
     from starlette.staticfiles import StaticFiles
     app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")

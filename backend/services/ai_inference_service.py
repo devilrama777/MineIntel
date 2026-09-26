@@ -2,8 +2,8 @@
 MineIntel Phase 3: AI Inference Service (Structured Evidence Reasoning & Multimodal Captioning)
 
 Orchestrates:
-- Evidence-grounded text reasoning via Qwen3-8B (or configured provider)
-- Multimodal visual captioning via Qwen3-VL-8B
+- Evidence-grounded text reasoning via qwen2.5:7b (or configured provider)
+- Multimodal visual captioning via qwen2.5vl:7b
 - Generating derived Phase 2 StructuredEvidenceItem records
 - Strict Model Unavailable error handling (never fake fallback output)
 """
@@ -54,7 +54,7 @@ class AIInferenceService:
         """
         Executes structured evidence reasoning:
         1. Assembles locked facts, calculated values, and narratives into an evidence-aware prompt.
-        2. Dispatches to selected AI provider (Local Qwen3-8B or OpenRouter).
+        2. Dispatches to selected AI provider (Local qwen2.5:7b or OpenRouter).
         3. Persists AI output as an AI ANALYSIS derived evidence item.
         """
         prompt_text, system_inst, parent_ids = prompt_builder.build_reasoning_prompt(
@@ -161,7 +161,7 @@ class AIInferenceService:
         model_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Executes multimodal visual evidence analysis / captioning with Qwen3-VL-8B:
+        Executes multimodal visual evidence analysis / captioning with qwen2.5vl:7b:
         1. Loads image evidence item and raw file reference.
         2. Dispatches image and visual prompt to multimodal model.
         3. Persists result as AI-GENERATED CAPTION derived evidence item.

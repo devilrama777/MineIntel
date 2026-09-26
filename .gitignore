@@ -1,48 +1,53 @@
-# Python Bytecode & Cache
-__pycache__/
-*.py[cod]
-*$py.class
-*.pyd
-
-# Environments
-.env
-.env.*
+# Environments & Secrets
+.env*
 !.env.example
-.env*.local
-
-# User storage & database files (dynamic runtime state)
-backend/data/*.json
 *.db
 *.sqlite
 *.sqlite3
 
-# Temporary and log files
+# Python Bytecode & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+venv/
+.venv/
+env/
+.env/
+
+# Dependencies & Build Artifacts
+node_modules/
+dist/
+.vercel/
+
+# Logs & Temporary Files
 *.log
 *.tmp
 *.bak
 temp/
 
-# User uploads & processed caches
-uploads/*
-!uploads/.gitkeep
-reported_data/*
-!reported_data/.gitkeep
+# User storage & database files (dynamic runtime state)
+backend/data/*.json
+!backend/data/cil_colliery_data.json
+!backend/data/trends_data.json
+
+# Runtime outputs & generated media
+outputs/ingest_*
 outputs/job_*
 outputs/active_*
 outputs/reports/*
 !outputs/reports/.gitkeep
 outputs/charts/*
 !outputs/charts/.gitkeep
+backend/static/charts/*
+!backend/static/charts/.gitkeep
+uploads/*
+!uploads/.gitkeep
+reported_data/*
+!reported_data/.gitkeep
 .freebuff/
 scratch/
-node_modules/
-dist/
-.vercel/
-SIH_ps_2_test_1/
-# OS specific
+
+# OS Specific
 .DS_Store
 Thumbs.db
-
-
-.vercel
-.env*

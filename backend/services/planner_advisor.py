@@ -1,7 +1,7 @@
 """
 MineIntel Phase 6: Report Planner AI Organization Advisor
 
-Utilizes Phase 3 Local AI (Qwen3-8B) to optimize report titles, section hierarchies,
+Utilizes Phase 3 Local AI (qwen2.5:7b) to optimize report titles, section hierarchies,
 and executive logical flow while strictly prohibiting AI from altering factual numbers.
 """
 

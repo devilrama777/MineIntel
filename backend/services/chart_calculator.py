@@ -53,17 +53,44 @@ class ChartCalculator:
             validation_errors.append("Dataset has no rows to chart.")
             return None, validation_errors
 
+        if isinstance(y_cols, str):
+            y_cols = [y_cols]
+
         if not y_cols:
             validation_errors.append("At least one numerical metric column (y_axis) must be specified.")
             return None, validation_errors
 
-        # Check column existence
+        # Flexible column resolution helper
         sample_row = rows[0]
-        if x_col not in sample_row:
+        available_keys = list(sample_row.keys())
+
+        def resolve_col(target: str, available: List[str]) -> Optional[str]:
+            if target in available:
+                return target
+            target_norm = target.strip().lower().replace("_", "").replace(" ", "").replace("-", "")
+            for col in available:
+                if col.strip().lower().replace("_", "").replace(" ", "").replace("-", "") == target_norm:
+                    return col
+            for col in available:
+                if col.strip().lower() == target.strip().lower():
+                    return col
+            return None
+
+        # Check column existence
+        resolved_x = resolve_col(x_col, available_keys)
+        if not resolved_x:
             validation_errors.append(f"X-axis column '{x_col}' does not exist in dataset.")
+        else:
+            x_col = resolved_x
+
+        resolved_y_cols = []
         for y_col in y_cols:
-            if y_col not in sample_row:
+            res_y = resolve_col(y_col, available_keys)
+            if not res_y:
                 validation_errors.append(f"Y-axis metric column '{y_col}' does not exist in dataset.")
+            else:
+                resolved_y_cols.append(res_y)
+        y_cols = resolved_y_cols
 
         if validation_errors:
             return None, validation_errors

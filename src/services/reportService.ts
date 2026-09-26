@@ -78,7 +78,7 @@ class LocalDesktopService {
       if (healthResp.ok) {
         const h = await healthResp.json();
         const activeProvider = aiStatusData?.active_provider || h.ai_provider || 'local_ollama';
-        const activeModel = aiStatusData?.default_model || h.cloud_model || 'qwen3:8b';
+        const activeModel = aiStatusData?.default_model || h.cloud_model || 'qwen2.5:7b';
         const isAiHealthy = aiStatusData
           ? Boolean(aiStatusData.status === 'operational' || aiStatusData.local_daemon_available || aiStatusData.active_provider)
           : Boolean(h.cloud_ai_active);
@@ -152,7 +152,7 @@ class LocalDesktopService {
 
       if (healthResp.ok) {
         const h = await healthResp.json();
-        const activeModel = aiStatusData?.default_model || h.cloud_model || 'qwen3:8b';
+        const activeModel = aiStatusData?.default_model || h.cloud_model || 'qwen2.5:7b';
         const activeProvider = aiStatusData?.active_provider || 'local_ollama';
         return {
           localAiStatus: `Sovereign Engine (${activeProvider}: ${activeModel})`,
@@ -203,7 +203,7 @@ class LocalDesktopService {
               sourcesLinkedCount: r.sources_count || 0,
               validationScore: r.validation_score || 0,
               referenceReportUsed: r.reference_report_path,
-              selectedModel: r.model_name || 'qwen3:8b',
+              selectedModel: r.model_name || 'qwen2.5:7b',
             });
           }
         }
@@ -238,7 +238,7 @@ class LocalDesktopService {
                     wordCount: 0,
                     sourcesLinkedCount: j.total_files || 1,
                     validationScore: 100,
-                    selectedModel: 'qwen3:8b',
+                    selectedModel: 'qwen2.5:7b',
                   });
                 }
               }
@@ -281,7 +281,7 @@ class LocalDesktopService {
           wordCount: 0,
           sourcesLinkedCount: 0,
           validationScore: 100,
-          selectedModel: 'qwen3:8b',
+          selectedModel: 'qwen2.5:7b',
         };
       }
     } catch {
@@ -465,7 +465,16 @@ class LocalDesktopService {
     title?: string,
     onProgress?: (
       status: 'PENDING' | 'RUNNING' | 'AWAITING_INPUT' | 'VALIDATING' | 'RETRYING' | 'COMPLETED' | 'FAILED',
-      detail?: { currentTool?: string; currentStage?: string; progressReason?: string; message?: string }
+      detail?: {
+        currentTool?: string;
+        currentStage?: string;
+        progressReason?: string;
+        message?: string;
+        sections_completed?: number;
+        total_sections?: number;
+        active_sections?: string[];
+        completed_sections?: string[];
+      }
     ) => void
   ): Promise<{
     job_id: string;
@@ -559,6 +568,19 @@ class LocalDesktopService {
       const currentStage = structuredState.current_stage || '';
       const progressReason = structuredState.progress_reason || '';
 
+      const sections_completed = Number(statusData.sections_completed ?? structuredState.sections_completed ?? 0);
+      const total_sections = Number(statusData.total_sections ?? structuredState.total_sections ?? structuredState.sections_total ?? 0);
+      const active_sections = Array.isArray(statusData.active_sections)
+        ? statusData.active_sections
+        : Array.isArray(structuredState.active_sections)
+        ? structuredState.active_sections
+        : [];
+      const completed_sections = Array.isArray(statusData.completed_sections)
+        ? statusData.completed_sections
+        : Array.isArray(structuredState.completed_sections)
+        ? structuredState.completed_sections
+        : [];
+
       if (!activeTool && Array.isArray(taskObj?.execution_history)) {
         for (let i = taskObj.execution_history.length - 1; i >= 0; i--) {
           const h = taskObj.execution_history[i];
@@ -577,6 +599,10 @@ class LocalDesktopService {
         currentTool: activeTool,
         currentStage,
         progressReason,
+        sections_completed,
+        total_sections,
+        active_sections,
+        completed_sections,
       });
 
       if (currentStatus === 'COMPLETED') {
@@ -702,7 +728,20 @@ class LocalDesktopService {
 
   async runPipelineWithFile(
     file: File,
-    customCommand?: string
+    customCommand?: string,
+    onProgress?: (
+      status: 'PENDING' | 'RUNNING' | 'AWAITING_INPUT' | 'VALIDATING' | 'RETRYING' | 'COMPLETED' | 'FAILED',
+      detail?: {
+        currentTool?: string;
+        currentStage?: string;
+        progressReason?: string;
+        message?: string;
+        sections_completed?: number;
+        total_sections?: number;
+        active_sections?: string[];
+        completed_sections?: string[];
+      }
+    ) => void
   ): Promise<{
     job_id: string;
     filename: string;
@@ -712,7 +751,7 @@ class LocalDesktopService {
     report_text: string;
     output_files: { pdf?: string; docx?: string; xlsx?: string };
   }> {
-    const res = await this.runPipelineWithFiles([file], customCommand, `Executive Audit: ${file.name}`);
+    const res = await this.runPipelineWithFiles([file], customCommand, `Executive Audit: ${file.name}`, onProgress);
     return {
       job_id: res.job_id,
       filename: res.filename,

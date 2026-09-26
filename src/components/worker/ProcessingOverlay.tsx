@@ -22,6 +22,10 @@ export interface ProcessingOverlayProps {
   currentTool?: string;
   currentStage?: string;
   progressReason?: string;
+  sections_completed?: number;
+  total_sections?: number;
+  active_sections?: string[];
+  completed_sections?: string[];
 }
 
 const STAGES = [
@@ -45,8 +49,8 @@ const STAGES = [
   },
   {
     id: 3,
-    label: 'Report Validation & Verification',
-    detail: 'Auditing mathematical consistency and evidence integrity...',
+    label: 'Section Synthesis & Verification',
+    detail: 'Synthesizing report sections in parallel and verifying math...',
     icon: Sparkles,
   },
   {
@@ -66,6 +70,10 @@ export const ProcessingOverlay: React.FC<ProcessingOverlayProps> = ({
   currentTool,
   currentStage,
   progressReason,
+  sections_completed = 0,
+  total_sections = 0,
+  active_sections = [],
+  completed_sections = [],
 }) => {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -83,6 +91,39 @@ export const ProcessingOverlay: React.FC<ProcessingOverlayProps> = ({
   // Map real Agent status & deterministic workflow stages without timer-based fake progress
   const normalizedStatus = (agentStatus || 'PENDING').toUpperCase();
   const normalizedStage = (currentStage || '').toUpperCase();
+
+  const sectionsCompleted = sections_completed ?? 0;
+  const totalSections = total_sections ?? 0;
+  const activeSections = active_sections ?? [];
+  const completedSections = completed_sections ?? [];
+
+  // Granular Section Progress: (sections_completed / total_sections) * 100
+  const sectionProgressPercent = totalSections > 0
+    ? Math.min(100, Math.max(0, Math.round((sectionsCompleted / totalSections) * 100)))
+    : 0;
+
+  // Real-time Status Text area builder (e.g., "✅ Executive Summary completed... ⏳ Writing Market Analysis...")
+  const buildStatusText = () => {
+    const parts: string[] = [];
+    if (completedSections.length > 0) {
+      const lastCompleted = completedSections[completedSections.length - 1];
+      parts.push(`✅ ${lastCompleted} completed`);
+    }
+    if (activeSections.length > 0) {
+      parts.push(`⏳ Writing ${activeSections.join(', ')}...`);
+    }
+    if (parts.length > 0) {
+      return parts.join('... ');
+    }
+    if (totalSections > 0) {
+      if (sectionsCompleted >= totalSections) {
+        return `✅ All ${totalSections} sections completed. Compiling final report artifacts...`;
+      }
+      return `⏳ Initializing parallel section synthesis (${totalSections} sections queued)...`;
+    }
+    return progressReason || 'Autonomous Agent reasoning over ingested evidence...';
+  };
+  const statusText = buildStatusText();
 
   let stageIndex = 0;
   let progressPercent = 10;
@@ -114,12 +155,17 @@ export const ProcessingOverlay: React.FC<ProcessingOverlayProps> = ({
       displayStageDetail = progressReason || 'Formulating comprehensive audit outline and visual chart plan...';
     } else if (normalizedStage === 'WRITING' || normalizedStage === 'VALIDATE_REPORT_DATA') {
       stageIndex = 3;
-      progressPercent = 80;
-      displayStageName = 'Section Synthesis & Verification';
-      displayStageDetail = progressReason || 'Synthesizing report sections and auditing mathematical consistency...';
+      // Linear granular jumps as parallel sections finish
+      progressPercent = totalSections > 0
+        ? Math.min(90, Math.max(55, Math.round(55 + (sectionProgressPercent * 0.35))))
+        : 80;
+      displayStageName = totalSections > 0
+        ? `Parallel Section Writing (${sectionsCompleted}/${totalSections})`
+        : 'Section Synthesis & Verification';
+      displayStageDetail = statusText;
     } else if (normalizedStage === 'COMPILE_MARKDOWN_ARTIFACT' || normalizedStage === 'VERIFY_ARTIFACT') {
       stageIndex = 4;
-      progressPercent = 92;
+      progressPercent = 95;
       displayStageName = 'Markdown Compilation & Artifact Verification';
       displayStageDetail = progressReason || 'Compiling executive Markdown artifact and verifying integrity...';
     } else if (currentTool === 'query_evidence' || currentTool === 'get_intelligence') {
@@ -132,7 +178,7 @@ export const ProcessingOverlay: React.FC<ProcessingOverlayProps> = ({
       displayStageDetail = progressReason || `Agent executing: ${currentTool} — formulating intelligence plan...`;
     } else if (currentTool === 'generate_report') {
       stageIndex = 4;
-      progressPercent = 85;
+      progressPercent = 90;
       displayStageDetail = progressReason || 'Agent executing: generate_report — compiling report artifacts...';
     } else {
       stageIndex = 1;
@@ -141,7 +187,7 @@ export const ProcessingOverlay: React.FC<ProcessingOverlayProps> = ({
     }
   } else if (normalizedStatus === 'VALIDATING') {
     stageIndex = 3;
-    progressPercent = 85;
+    progressPercent = 88;
     displayStageName = 'Validating report';
     displayStageDetail = progressReason || (currentTool ? `Validating with ${currentTool}...` : 'Auditing mathematical consistency and section integrity...');
   } else if (normalizedStatus === 'RETRYING') {
@@ -226,7 +272,77 @@ export const ProcessingOverlay: React.FC<ProcessingOverlayProps> = ({
 
         {/* Progress Stages & Feedback Bottom Area */}
         <div className="p-6 overflow-y-auto">
-          {/* Progress Bar */}
+          {/* Granular Section Progress UI for Parallel Writing */}
+          {(totalSections > 0 || normalizedStage === 'WRITING') && (
+            <div
+              id="granular-section-progress-card"
+              className="mb-5 p-4.5 rounded-2xl bg-gradient-to-br from-blue-950/70 via-[#071326] to-[#040813] border border-blue-400/50 dark:border-blue-500/40 shadow-xl shadow-blue-950/40"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-xs sm:text-sm font-extrabold text-neutral-900 dark:text-white">
+                    Parallel Section Synthesis: <span className="text-blue-600 dark:text-blue-400 font-mono">Section {sectionsCompleted}/{totalSections} completed</span>
+                  </span>
+                </div>
+                <span className="font-mono font-extrabold text-xs sm:text-sm px-2.5 py-0.5 rounded-md bg-blue-500/20 text-blue-600 dark:text-blue-300 border border-blue-400/40 shadow-xs">
+                  {sectionProgressPercent}%
+                </span>
+              </div>
+
+              {/* Progress Bar that calculates: (sections_completed / total_sections) * 100 */}
+              <div className="w-full h-3.5 rounded-full bg-neutral-200 dark:bg-[#060d1a] overflow-hidden p-0.5 border border-blue-300/70 dark:border-blue-800/70 shadow-inner">
+                <div
+                  id="section-progress-bar"
+                  className="h-full rounded-full transition-all duration-300 ease-out shadow-md bg-gradient-to-r from-blue-600 via-sky-400 to-emerald-400"
+                  style={{ width: `${sectionProgressPercent}%` }}
+                />
+              </div>
+
+              {/* Status Text area updating as sections finish (e.g. "✅ Executive Summary completed... ⏳ Writing Market Analysis...") */}
+              <div
+                id="section-status-text"
+                className="mt-3 px-3.5 py-2.5 rounded-xl bg-white/80 dark:bg-[#050b17]/95 border border-blue-200/80 dark:border-blue-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono"
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <span className="text-blue-500 dark:text-blue-400 font-bold shrink-0">Status Text:</span>
+                  <span className="text-neutral-900 dark:text-slate-100 font-medium truncate">{statusText}</span>
+                </div>
+                {activeSections.length > 0 && (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-amber-600 dark:text-amber-300 shrink-0">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                    {activeSections.length} parallel worker{activeSections.length > 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+
+              {/* Badges for completed & active sections */}
+              {(completedSections.length > 0 || activeSections.length > 0) && (
+                <div className="mt-2.5 flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pt-1">
+                  {completedSections.map((title) => (
+                    <span
+                      key={`comp-${title}`}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800/60"
+                    >
+                      <span>✅</span>
+                      <span className="truncate max-w-[220px]">{title}</span>
+                    </span>
+                  ))}
+                  {activeSections.map((title) => (
+                    <span
+                      key={`act-${title}`}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800/60 animate-pulse"
+                    >
+                      <span>⏳</span>
+                      <span className="truncate max-w-[220px]">{title}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Overall Workflow Progress Bar */}
           <div className="mb-6">
             <div className="flex items-center justify-between text-xs sm:text-sm font-bold mb-2 text-neutral-700 dark:text-neutral-200">
               <span className="truncate pr-2 flex flex-col">
@@ -251,7 +367,7 @@ export const ProcessingOverlay: React.FC<ProcessingOverlayProps> = ({
             </div>
             <div className="w-full h-2.5 rounded-full bg-neutral-100 dark:bg-[#070e1c] overflow-hidden p-0.5 border border-neutral-200/80 dark:border-blue-900/40">
               <div
-                className={`h-full rounded-full transition-all duration-500 ease-out shadow-xs ${
+                className={`h-full rounded-full transition-all duration-300 ease-out shadow-xs ${
                   isFailed
                     ? 'bg-rose-500'
                     : isCompleted
@@ -290,7 +406,22 @@ export const ProcessingOverlay: React.FC<ProcessingOverlayProps> = ({
                     {isDone ? (
                       <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                     ) : isCurrent ? (
-                      <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+                      /* Replace generic spinner with progress indicator during Section Writing */
+                      idx === 3 && totalSections > 0 ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-mono font-bold text-blue-600 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/80 px-1.5 py-0.2 rounded border border-blue-400/50">
+                            {sectionsCompleted}/{totalSections}
+                          </span>
+                          <div className="w-8 h-1.5 rounded-full bg-blue-200 dark:bg-blue-900/60 overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-blue-500 transition-all duration-300"
+                              style={{ width: `${sectionProgressPercent}%` }}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+                      )
                     ) : isFailed && idx === stageIndex ? (
                       <AlertCircle className="w-4 h-4 text-rose-500" />
                     ) : (

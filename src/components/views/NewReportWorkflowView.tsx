@@ -90,25 +90,21 @@ export const NewReportWorkflowView: React.FC<Props> = ({
 
   const launch = () => {
     setLaunching(true);
-    window.setTimeout(
-      () =>
-        onCreateReport({
-          name: reportName,
-          organization,
-          reportingPeriod,
-          description,
-          selectedSources,
-          referenceReport: reference,
-          processingConfig: config,
-          aiConfig: {
-            modelName: effectiveModel,
-            contextLength: 32768,
-            temperature,
-            strictVerification,
-          },
-        }),
-      600
-    );
+    onCreateReport({
+      name: reportName,
+      organization,
+      reportingPeriod,
+      description,
+      selectedSources,
+      referenceReport: reference,
+      processingConfig: config,
+      aiConfig: {
+        modelName: effectiveModel,
+        contextLength: 32768,
+        temperature,
+        strictVerification,
+      },
+    });
   };
 
   const content = () => {

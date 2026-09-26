@@ -25,7 +25,10 @@ from backend.services.chart_models import ChartConfig, ChartType
 
 logger = logging.getLogger("mineintel.chart_renderer")
 
-CHARTS_DIR = config.OUTPUTS_DIR / "charts"
+STATIC_CHARTS_DIR = getattr(config, "STATIC_CHARTS_DIR", config.BACKEND_DIR / "static" / "charts")
+OUTPUTS_CHARTS_DIR = config.OUTPUTS_DIR / "charts"
+# Default CHARTS_DIR points to STATIC_CHARTS_DIR (backend/static/charts)
+CHARTS_DIR = STATIC_CHARTS_DIR
 
 # Modern curated color palettes
 PALETTE = [
@@ -57,14 +60,43 @@ THEME_COLORS = {
 }
 
 
+def normalize_chart_type(chart_type: Optional[str], series_count: int = 1) -> str:
+    """Normalizes any chart_type string from AI or user to a valid supported enum value."""
+    if not chart_type:
+        return ChartType.GROUPED_BAR.value if series_count > 1 else ChartType.BAR.value
+    c = str(chart_type).lower().strip().replace("-", "_").replace(" ", "_")
+    if "time" in c or "date" in c or "temporal" in c:
+        return ChartType.TIME_SERIES.value
+    if "line" in c or "trend" in c:
+        return ChartType.LINE.value
+    if "donut" in c or "doughnut" in c:
+        return ChartType.DONUT.value
+    if "pie" in c:
+        return ChartType.PIE.value
+    if "scatter" in c:
+        return ChartType.SCATTER.value
+    if "area" in c:
+        return ChartType.AREA.value
+    if "stack" in c:
+        return ChartType.STACKED_BAR.value
+    if "group" in c:
+        return ChartType.GROUPED_BAR.value
+    if "bar" in c or "col" in c or "hist" in c:
+        return ChartType.GROUPED_BAR.value if series_count > 1 else ChartType.BAR.value
+    return ChartType.GROUPED_BAR.value if series_count > 1 else ChartType.BAR.value
+
+
 class ChartRenderer:
     """Renders charts using headless Matplotlib with custom MineIntel styling."""
 
+    normalize_chart_type = staticmethod(normalize_chart_type)
+
     def __init__(self):
-        try:
-            CHARTS_DIR.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
+        for d in (STATIC_CHARTS_DIR, OUTPUTS_CHARTS_DIR):
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
 
     @classmethod
     def _apply_theme(cls, fig, ax, theme_name: str):
@@ -89,14 +121,26 @@ class ChartRenderer:
         Renders chart to PNG and SVG files.
         Returns (png_path, svg_path).
         """
-        try:
-            CHARTS_DIR.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
+        for d in (STATIC_CHARTS_DIR, OUTPUTS_CHARTS_DIR):
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
         chart_id = chart_config.chart_id
-        chart_type = chart_config.chart_type
+        chart_type = normalize_chart_type(chart_config.chart_type, len(series))
         theme_name = chart_config.theme or "mineintel_dark"
         theme = THEME_COLORS.get(theme_name, THEME_COLORS["mineintel_dark"])
+
+        # Sanitize series values (replacing None or NaN with 0.0)
+        sanitized_series = []
+        for s in series:
+            s_copy = dict(s)
+            s_copy["data"] = [
+                float(v) if (v is not None and not (isinstance(v, float) and np.isnan(v))) else 0.0
+                for v in s.get("data", [])
+            ]
+            sanitized_series.append(s_copy)
+        series = sanitized_series
 
         fig, ax = plt.subplots(figsize=(10, 5.5), dpi=120)
 
@@ -225,17 +269,113 @@ class ChartRenderer:
 
             png_filename = f"{chart_id}.png"
             svg_filename = f"{chart_id}.svg"
-            png_path = CHARTS_DIR / png_filename
-            svg_path = CHARTS_DIR / svg_filename
+            png_static = STATIC_CHARTS_DIR / png_filename
+            svg_static = STATIC_CHARTS_DIR / svg_filename
+            png_output = OUTPUTS_CHARTS_DIR / png_filename
+            svg_output = OUTPUTS_CHARTS_DIR / svg_filename
 
-            fig.savefig(str(png_path), format="png", dpi=150, facecolor=fig.get_facecolor(), bbox_inches="tight")
-            fig.savefig(str(svg_path), format="svg", facecolor=fig.get_facecolor(), bbox_inches="tight")
+            fig.savefig(str(png_static), format="png", dpi=150, facecolor=fig.get_facecolor(), bbox_inches="tight")
+            fig.savefig(str(svg_static), format="svg", facecolor=fig.get_facecolor(), bbox_inches="tight")
 
-            logger.info(f"Rendered chart {chart_id} to {png_path} and {svg_path}")
-            return str(png_path), str(svg_path)
+            try:
+                if png_output != png_static:
+                    import shutil
+                    shutil.copy2(png_static, png_output)
+                    shutil.copy2(svg_static, svg_output)
+            except Exception:
+                pass
+
+            logger.info(f"Rendered chart {chart_id} to {png_static} and {svg_static}")
+            return str(png_static), str(svg_static)
+
+        finally:
+            plt.close(fig)
+
+    def render_placeholder(
+        self,
+        chart_id: str,
+        title: str,
+        subtitle: Optional[str] = None,
+        error_message: Optional[str] = None,
+        theme_name: str = "mineintel_dark"
+    ) -> Tuple[str, str]:
+        """
+        Renders a clean, high-DPI visual placeholder when automatic chart rendering encounters
+        missing columns or requires fallback representation.
+        Guarantees that a physical, valid PNG and SVG file are created on disk in static/charts/.
+        """
+        for d in (STATIC_CHARTS_DIR, OUTPUTS_CHARTS_DIR):
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+
+        theme = THEME_COLORS.get(theme_name, THEME_COLORS["mineintel_dark"])
+        fig, ax = plt.subplots(figsize=(10, 5.5), dpi=120)
+
+        try:
+            self._apply_theme(fig, ax, theme_name)
+
+            full_title = f"{title}\n[CHART VISUALIZATION PLACEHOLDER]"
+            if subtitle:
+                full_title += f" • {subtitle}"
+            ax.set_title(full_title, fontsize=12, fontweight="bold", pad=14, color=theme["text"])
+
+            ax.set_xlim(0, 10)
+            ax.set_ylim(0, 10)
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+            # Draw a styled card area
+            rect = plt.Rectangle((0.5, 0.5), 9.0, 9.0, fill=True, facecolor=theme["ax_bg"],
+                                 edgecolor=theme["spine"], linestyle="--", linewidth=1.8, alpha=0.95)
+            ax.add_patch(rect)
+
+            # Central placeholder icon and text
+            ax.text(5, 6.4, "📊", fontsize=36, ha="center", va="center")
+            ax.text(5, 5.0, "Operational Metrics Visual Enclave", fontsize=13, fontweight="bold",
+                    color=theme["text"], ha="center", va="center")
+
+            reason = error_message or "Deterministic chart calculation fallback placeholder."
+            ax.text(5, 3.8, f"Notice: {reason[:120]}", fontsize=9.5, fontstyle="italic",
+                    color="#94A3B8", ha="center", va="center", wrap=True)
+
+            # Draw decorative metric bars to simulate chart presence
+            sample_heights = [1.2, 2.0, 1.6, 2.4, 1.8]
+            for idx, h in enumerate(sample_heights):
+                x_pos = 3.2 + (idx * 0.8)
+                bar = plt.Rectangle((x_pos, 1.2), 0.5, h, fill=True, color=PALETTE[idx % len(PALETTE)], alpha=0.6)
+                ax.add_patch(bar)
+
+            ax.text(5, 0.9, "SYSTEM FALLBACK RENDERED • SOVEREIGN DATA AUDIT",
+                    fontsize=8, fontweight="bold", color="#10B981", ha="center", va="center")
+
+            fig.tight_layout()
+
+            png_filename = f"{chart_id}.png"
+            svg_filename = f"{chart_id}.svg"
+            png_static = STATIC_CHARTS_DIR / png_filename
+            svg_static = STATIC_CHARTS_DIR / svg_filename
+            png_output = OUTPUTS_CHARTS_DIR / png_filename
+            svg_output = OUTPUTS_CHARTS_DIR / svg_filename
+
+            fig.savefig(str(png_static), format="png", dpi=150, facecolor=fig.get_facecolor(), bbox_inches="tight")
+            fig.savefig(str(svg_static), format="svg", facecolor=fig.get_facecolor(), bbox_inches="tight")
+
+            try:
+                if png_output != png_static:
+                    import shutil
+                    shutil.copy2(png_static, png_output)
+                    shutil.copy2(svg_static, svg_output)
+            except Exception:
+                pass
+
+            logger.info(f"Rendered fallback placeholder chart {chart_id} to {png_static}")
+            return str(png_static), str(svg_static)
 
         finally:
             plt.close(fig)
 
 
 chart_renderer = ChartRenderer()
+

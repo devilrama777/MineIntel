@@ -3,8 +3,8 @@ MineIntel Phase 3: Local AI Adapter Architecture (Ollama & GGUF Compatible)
 
 Supports:
 - Local offline inference via Ollama / GGUF REST runtime
-- Qwen3-8B text reasoning & systematic summarization
-- Qwen3-VL-8B multimodal visual analysis for image evidence
+- qwen2.5:7b text reasoning & systematic summarization
+- qwen2.5vl:7b multimodal visual analysis for image evidence
 - Dynamic model availability and health probing
 - Strict "Model Unavailable" error handling (zero fake fallback outputs)
 """
@@ -103,7 +103,7 @@ class LocalOllamaProvider(BaseAIProvider):
 
     def generate(self, req: AIRequest) -> AIResponse:
         """
-        Executes text generation using Qwen3-8B (or configured local model).
+        Executes text generation using qwen2.5:7b (or configured local model).
         Returns graceful model_unavailable if Ollama or model is absent.
         Never produces fake or synthetic fallback content.
         """
@@ -259,7 +259,7 @@ class LocalOllamaProvider(BaseAIProvider):
 
     def generate_multimodal(self, req: AIRequest) -> AIResponse:
         """
-        Executes multimodal visual analysis or caption generation using Qwen3-VL-8B.
+        Executes multimodal visual analysis or caption generation using qwen2.5vl:7b.
         Encodes images into base64 and invokes Ollama multimodal generation.
         """
         target_model = req.model or self.default_vl_model
@@ -273,7 +273,7 @@ class LocalOllamaProvider(BaseAIProvider):
                 model=target_model,
                 duration_ms=int((time.time() - t0) * 1000),
                 status="model_unavailable",
-                error=f"Local AI runtime (Ollama) is offline at {self.host}. Start Ollama and run 'ollama pull {target_model}' to enable Qwen3-VL multimodal visual analysis.",
+                error=f"Local AI runtime (Ollama) is offline at {self.host}. Start Ollama and run 'ollama pull {target_model}' to enable qwen2.5vl:7b multimodal visual analysis.",
                 evidence_classification=req.context_metadata.get("classification", "AI-GENERATED CAPTION"),
                 parent_evidence_ids=req.context_metadata.get("parent_evidence_ids", [])
             )
@@ -363,7 +363,7 @@ class LocalOllamaProvider(BaseAIProvider):
                     model=target_model,
                     duration_ms=dur_ms,
                     status="model_unavailable",
-                    error=f"Multimodal model '{target_model}' not found in local Ollama. Run 'ollama pull {target_model}' to install Qwen3-VL.",
+                    error=f"Multimodal model '{target_model}' not found in local Ollama. Run 'ollama pull {target_model}' to install qwen2.5vl:7b.",
                     evidence_classification="AI-GENERATED CAPTION",
                     parent_evidence_ids=req.context_metadata.get("parent_evidence_ids", [])
                 )

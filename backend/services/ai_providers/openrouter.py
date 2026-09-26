@@ -9,8 +9,17 @@ import time
 from typing import Any, Dict, List, Optional
 
 from backend import config
-from backend.services.ai_providers.base import AIRequest, AIResponse, BaseAIProvider
-from backend.services.cloud_ai_client import CloudAIClient
+from backend.services.ai_providers.base import BaseAIProvider, AIRequest, AIResponse
+try:
+    from backend.services.cloud_ai_client import CloudAIClient
+except ImportError:
+    class CloudAIClient:  # type: ignore
+        def __init__(self, *args, **kwargs):
+            self.model = getattr(config, "OPENROUTER_MODEL", "qwen/qwen-2.5-72b-instruct")
+        def is_available(self) -> bool:
+            return False
+        def generate(self, *args, **kwargs):
+            return {"success": False, "status": "model_unavailable", "error": "CloudAIClient has been deprecated and removed."}
 
 logger = logging.getLogger("mineintel.ai.openrouter")
 

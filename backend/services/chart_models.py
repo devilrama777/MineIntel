@@ -118,8 +118,16 @@ class ChartArtifact:
     svg_path: Optional[str] = None
     ai_recommendation: Optional[Dict[str, Any]] = None
     created_at: int = 0
+    file_path: Optional[str] = None
+    url: Optional[str] = None
+    is_fallback: bool = False
+    warning: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
+        from pathlib import Path
+        filename = Path(self.png_path).name if self.png_path else f"{self.chart_id}.png"
+        rel_path = self.file_path or f"static/charts/{filename}"
+        web_url = self.url or f"/static/charts/{filename}"
         return {
             "chart_id": self.chart_id,
             "job_id": self.job_id,
@@ -128,6 +136,11 @@ class ChartArtifact:
             "calculation": self.calculation.to_dict() if isinstance(self.calculation, ChartCalculationRecord) else self.calculation,
             "png_path": self.png_path,
             "svg_path": self.svg_path,
+            "file_path": rel_path,
+            "url": web_url,
+            "is_fallback": self.is_fallback,
+            "warning": self.warning,
             "ai_recommendation": self.ai_recommendation,
             "created_at": self.created_at
         }
+

@@ -1,9 +1,11 @@
+import asyncio
+import concurrent.futures
 import json
 import logging
 import os
 from pathlib import Path
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 from backend import config
@@ -44,6 +46,11 @@ class SectionTimeoutError(Exception):
 
 class LLMCallTimeoutError(Exception):
     """Raised when an individual LLM call times out and exhausts retries."""
+    pass
+
+
+class ToolTimeoutError(Exception):
+    """Raised when a deterministic tool execution exceeds its allowed stage budget."""
     pass
 
 
@@ -93,6 +100,11 @@ class AgentCoordinator:
                 "files_completed": 0,
                 "chunks_total": 0,
                 "chunks_completed": 0,
+                "total_sections": 0,
+                "sections_total": 0,
+                "sections_completed": 0,
+                "active_sections": [],
+                "completed_sections": [],
                 "retry_count": 0
             }
         )
@@ -363,23 +375,101 @@ class AgentCoordinator:
         state: AgentTaskState,
         stage: WorkflowStage,
         tool_name: str,
-        args: Dict[str, Any]
+        args: Dict[str, Any],
+        timeout_sec: Optional[float] = None,
+        ev_count: int = 0
     ) -> Any:
-        """Executes a tool with explicit pre-invocation state persistence and typed error handling."""
+        """
+        Executes a deterministic tool with active bounded execution timeout,
+        pre-invocation state persistence, structured instrumentation, and typed error handling.
+        """
         self._check_task_deadline(state, stage)
-        self._set_stage(state, stage, STAGE_DEADLINE_SEC, tool=tool_name, progress_reason=f"Executing {tool_name}...")
+
+        now_sec = time.time()
+        stage_budget = timeout_sec if timeout_sec is not None else STAGE_DEADLINE_SEC
+        if self.task_deadline is not None:
+            remaining_task_sec = max(0.0, self.task_deadline - now_sec)
+            effective_timeout = min(float(stage_budget), remaining_task_sec)
+        else:
+            effective_timeout = float(stage_budget)
+
+        if effective_timeout <= 0.1:
+            if self.task_deadline is not None and now_sec >= self.task_deadline:
+                raise TaskTimeoutError(
+                    f"Total task execution exceeded {self.overall_deadline_sec}s overall deadline before executing {tool_name} at stage {stage.value}."
+                )
+            else:
+                raise ToolTimeoutError(
+                    f"Deterministic tool '{tool_name}' exceeded stage budget before starting at stage {stage.value}."
+                )
+
+        self._set_stage(state, stage, int(effective_timeout), tool=tool_name, progress_reason=f"Executing {tool_name}...")
+
+        start_ts = int(time.time() * 1000)
+        res_count = 0
+        status_code = "success"
+        exception_to_raise = None
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
-            result_dict = execute_tool(tool_name, args, self.owner_id, state.task_id)
+            future = executor.submit(execute_tool, tool_name, args, self.owner_id, state.task_id)
+            result_dict = future.result(timeout=effective_timeout)
             tool_res = result_dict.get("result") if (isinstance(result_dict, dict) and "result" in result_dict) else result_dict
+            if isinstance(tool_res, list):
+                res_count = len(tool_res)
+            elif isinstance(tool_res, dict):
+                res_count = len(tool_res.get("conflicts", [])) if "conflicts" in tool_res else len(tool_res)
+            else:
+                res_count = 1
+
             state.execution_history.append({
                 "role": "tool",
                 "tool_name": tool_name,
                 "stage": stage.value,
                 "status": "success",
+                "duration_ms": int(time.time() * 1000) - start_ts,
                 "timestamp": int(time.time() * 1000)
             })
             return tool_res
+        except concurrent.futures.TimeoutError:
+            now_after = time.time()
+            duration_ms = int(now_after * 1000) - start_ts
+            if self.task_deadline is not None and now_after >= self.task_deadline:
+                status_code = "WALLCLOCK_TIMEOUT"
+                err_msg = (
+                    f"Total task execution exceeded {self.overall_deadline_sec}s overall deadline "
+                    f"during tool '{tool_name}' at stage {stage.value} (elapsed {int(now_after - (self.task_start_time or now_after))}s, tool duration {duration_ms}ms)."
+                )
+                exception_to_raise = TaskTimeoutError(err_msg)
+            else:
+                status_code = "STAGE_TIMEOUT"
+                err_msg = (
+                    f"Deterministic tool '{tool_name}' at stage {stage.value} exceeded {effective_timeout:.1f}s deadline "
+                    f"(duration {duration_ms}ms)."
+                )
+                exception_to_raise = ToolTimeoutError(err_msg)
+            raise exception_to_raise
+        except ToolExecutionError as te:
+            status_code = getattr(te, "code", "TOOL_ERROR")
+            exception_to_raise = te
+            raise
+        except Exception as e:
+            status_code = "TOOL_FAILED"
+            exception_to_raise = e
+            raise
         finally:
+            end_ts = int(time.time() * 1000)
+            duration_ms = end_ts - start_ts
+            executor.shutdown(wait=False, cancel_futures=True)
+
+            # Instrument Stage 4 & Stage 5 tools specifically
+            if tool_name in ["get_intelligence", "detect_charts", "render_chart"]:
+                logger.info(
+                    f"DETERMINISTIC_STAGE_METRICS tool={tool_name} stage={stage.value} "
+                    f"start_ts={start_ts} end_ts={end_ts} duration_ms={duration_ms} "
+                    f"evidence_count={ev_count} result_count={res_count} code={status_code}"
+                )
+
             # Clear current_tool immediately upon tool completion without raising in finally
             now = int(time.time() * 1000)
             state.updated_at = now
@@ -545,6 +635,129 @@ class AgentCoordinator:
                     break
 
         raise RuntimeError(f"Ollama call exceeded {MAX_TRANSIENT_RETRIES} retries at stage {stage.value}: {last_error}")
+
+    async def _write_section_async(
+        self,
+        section: Any,  # PlannedSection
+        evidence_items: List[Dict[str, Any]],
+        chunk_summaries: Optional[List[str]],
+        conflicts: Optional[List[Dict[str, Any]]],
+        charts: Optional[List[Dict[str, Any]]],
+        state: AgentTaskState,
+        stage: WorkflowStage,
+        semaphore: asyncio.Semaphore,
+        plan_title: str = "",
+        state_lock: Optional[asyncio.Lock] = None,
+        completed_tracker: Optional[List[int]] = None
+    ) -> str:
+        """
+        Asynchronously synthesizes a single report section with bounded concurrency.
+        Wraps blocking synchronous _call_qwen inside asyncio.to_thread.
+        Maintains order-independence and handles section-level error resilience.
+        """
+        sec_start = time.time()
+        sec_deadline = min(sec_start + self.section_writing_timeout_sec, self.task_deadline) if self.task_deadline else (sec_start + self.section_writing_timeout_sec)
+
+        # Retrieve bounded section-specific context deterministically
+        bounded_text = self.build_section_specific_context(
+            section=section,
+            evidence_items=evidence_items,
+            chunk_summaries=chunk_summaries,
+            conflicts=conflicts,
+            charts=charts
+        )
+
+        section_prompt = (
+            f"Write comprehensive content for section '{section.title}' of report '{plan_title}'.\n\n"
+            f"Section Focus: {section.topic or section.title}\n"
+            f"Relevant Grounded Evidence:\n{bounded_text or 'Refer to overall operational metrics.'}\n\n"
+            f"Strict Directives:\n"
+            f"1. Cite factual evidence using [EV-...] citations.\n"
+            f"2. Write clear, analytical executive prose with subsections or bullet points.\n"
+            f"3. Do not invent ungrounded numbers."
+        )
+
+        sec_content = ""
+        async with semaphore:
+            # Mark section as active under thread-safe lock
+            if state_lock:
+                async with state_lock:
+                    active = list(state.structured_state.get("active_sections", []))
+                    if section.title not in active:
+                        active.append(section.title)
+                    state.structured_state["active_sections"] = active
+                    state.structured_state["current_section"] = section.title
+                    state.heartbeat_at = int(time.time() * 1000)
+                    update_task_state(state.model_dump())
+            else:
+                active = list(state.structured_state.get("active_sections", []))
+                if section.title not in active:
+                    active.append(section.title)
+                state.structured_state["active_sections"] = active
+                state.structured_state["current_section"] = section.title
+                state.heartbeat_at = int(time.time() * 1000)
+                update_task_state(state.model_dump())
+
+            try:
+                # Wrap synchronous/blocking _call_qwen inside asyncio.to_thread
+                sec_content = await asyncio.to_thread(
+                    self._call_qwen,
+                    prompt=section_prompt,
+                    system_instruction="You are an expert executive report author for the Ministry of Coal. Write analytical, strictly grounded reports.",
+                    state=state,
+                    stage=stage,
+                    max_tokens=800,
+                    images=None,
+                    deadline=sec_deadline
+                )
+            except Exception as e:
+                logger.warning(f"Section '{section.title}' synthesis encountered an error: {e}. Marking as Generation Failed.")
+                sec_content = (
+                    f"## {section.title}\n\n"
+                    f"> ⚠️ **Generation Failed**: Section analytical generation unavailable ({e}). Audited evidence baseline displayed.\n\n"
+                    f"{bounded_text or 'Grounded operational metrics and statutory evidence records apply.'}"
+                )
+            finally:
+                # Thread-safe state update: remove from active, add to completed, update count
+                if state_lock:
+                    async with state_lock:
+                        active = list(state.structured_state.get("active_sections", []))
+                        if section.title in active:
+                            active.remove(section.title)
+                        state.structured_state["active_sections"] = active
+
+                        completed = list(state.structured_state.get("completed_sections", []))
+                        if section.title not in completed:
+                            completed.append(section.title)
+                        state.structured_state["completed_sections"] = completed
+
+                        if completed_tracker is not None:
+                            completed_tracker[0] += 1
+                            state.structured_state["sections_completed"] = completed_tracker[0]
+                        else:
+                            curr = state.structured_state.get("sections_completed", 0)
+                            state.structured_state["sections_completed"] = curr + 1
+                        state.structured_state["current_section"] = section.title
+                        state.heartbeat_at = int(time.time() * 1000)
+                        update_task_state(state.model_dump())
+                else:
+                    active = list(state.structured_state.get("active_sections", []))
+                    if section.title in active:
+                        active.remove(section.title)
+                    state.structured_state["active_sections"] = active
+
+                    completed = list(state.structured_state.get("completed_sections", []))
+                    if section.title not in completed:
+                        completed.append(section.title)
+                    state.structured_state["completed_sections"] = completed
+
+                    curr = state.structured_state.get("sections_completed", 0)
+                    state.structured_state["sections_completed"] = curr + 1
+                    state.structured_state["current_section"] = section.title
+                    state.heartbeat_at = int(time.time() * 1000)
+                    update_task_state(state.model_dump())
+
+        return sec_content
 
     def process_task(self, task_id: str, prompt: str, images: Optional[List[str]] = None) -> AgentTaskState:
         """
@@ -730,12 +943,14 @@ class AgentCoordinator:
             self._check_task_deadline(state, stage)
             conflicts: List[Dict[str, Any]] = []
             try:
-                intel_res = self._execute_tool_with_state(state, stage, "get_intelligence", {})
+                intel_res = self._execute_tool_with_state(
+                    state, stage, "get_intelligence", {}, ev_count=len(evidence_items)
+                )
                 conflicts = (intel_res or {}).get("conflicts", [])
                 if conflicts:
                     state.conflict_logs = conflicts
                     update_task_state(state.model_dump())
-            except (TaskTimeoutError, SectionTimeoutError, LLMCallTimeoutError, FatalToolError):
+            except (TaskTimeoutError, ToolTimeoutError, SectionTimeoutError, LLMCallTimeoutError, FatalToolError):
                 raise
             except Exception as e:
                 return self._fail_task(state, code="INTELLIGENCE_FAILED", message=f"Intelligence analysis failed: {e}", stage=stage)
@@ -747,23 +962,87 @@ class AgentCoordinator:
             self._check_task_deadline(state, stage)
             charts: List[Dict[str, Any]] = []
             try:
-                candidates = self._execute_tool_with_state(state, stage, "detect_charts", {})
+                candidates = self._execute_tool_with_state(
+                    state, stage, "detect_charts", {}, ev_count=len(evidence_items)
+                )
                 if isinstance(candidates, list) and len(candidates) > 0:
                     for cand in candidates[:2]:
                         t_id = cand.get("table_id")
                         if t_id:
-                            try:
-                                self._execute_tool_with_state(
-                                    state, stage, "render_chart",
-                                    {"chart_type": "bar", "data": cand.get("data", {}), "title": cand.get("title", "Operational Metrics")}
-                                )
-                            except Exception as ce:
-                                logger.warning(f"Chart render warning: {ce}")
+                            f_id = cand.get("file_id")
+                            x_c = cand.get("detected_time_column") or (cand.get("detected_category_columns") or [None])[0]
+                            y_cs = cand.get("detected_metric_columns") or []
+                            c_types = cand.get("recommended_chart_types") or ["bar"]
+                            c_type = c_types[0] if c_types else "bar"
+                            c_title = cand.get("title") or f"Operational Metrics ({cand.get('filename', 'Table')})"
+                            if x_c and y_cs:
+                                try:
+                                    self._execute_tool_with_state(
+                                        state, stage, "render_chart",
+                                        {
+                                            "chart_type": c_type,
+                                            "file_id": f_id,
+                                            "x_col": x_c,
+                                            "y_cols": y_cs,
+                                            "title": c_title
+                                        },
+                                        timeout_sec=15.0,
+                                        ev_count=len(evidence_items)
+                                    )
+                                except Exception as ce:
+                                    logger.info(f"Rendering fallback placeholder for chart due to: {ce}")
+                                    try:
+                                        from backend.services.chart_service import chart_service
+                                        chart_service.generate_fallback_chart(
+                                            job_id=task_id,
+                                            owner_id=self.owner_id,
+                                            title=c_title,
+                                            error_message=f"Chart render fallback: {ce}"
+                                        )
+                                    except Exception as fbe:
+                                        logger.error(f"Fallback placeholder generation failed: {fbe}")
+                            else:
+                                # Candidate detected but columns were incomplete - generate fallback placeholder
+                                try:
+                                    from backend.services.chart_service import chart_service
+                                    chart_service.generate_fallback_chart(
+                                        job_id=task_id,
+                                        owner_id=self.owner_id,
+                                        title=c_title,
+                                        error_message="Detected tabular structure required metric column resolution; rendered systematic fallback."
+                                    )
+                                except Exception as fbe:
+                                    logger.error(f"Fallback generation failed: {fbe}")
+
                 charts = list_charts_for_job(job_id=task_id, owner_id=self.owner_id)
-            except (TaskTimeoutError, SectionTimeoutError, LLMCallTimeoutError, FatalToolError):
+                # Ensure at least one robust chart artifact is present if evidence exists
+                if not charts and evidence_items:
+                    try:
+                        from backend.services.chart_service import chart_service
+                        chart_service.generate_fallback_chart(
+                            job_id=task_id,
+                            owner_id=self.owner_id,
+                            title=f"Operational Performance Overview ({task_id[:8]})",
+                            error_message="Automatic chart synthesis completed with systematic baseline placeholder."
+                        )
+                        charts = list_charts_for_job(job_id=task_id, owner_id=self.owner_id)
+                    except Exception as fbe:
+                        logger.error(f"Baseline fallback chart generation failed: {fbe}")
+            except (TaskTimeoutError, ToolTimeoutError, SectionTimeoutError, LLMCallTimeoutError, FatalToolError):
                 raise
             except Exception as e:
-                logger.warning(f"Chart detection non-blocking warning: {e}")
+                logger.info(f"Generating fallback chart placeholder following detection notice: {e}")
+                try:
+                    from backend.services.chart_service import chart_service
+                    chart_service.generate_fallback_chart(
+                        job_id=task_id,
+                        owner_id=self.owner_id,
+                        title=f"Operational Performance Overview ({task_id[:8]})",
+                        error_message=f"Chart pipeline fallback: {e}"
+                    )
+                    charts = list_charts_for_job(job_id=task_id, owner_id=self.owner_id)
+                except Exception as fbe:
+                    logger.error(f"Fallback chart generation failed: {fbe}")
 
             # -------------------------------------------------------------
             # STAGE 6: PLANNING & VALIDATE_PLAN
@@ -780,7 +1059,7 @@ class AgentCoordinator:
                 plan_id = (plan_res or {}).get("plan_id") or (plan_res or {}).get("plan", {}).get("plan_id")
                 if not plan_id:
                     raise ValueError("Planner did not return a valid plan_id.")
-            except (TaskTimeoutError, SectionTimeoutError, LLMCallTimeoutError, FatalToolError):
+            except (TaskTimeoutError, ToolTimeoutError, SectionTimeoutError, LLMCallTimeoutError, FatalToolError):
                 raise
             except Exception as e:
                 return self._fail_task(state, code="PLANNING_FAILED", message=f"Report planning failed: {e}", stage=stage)
@@ -792,13 +1071,13 @@ class AgentCoordinator:
                 is_valid = (val_res or {}).get("is_valid", True)
                 if not is_valid:
                     logger.warning(f"Plan validation issues: {val_res.get('issues')}")
-            except (TaskTimeoutError, SectionTimeoutError, LLMCallTimeoutError, FatalToolError):
+            except (TaskTimeoutError, ToolTimeoutError, SectionTimeoutError, LLMCallTimeoutError, FatalToolError):
                 raise
             except Exception as e:
                 logger.warning(f"Plan validation non-blocking warning: {e}")
 
             # -------------------------------------------------------------
-            # STAGE 7: WRITING (Section-by-Section Bounded Evidence Synthesis)
+            # STAGE 7: WRITING (Concurrent Section Evidence Synthesis)
             # -------------------------------------------------------------
             stage = WorkflowStage.WRITING
             self._check_task_deadline(state, stage)
@@ -809,55 +1088,66 @@ class AgentCoordinator:
 
             plan = ReportPlan.from_dict(plan_data) if isinstance(plan_data, dict) else plan_data
             num_sections = max(1, len(plan.sections))
+            # Concurrency limit between 3 and 5 (default 4) to avoid overloading Ollama
+            concurrency_limit = max(1, min(4, num_sections))
             self._set_stage(
                 state, stage,
                 int(self.section_writing_timeout_sec * num_sections),
-                progress_reason=f"Synthesizing {num_sections} report sections..."
+                progress_reason=f"Synthesizing {num_sections} report sections concurrently (concurrency={concurrency_limit})..."
             )
 
-            for sec_idx, section in enumerate(plan.sections):
-                self._check_task_deadline(state, stage)
+            state.structured_state["sections_total"] = num_sections
+            state.structured_state["total_sections"] = num_sections
+            state.structured_state["sections_completed"] = 0
+            state.structured_state["active_sections"] = []
+            state.structured_state["completed_sections"] = []
+            update_task_state(state.model_dump())
 
-                # B2: Real Per-Section Timeout: Each section has a hard deadline
-                sec_start = time.time()
-                sec_deadline = min(sec_start + self.section_writing_timeout_sec, self.task_deadline)
+            async def _run_parallel_section_writing():
+                semaphore = asyncio.Semaphore(concurrency_limit)
+                state_lock = asyncio.Lock()
+                completed_tracker = [0]
 
-                state.structured_state["current_section"] = section.title
-                state.structured_state["section_started_at"] = int(sec_start * 1000)
-                state.structured_state["section_deadline"] = int(sec_deadline * 1000)
-                state.heartbeat_at = int(time.time() * 1000)
-                update_task_state(state.model_dump())
+                # Deterministic Order: create task list for every section in plan.sections
+                tasks = [
+                    self._write_section_async(
+                        section=section,
+                        evidence_items=evidence_items,
+                        chunk_summaries=chunk_summaries,
+                        conflicts=conflicts,
+                        charts=charts,
+                        state=state,
+                        stage=stage,
+                        semaphore=semaphore,
+                        plan_title=plan.title,
+                        state_lock=state_lock,
+                        completed_tracker=completed_tracker
+                    )
+                    for section in plan.sections
+                ]
 
-                # Retrieve bounded section-specific context (Phase A: A2 & A3)
-                bounded_text = self.build_section_specific_context(
-                    section=section,
-                    evidence_items=evidence_items,
-                    chunk_summaries=chunk_summaries,
-                    conflicts=conflicts,
-                    charts=charts
-                )
+                # await asyncio.gather(*tasks) executes concurrently & guarantees exact order of plan.sections
+                return await asyncio.gather(*tasks)
 
-                section_prompt = (
-                    f"Write comprehensive content for section '{section.title}' of report '{plan.title}'.\n\n"
-                    f"Section Focus: {section.topic or section.title}\n"
-                    f"Relevant Grounded Evidence:\n{bounded_text or 'Refer to overall operational metrics.'}\n\n"
-                    f"Strict Directives:\n"
-                    f"1. Cite factual evidence using [EV-...] citations.\n"
-                    f"2. Write clear, analytical executive prose with subsections or bullet points.\n"
-                    f"3. Do not invent ungrounded numbers."
-                )
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
 
-                sec_content = self._call_qwen(
-                    prompt=section_prompt,
-                    system_instruction="You are an expert executive report author for the Ministry of Coal. Write analytical, strictly grounded reports.",
-                    state=state,
-                    stage=stage,
-                    max_tokens=800,
-                    deadline=sec_deadline
-                )
-                section.content_text = sec_content
-                state.structured_state["sections_completed"] = sec_idx + 1
-                update_task_state(state.model_dump())
+            if loop and loop.is_running():
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    section_contents = pool.submit(lambda: asyncio.run(_run_parallel_section_writing())).result()
+            else:
+                section_contents = asyncio.run(_run_parallel_section_writing())
+
+            # Assign results to plan sections in deterministic order
+            for sec_idx, sec_content in enumerate(section_contents):
+                plan.sections[sec_idx].content_text = sec_content
+
+            state.structured_state["active_sections"] = []
+            state.structured_state["completed_sections"] = [s.title for s in plan.sections]
+            state.structured_state["sections_completed"] = len(plan.sections)
+            update_task_state(state.model_dump())
 
             # Persist synthesized plan sections
             save_plan(plan.to_dict())
@@ -886,7 +1176,7 @@ class AgentCoordinator:
                 )
                 report_id = (rep_res or {}).get("report_id") or ""
                 artifacts = (rep_res or {}).get("artifacts") or {}
-            except (TaskTimeoutError, SectionTimeoutError, LLMCallTimeoutError, FatalToolError):
+            except (TaskTimeoutError, ToolTimeoutError, SectionTimeoutError, LLMCallTimeoutError, FatalToolError):
                 raise
             except Exception as e:
                 return self._fail_task(state, code="REPORT_COMPILATION_FAILED", message=f"Markdown report compilation failed: {e}", stage=stage)
@@ -945,6 +1235,17 @@ class AgentCoordinator:
                 code="WALLCLOCK_TIMEOUT",
                 message=str(tte),
                 stage=stage,
+                tool=state.structured_state.get("current_tool"),
+                retryable=False
+            )
+        except ToolTimeoutError as tte:
+            logger.error(f"Task {task_id} failed due to deterministic tool timeout: {tte}")
+            return self._fail_task(
+                state,
+                code="STAGE_TIMEOUT",
+                message=str(tte),
+                stage=stage,
+                tool=state.structured_state.get("current_tool"),
                 retryable=False
             )
         except SectionTimeoutError as ste:

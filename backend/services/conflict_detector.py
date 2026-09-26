@@ -64,6 +64,43 @@ class ConflictDetector:
         return None
 
     @classmethod
+    def _extract_metric_number_and_unit(
+        cls,
+        item: Dict[str, Any],
+        text: str,
+        pattern: str
+    ) -> Optional[Tuple[float, str]]:
+        """
+        Extracts the numerical figure associated specifically with the matched metric.
+        First inspects structured content_json keys; then proximate numbers in text;
+        falling back to general number extraction.
+        """
+        # 1. Structured content_json inspection (e.g. tabular ledgers)
+        c_json = item.get("content_json")
+        if isinstance(c_json, dict):
+            for k, v in c_json.items():
+                if re.search(pattern, str(k).lower()):
+                    if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        unit = "t" if "_t" in str(k).lower() else ""
+                        return float(v), unit
+                    elif isinstance(v, str):
+                        clean_v = v.replace(",", "").strip()
+                        m_v = re.search(r"^(\d+(?:\.\d+)?)\s*(mt|metric\s+tons?|tonnes?|tph|m|meters?|%|lakh\s+tonnes?)?", clean_v, re.IGNORECASE)
+                        if m_v:
+                            return float(m_v.group(1)), (m_v.group(2) or "").strip().lower()
+
+        # 2. Look for numerical figure in the immediate vicinity of the metric keyword in text
+        # e.g. "rom_production_t=215000", "production: 205,000 tonnes", "production of 205,000"
+        m_prox = re.search(rf"{pattern}[^\d\n\r,;]*[:=\s]+(\d+(?:,\d+)*(?:\.\d+)?)\s*(mt|metric\s+tons?|tonnes?|tph|m|meters?|%|lakh\s+tonnes?)?", text, re.IGNORECASE)
+        if m_prox:
+            num = float(m_prox.group(1).replace(",", ""))
+            unit = (m_prox.group(2) or "").strip().lower()
+            return num, unit
+
+        # 3. Fallback: clean text and general extraction
+        return cls._extract_number_and_unit(text)
+
+    @classmethod
     def _get_item_priority(cls, item: Dict[str, Any]) -> int:
         classification = str(item.get("classification", ""))
         layer = str(item.get("layer", ""))
@@ -96,9 +133,14 @@ class ConflictDetector:
 
         for it in items:
             text = str(it.get("content_text") or it.get("content") or "").lower()
+            c_json = it.get("content_json")
             for pattern, metric_key in cls.METRIC_PATTERNS:
-                if re.search(pattern, text):
-                    num_unit = cls._extract_number_and_unit(text)
+                json_match = False
+                if isinstance(c_json, dict):
+                    json_match = any(re.search(pattern, str(k).lower()) for k in c_json.keys())
+
+                if re.search(pattern, text) or json_match:
+                    num_unit = cls._extract_metric_number_and_unit(it, text, pattern)
                     if num_unit:
                         val, unit = num_unit
                         item_entry = {
@@ -115,44 +157,65 @@ class ConflictDetector:
             if len(entries) < 2:
                 continue
 
-            # Compare pairs for significant variance (> 1%)
+            # Group items by numerical value to eliminate comparisons between identical values
+            # Preserves all entries, all evidence IDs, and all metadata without any top-N cap
+            value_groups: Dict[float, List[Dict[str, Any]]] = {}
+            for e in entries:
+                val_key = round(float(e["value"]), 6)
+                value_groups.setdefault(val_key, []).append(e)
+
+            distinct_values = sorted(value_groups.keys())
+            if len(distinct_values) < 2:
+                # All entries for this metric share identical values (variance <= 0)
+                continue
+
             seen_pairs = set()
-            for i in range(len(entries)):
-                for j in range(i + 1, len(entries)):
-                    e1 = entries[i]
-                    e2 = entries[j]
-                    id1 = e1["item"].get("evidence_id")
-                    id2 = e2["item"].get("evidence_id")
-                    pair_key = tuple(sorted([id1, id2]))
-                    if pair_key in seen_pairs:
+            for i in range(len(distinct_values)):
+                v1 = distinct_values[i]
+                for j in range(i + 1, len(distinct_values)):
+                    v2 = distinct_values[j]
+
+                    max_v = max(abs(v1), abs(v2))
+                    if max_v <= 0:
                         continue
-                    seen_pairs.add(pair_key)
 
-                    v1, v2 = e1["value"], e2["value"]
-                    if max(v1, v2) > 0:
-                        variance = abs(v1 - v2) / max(v1, v2)
-                        if variance > 0.01:  # More than 1% discrepancy
-                            var_pct = round(variance * 100.0, 2)
-                            severity = (
-                                ConflictSeverity.CRITICAL.value if var_pct > 25.0
-                                else (ConflictSeverity.HIGH.value if var_pct > 10.0 else ConflictSeverity.MEDIUM.value)
-                            )
+                    variance = abs(v1 - v2) / max_v
+                    if variance <= 0.01:  # 1% or less cannot produce a conflict
+                        continue
 
-                            p1 = cls._get_item_priority(e1["item"])
+                    var_pct = round(variance * 100.0, 2)
+                    severity = (
+                        ConflictSeverity.CRITICAL.value if var_pct > 25.0
+                        else (ConflictSeverity.HIGH.value if var_pct > 10.0 else ConflictSeverity.MEDIUM.value)
+                    )
+
+                    for e1 in value_groups[v1]:
+                        id1 = e1["item"].get("evidence_id")
+                        p1 = cls._get_item_priority(e1["item"])
+                        src1 = (e1["item"].get("provenance") or {}).get("filename") or e1["item"].get("file_id") or "Source A"
+
+                        for e2 in value_groups[v2]:
+                            id2 = e2["item"].get("evidence_id")
+                            if id1 == id2:
+                                continue
+
+                            pair_key = tuple(sorted([id1, id2]))
+                            if pair_key in seen_pairs:
+                                continue
+                            seen_pairs.add(pair_key)
+
                             p2 = cls._get_item_priority(e2["item"])
+                            src2 = (e2["item"].get("provenance") or {}).get("filename") or e2["item"].get("file_id") or "Source B"
 
                             # Source priority recommendation
                             if p1 >= p2:
                                 rec_item = e1["item"]
-                                rec_val = v1
+                                rec_val = e1["value"]
                                 rationale = f"Source {id1} has higher authority rank ({p1} vs {p2}) for metric {metric_key}."
                             else:
                                 rec_item = e2["item"]
-                                rec_val = v2
+                                rec_val = e2["value"]
                                 rationale = f"Source {id2} has higher authority rank ({p2} vs {p1}) for metric {metric_key}."
-
-                            src1 = (e1["item"].get("provenance") or {}).get("filename", "Source A")
-                            src2 = (e2["item"].get("provenance") or {}).get("filename", "Source B")
 
                             conflict_id = f"CONF-{hashlib.sha256(f'{id1}:{id2}:{metric_key}'.encode()).hexdigest()[:10].upper()}"
 
@@ -166,8 +229,8 @@ class ConflictDetector:
                                 entity_or_metric=metric_key,
                                 conflicting_evidence_ids=[id1, id2],
                                 evidence_values=[
-                                    {"evidence_id": id1, "value": v1, "unit": e1["unit"], "source": src1, "priority": p1},
-                                    {"evidence_id": id2, "value": v2, "unit": e2["unit"], "source": src2, "priority": p2}
+                                    {"evidence_id": id1, "value": e1["value"], "unit": e1["unit"], "source": src1, "priority": p1},
+                                    {"evidence_id": id2, "value": e2["value"], "unit": e2["unit"], "source": src2, "priority": p2}
                                 ],
                                 variance_pct=var_pct,
                                 recommended_evidence_id=rec_item.get("evidence_id"),
@@ -176,7 +239,7 @@ class ConflictDetector:
                                 status="flagged_for_review",
                                 review_flag={
                                     "flag": "AUDIT_NUMERICAL_DISCREPANCY",
-                                    "message": f"Metric '{metric_key}' has {var_pct}% variance between {src1} ({v1}) and {src2} ({v2}).",
+                                    "message": f"Metric '{metric_key}' has {var_pct}% variance between {src1} ({e1['value']}) and {src2} ({e2['value']}).",
                                     "requires_auditor_signoff": severity in [ConflictSeverity.CRITICAL.value, ConflictSeverity.HIGH.value]
                                 },
                                 created_at=int(time.time() * 1000)

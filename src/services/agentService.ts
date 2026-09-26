@@ -22,6 +22,10 @@ export interface AgentJobStatusResponse {
   job_id?: string;
   task_id?: string;
   status: string;
+  sections_completed?: number;
+  total_sections?: number;
+  active_sections?: string[];
+  completed_sections?: string[];
   task?: any;
   job?: any;
 }

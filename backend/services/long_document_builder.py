@@ -41,6 +41,7 @@ from backend import config
 from backend.services.evidence_models import EvidenceClassification
 from backend.services.planner_models import PlannedSection, ReportPlan
 from backend.services.report_canvas import NumberedReportCanvas
+from backend.services.document_generator import DocumentGenerator
 
 logger = logging.getLogger("mineintel.long_doc_builder")
 
@@ -560,56 +561,57 @@ class LongDocumentBuilder:
         evidence_by_id = {it.get("evidence_id"): it for it in evidence_items if it.get("evidence_id")}
         charts_by_id = {c.get("chart_id"): c for c in charts if c.get("chart_id")}
 
-        lines = [
-            f"# {plan.title}",
-            f"**Subtitle:** {plan.subtitle or 'Operational Dossier'}",
-            f"**Reference:** MIN/REP/{plan.job_id}/v{plan.version} | **Officer:** {plan.owner_id}",
-            f"**Evidence Sufficiency:** {int(plan.evidence_sufficiency_score * 100)}% Verified | **Status:** {plan.status.upper()}",
-            "",
-            "---",
-            ""
-        ]
+        # MEMORY OPTIMIZATION: Chunked/streaming write directly to disk to prevent OOM crashes on 100+ page reports
+        with open(md_path, "w", encoding="utf-8", buffering=65536) as f:
+            f.write(f"# {plan.title}\n")
+            f.write(f"**Subtitle:** {plan.subtitle or 'Operational Dossier'}\n")
+            f.write(f"**Reference:** MIN/REP/{plan.job_id}/v{plan.version} | **Officer:** {plan.owner_id}\n")
+            f.write(f"**Evidence Sufficiency:** {int(plan.evidence_sufficiency_score * 100)}% Verified | **Status:** {plan.status.upper()}\n\n")
+            f.write("---\n\n")
 
-        for sec in plan.sections:
-            lines.append(f"## {sec.section_id} {sec.title}\n")
-            if sec.validation_status == "insufficient":
-                for flag in plan.insufficient_evidence_flags:
-                    f_dict = flag if isinstance(flag, dict) else flag.to_dict()
-                    if f_dict.get("section_id") == sec.section_id:
-                        lines.append(f"> ⚠️ **AUDIT NOTICE:** {f_dict.get('rationale')}\n")
+            for sec in plan.sections:
+                f.write(f"## {sec.section_id} {sec.title}\n\n")
+                if sec.validation_status == "insufficient":
+                    for flag in plan.insufficient_evidence_flags:
+                        f_dict = flag if isinstance(flag, dict) else flag.to_dict()
+                        if f_dict.get("section_id") == sec.section_id:
+                            f.write(f"> ⚠️ **AUDIT NOTICE:** {f_dict.get('rationale')}\n\n")
 
-            sec_narrative = getattr(sec, "content_text", "") or getattr(sec, "narrative", "")
-            if sec_narrative:
-                lines.append(f"> 🤖 **[AI ANALYTICAL SYNTHESIS — GROUNDED IN AUDITED EVIDENCE]**\n>\n" + "\n".join(f"> {l}" for l in sec_narrative.splitlines() if l.strip()) + "\n")
+                sec_narrative = getattr(sec, "content_text", "") or getattr(sec, "narrative", "")
+                if sec_narrative:
+                    f.write("> 🤖 **[AI ANALYTICAL SYNTHESIS — GROUNDED IN AUDITED EVIDENCE]**\n>\n")
+                    for l in sec_narrative.splitlines():
+                        if l.strip():
+                            f.write(f"> {l}\n")
+                    f.write("\n")
 
-            for ev_id in sec.evidence_ids[:30]:
-                item = evidence_by_id.get(ev_id)
-                if not item:
-                    continue
-                cls_name = item.get("classification", "LOCKED FACT")
-                prov = item.get("provenance") or {}
-                content = item.get("content_text") or str(item.get("content_json") or "")
-                lines.append(f"- **[{cls_name}] {ev_id}** ({prov.get('filename')}): {content}")
-
-            for c_id in sec.chart_ids:
-                chart = charts_by_id.get(c_id)
-                if chart:
-                    cfg = chart.get("config", {})
-                    lines.append(f"\n### Chart: {cfg.get('title')}")
-                    lines.append(f"![{cfg.get('title')}]({chart.get('png_path')})")
-                    lines.append(f"*Calculation: {chart.get('calculation', {}).get('aggregation_formula')}*\n")
-
-            for sub in sec.subsections:
-                lines.append(f"### {sub.section_id} {sub.title}\n")
-                for ev_id in sub.evidence_ids[:15]:
+                for ev_id in sec.evidence_ids[:30]:
                     item = evidence_by_id.get(ev_id)
-                    if item:
-                        lines.append(f"- {item.get('content_text')}")
+                    if not item:
+                        continue
+                    cls_name = item.get("classification", "LOCKED FACT")
+                    prov = item.get("provenance") or {}
+                    content = item.get("content_text") or str(item.get("content_json") or "")
+                    f.write(f"- **[{cls_name}] {ev_id}** ({prov.get('filename')}): {content}\n")
 
-            lines.append("\n---\n")
+                for c_id in sec.chart_ids:
+                    chart = charts_by_id.get(c_id)
+                    if chart:
+                        cfg = chart.get("config", {})
+                        title = cfg.get("title") or "Chart"
+                        f.write(f"\n### Chart: {title}\n")
+                        f.write(f"{DocumentGenerator.format_chart_markdown(chart, title)}\n")
+                        f.write(f"*Calculation: {chart.get('calculation', {}).get('aggregation_formula')}*\n\n")
 
-        md_content = "\n".join(lines)
-        md_path.write_text(md_content, encoding="utf-8")
+                for sub in sec.subsections:
+                    f.write(f"### {sub.section_id} {sub.title}\n\n")
+                    for ev_id in sub.evidence_ids[:15]:
+                        item = evidence_by_id.get(ev_id)
+                        if item:
+                            f.write(f"- {item.get('content_text')}\n")
+
+                f.write("\n---\n\n")
+
         return str(md_path)
 
     def build_pdf_from_revision(
@@ -887,46 +889,43 @@ class LongDocumentBuilder:
         evidence_by_id = {it.get("evidence_id"): it for it in evidence_items if it.get("evidence_id")}
         charts_by_id = {c.get("chart_id"): c for c in charts if c.get("chart_id")}
 
-        lines = [
-            f"# {revision.title}",
-            f"**Subtitle:** {revision.subtitle or 'Operational Dossier'}",
-            f"**Reference:** MIN/REP/{revision.job_id}/v{revision.version} | **Officer:** {revision.owner_id}",
-            f"**State:** {revision.state.upper()} | **Change Summary:** {revision.change_summary or 'N/A'}",
-            "",
-            "---",
-            ""
-        ]
+        # MEMORY OPTIMIZATION: Chunked/streaming write directly to disk to prevent OOM crashes on 100+ page reports
+        with open(md_path, "w", encoding="utf-8", buffering=65536) as f:
+            f.write(f"# {revision.title}\n")
+            f.write(f"**Subtitle:** {revision.subtitle or 'Operational Dossier'}\n")
+            f.write(f"**Reference:** MIN/REP/{revision.job_id}/v{revision.version} | **Officer:** {revision.owner_id}\n")
+            f.write(f"**State:** {revision.state.upper()} | **Change Summary:** {revision.change_summary or 'N/A'}\n\n")
+            f.write("---\n\n")
 
-        for sec in revision.sections:
-            lines.append(f"## {sec.section_id} {sec.title}\n")
-            if getattr(sec, "user_modified", False):
-                lines.append("> ✍️ **AUDITOR REVISED CONTENT**\n")
-            if getattr(sec, "content_text", ""):
-                lines.append(f"{sec.content_text}\n")
+            for sec in revision.sections:
+                f.write(f"## {sec.section_id} {sec.title}\n\n")
+                if getattr(sec, "user_modified", False):
+                    f.write("> ✍️ **AUDITOR REVISED CONTENT**\n\n")
+                if getattr(sec, "content_text", ""):
+                    f.write(f"{sec.content_text}\n\n")
 
-            for eid in getattr(sec, "evidence_ids", []):
-                ev = evidence_by_id.get(eid)
-                if ev:
-                    cls_name = ev.get("classification", "LOCKED FACT")
-                    prov = ev.get("provenance") or {}
-                    lines.append(f"- **[{cls_name}] {eid}** ({prov.get('filename')}): {ev.get('content_text')}")
+                for eid in getattr(sec, "evidence_ids", []):
+                    ev = evidence_by_id.get(eid)
+                    if ev:
+                        cls_name = ev.get("classification", "LOCKED FACT")
+                        prov = ev.get("provenance") or {}
+                        f.write(f"- **[{cls_name}] {eid}** ({prov.get('filename')}): {ev.get('content_text')}\n")
 
-            for cid in getattr(sec, "chart_ids", []):
-                chart = charts_by_id.get(cid)
-                if chart:
-                    cfg = chart.get("config", {})
-                    lines.append(f"\n### Chart: {cfg.get('title')}")
-                    lines.append(f"![{cfg.get('title')}]({chart.get('png_path')})")
+                for cid in getattr(sec, "chart_ids", []):
+                    chart = charts_by_id.get(cid)
+                    if chart:
+                        cfg = chart.get("config", {})
+                        title = cfg.get("title") or "Chart"
+                        f.write(f"\n### Chart: {title}\n")
+                        f.write(f"{DocumentGenerator.format_chart_markdown(chart, title)}\n\n")
 
-            for sub in getattr(sec, "subsections", []):
-                lines.append(f"### {sub.section_id} {sub.title}\n")
-                if getattr(sub, "content_text", ""):
-                    lines.append(f"{sub.content_text}\n")
+                for sub in getattr(sec, "subsections", []):
+                    f.write(f"\n### {sub.section_id} {sub.title}\n\n")
+                    if getattr(sub, "content_text", ""):
+                        f.write(f"{sub.content_text}\n\n")
 
-            lines.append("\n---\n")
+                f.write("\n---\n\n")
 
-        md_content = "\n".join(lines)
-        md_path.write_text(md_content, encoding="utf-8")
         return str(md_path)
 
 

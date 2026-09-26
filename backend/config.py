@@ -78,9 +78,11 @@ else:
     REPORTED_DATA_DIR = BASE_DIR / "reported_data"
     PROCESSED_OUTPUT_DIR = BASE_DIR / "processed_output"
 
+STATIC_DIR = BACKEND_DIR / "static"
+STATIC_CHARTS_DIR = STATIC_DIR / "charts"
 STATIC_REPORTS_DIR = OUTPUTS_DIR / "reports" if IS_VERCEL else (BASE_DIR / "outputs" / "reports")
 
-for d in (UPLOADS_DIR, OUTPUTS_DIR, REPORTS_DIR, REPORTED_DATA_DIR, PROCESSED_OUTPUT_DIR, DATA_DIR):
+for d in (UPLOADS_DIR, OUTPUTS_DIR, REPORTS_DIR, REPORTED_DATA_DIR, PROCESSED_OUTPUT_DIR, DATA_DIR, STATIC_DIR, STATIC_CHARTS_DIR):
     try:
         d.mkdir(parents=True, exist_ok=True)
     except OSError:

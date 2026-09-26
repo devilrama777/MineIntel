@@ -10,7 +10,11 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from backend.services.converter import MarkdownConverter
 from backend.services.math_engine import MathEngine, safe_eval_expr
-from backend.services.llama_client import LlamaClient
+try:
+    from backend.services.llama_client import LlamaClient
+except ImportError:
+    LlamaClient = None
+
 from backend.services.pipeline import DocumentPipeline
 
 
@@ -19,7 +23,7 @@ class TestPipeline(unittest.TestCase):
     def setUp(self):
         self.converter = MarkdownConverter()
         self.math_engine = MathEngine()
-        self.llama_client = LlamaClient()
+        self.llama_client = LlamaClient() if LlamaClient else None
         self.pipeline = DocumentPipeline()
         self.test_data_dir = ROOT_DIR / "backend" / "tests" / "sample_data"
         self.test_data_dir.mkdir(parents=True, exist_ok=True)
@@ -73,8 +77,11 @@ class TestPipeline(unittest.TestCase):
 
     def test_openrouter_configuration_detection(self):
         """Verify OpenRouter provider and model defaults are correctly configured."""
+        try:
+            from backend.services.cloud_ai_client import CloudAIClient
+        except ImportError:
+            self.skipTest("CloudAIClient deleted in legacy AI cleanup")
         from backend import config
-        from backend.services.cloud_ai_client import CloudAIClient
         self.assertEqual(config.AI_PROVIDER, "local_ollama")
         
         # When no key is set, client correctly reports unavailable
@@ -88,7 +95,10 @@ class TestPipeline(unittest.TestCase):
     @patch("requests.post")
     def test_cloud_adapter_mocked_success(self, mock_post):
         """Verify CloudAIClient formats OpenRouter Chat Completions payload and parses 200 response successfully."""
-        from backend.services.cloud_ai_client import CloudAIClient
+        try:
+            from backend.services.cloud_ai_client import CloudAIClient
+        except ImportError:
+            self.skipTest("CloudAIClient deleted in legacy AI cleanup")
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
@@ -128,7 +138,10 @@ class TestPipeline(unittest.TestCase):
     @patch("requests.post")
     def test_cloud_adapter_transient_error_and_backoff(self, mock_post):
         """Verify CloudAIClient handles 429/500 errors safely with bounded retry on OpenRouter."""
-        from backend.services.cloud_ai_client import CloudAIClient
+        try:
+            from backend.services.cloud_ai_client import CloudAIClient
+        except ImportError:
+            self.skipTest("CloudAIClient deleted in legacy AI cleanup")
         mock_err_resp = MagicMock()
         mock_err_resp.status_code = 429
         mock_err_resp.text = "RESOURCE_EXHAUSTED: Rate limit exceeded"
@@ -146,7 +159,12 @@ class TestPipeline(unittest.TestCase):
 
     def test_offline_deterministic_fallback_preservation(self):
         """Verify LLaMA and Gemma clients cleanly fall back to deterministic extraction when offline."""
-        from backend.services.gemma_client import GemmaClient
+        try:
+            from backend.services.gemma_client import GemmaClient
+        except ImportError:
+            self.skipTest("GemmaClient deleted in legacy AI cleanup")
+        if not LlamaClient:
+            self.skipTest("LlamaClient deleted in legacy AI cleanup")
         # Offline llama client with invalid base_url and no cloud key
         offline_llama = LlamaClient(base_url="http://127.0.0.1:59999")
         offline_llama.cloud_client.api_key = ""

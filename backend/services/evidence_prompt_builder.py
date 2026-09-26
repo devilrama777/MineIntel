@@ -1,7 +1,7 @@
 """
 MineIntel Phase 3: Structured Evidence-Aware Prompt Builder
 
-Grounds local AI models (Qwen3-8B and Qwen3-VL-8B) directly in Phase 2 structured evidence:
+Grounds local AI models (qwen2.5:7b and qwen2.5vl:7b) directly in Phase 2 structured evidence:
 - Gathers and classifies evidence items into LOCKED FACTS, CALCULATED VALUES, and SUMMARIZABLE TEXT
 - Enforces strict source citation mandates (requiring evidence ID and provenance citations)
 - Prohibits extrapolation, numeric alteration, and hallucination
@@ -48,7 +48,7 @@ class EvidencePromptBuilder:
         limit_items: int = 100
     ) -> Tuple[str, str, List[str]]:
         """
-        Builds an evidence-grounded prompt for Qwen3-8B.
+        Builds an evidence-grounded prompt for qwen2.5:7b.
         Returns: (prompt_text, system_instruction, parent_evidence_ids)
         """
         items: List[Dict[str, Any]] = []
@@ -137,7 +137,7 @@ class EvidencePromptBuilder:
         custom_instruction: Optional[str] = None
     ) -> Tuple[str, str, List[str]]:
         """
-        Builds visual evidence inspection prompt for Qwen3-VL-8B.
+        Builds visual evidence inspection prompt for qwen2.5vl:7b.
         Returns: (prompt_text, system_instruction, parent_evidence_ids)
         """
         ev_id = image_evidence.get("evidence_id", "IMAGE-ASSET")

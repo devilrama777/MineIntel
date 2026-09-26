@@ -46,6 +46,14 @@ class TestOptionBAuthentication(unittest.TestCase):
                 auth_store.USERS_FILE.unlink()
             except Exception:
                 pass
+        if auth_store.is_postgres_configured():
+            try:
+                with auth_store._get_pg_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM mineintel_users WHERE officer_id = 'field_auditor_1'")
+                    conn.commit()
+            except Exception:
+                pass
 
     def test_01_master_login(self):
         """Test Master credentials authenticate and return Senior Officer role."""

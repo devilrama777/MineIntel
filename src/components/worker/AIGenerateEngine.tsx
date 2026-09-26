@@ -68,30 +68,22 @@ export const AIGenerateEngine: React.FC<AIGenerateEngineProps> = ({
 
   // AI Auto Prompt Generator function
   const handleAutoGeneratePrompt = () => {
-    setIsGeneratingPrompt(true);
-    setPromptGeneratedSuccess(false);
+    const lowerName = fileName.toLowerCase();
+    let selectedPrompt = '';
 
-    setTimeout(() => {
-      const lowerName = fileName.toLowerCase();
-      let selectedPrompt = '';
+    if (lowerName.includes('financ') || lowerName.includes('kpi') || lowerName.includes('q3') || lowerName.includes('audit')) {
+      selectedPrompt = 'Extract an exhaustive financial audit analyzing quarterly revenue growth, EBITDA margin trends, OpEx variances, and cash flow projections.';
+    } else if (lowerName.includes('risk') || lowerName.includes('secur') || lowerName.includes('incident') || lowerName.includes('hazard')) {
+      selectedPrompt = 'Perform a thorough risk and compliance assessment detailing high-impact vulnerability vectors, regulatory checkpoints, and rapid remediation protocols.';
+    } else if (lowerName.includes('tech') || lowerName.includes('architect') || lowerName.includes('system') || lowerName.includes('spec')) {
+      selectedPrompt = 'Execute a deep technical synthesis evaluating architectural bottlenecks, multi-system interoperability, failover safeguards, and long-term scalability.';
+    } else {
+      const randomIndex = Math.floor(Math.random() * PROMPT_TEMPLATES.length);
+      selectedPrompt = PROMPT_TEMPLATES[randomIndex].prompt;
+    }
 
-      if (lowerName.includes('financ') || lowerName.includes('kpi') || lowerName.includes('q3') || lowerName.includes('audit')) {
-        selectedPrompt = 'Extract an exhaustive financial audit analyzing quarterly revenue growth, EBITDA margin trends, OpEx variances, and cash flow projections.';
-      } else if (lowerName.includes('risk') || lowerName.includes('secur') || lowerName.includes('incident') || lowerName.includes('hazard')) {
-        selectedPrompt = 'Perform a thorough risk and compliance assessment detailing high-impact vulnerability vectors, regulatory checkpoints, and rapid remediation protocols.';
-      } else if (lowerName.includes('tech') || lowerName.includes('architect') || lowerName.includes('system') || lowerName.includes('spec')) {
-        selectedPrompt = 'Execute a deep technical synthesis evaluating architectural bottlenecks, multi-system interoperability, failover safeguards, and long-term scalability.';
-      } else {
-        const randomIndex = Math.floor(Math.random() * PROMPT_TEMPLATES.length);
-        selectedPrompt = PROMPT_TEMPLATES[randomIndex].prompt;
-      }
-
-      onCustomPromptChange(selectedPrompt);
-      setIsGeneratingPrompt(false);
-      setPromptGeneratedSuccess(true);
-
-      setTimeout(() => setPromptGeneratedSuccess(false), 2400);
-    }, 450);
+    onCustomPromptChange(selectedPrompt);
+    setPromptGeneratedSuccess(true);
   };
 
   return (

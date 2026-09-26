@@ -3,8 +3,8 @@ Phase 3 Local AI / Provider-Neutral Inference Foundation Test Suite.
 Tests:
 - Common inference/provider interface (BaseAIProvider, AIRequest, AIResponse)
 - Local model adapter architecture (LocalOllamaProvider) with Ollama/GGUF compatibility
-- Qwen3-8B text reasoning/summarization support
-- Qwen3-VL-8B multimodal architecture for visual evidence
+- qwen2.5:7b text reasoning/summarization support
+- qwen2.5vl:7b multimodal architecture for visual evidence
 - Model availability/status detection
 - Configurable provider/model selection via AIProviderRegistry
 - Structured evidence-aware prompts grounding models in source facts
@@ -103,18 +103,18 @@ class TestPhase3LocalAI(unittest.TestCase):
         req = AIRequest(
             prompt="Analyze coal extraction data",
             system_prompt="You are a mining analyst.",
-            model="qwen3:8b",
+            model="qwen2.5:7b",
             temperature=0.3,
             max_tokens=500,
             images_base64=["base64imgdata"]
         )
         self.assertEqual(req.prompt, "Analyze coal extraction data")
-        self.assertEqual(req.model, "qwen3:8b")
+        self.assertEqual(req.model, "qwen2.5:7b")
         self.assertEqual(len(req.images_base64), 1)
 
         resp = AIResponse(
             text="Total extracted: 450 tonnes",
-            model="qwen3:8b",
+            model="qwen2.5:7b",
             provider="local_ollama",
             prompt_tokens=50,
             completion_tokens=25,
@@ -128,36 +128,36 @@ class TestPhase3LocalAI(unittest.TestCase):
         self.assertEqual(d["total_tokens"], 75)
 
     # -------------------------------------------------------------------------
-    # 2. LocalOllamaProvider (Qwen3-8B Text & Qwen3-VL-8B Multimodal)
+    # 2. LocalOllamaProvider (qwen2.5:7b Text & qwen2.5vl:7b Multimodal)
     # -------------------------------------------------------------------------
     @patch("backend.services.ai_providers.local_ollama.requests.get")
     @patch("backend.services.ai_providers.local_ollama.requests.post")
-    def test_local_ollama_text_reasoning_qwen3(self, mock_post, mock_get):
+    def test_local_ollama_text_reasoning_qwen(self, mock_post, mock_get):
         # Mock status check
         mock_get.return_value.status_code = 200
         mock_get.return_value.json.return_value = {
-            "models": [{"name": "qwen3:8b"}, {"name": "qwen3-vl:8b"}]
+            "models": [{"name": "qwen2.5:7b"}, {"name": "qwen2.5vl:7b"}]
         }
 
         # Mock generate endpoint
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = {
             "response": "Analysis based on [EV-1]: Production matches baseline.",
-            "model": "qwen3:8b",
+            "model": "qwen2.5:7b",
             "prompt_eval_count": 80,
             "eval_count": 35,
             "total_duration": 450000000,  # nanoseconds
             "done": True
         }
 
-        provider = LocalOllamaProvider(host="http://localhost:11434", default_model="qwen3:8b")
+        provider = LocalOllamaProvider(host="http://localhost:11434", default_model="qwen2.5:7b")
         self.assertTrue(provider.is_available())
 
-        req = AIRequest(prompt="Summarize production", model="qwen3:8b")
+        req = AIRequest(prompt="Summarize production", model="qwen2.5:7b")
         resp = provider.generate(req)
 
         self.assertIn("Production matches baseline", resp.text)
-        self.assertEqual(resp.model, "qwen3:8b")
+        self.assertEqual(resp.model, "qwen2.5:7b")
         self.assertEqual(resp.provider, "local_ollama")
         self.assertEqual(resp.prompt_tokens, 80)
         self.assertEqual(resp.completion_tokens, 35)
@@ -165,17 +165,17 @@ class TestPhase3LocalAI(unittest.TestCase):
 
     @patch("backend.services.ai_providers.local_ollama.requests.get")
     @patch("backend.services.ai_providers.local_ollama.requests.post")
-    def test_local_ollama_multimodal_caption_qwen3_vl(self, mock_post, mock_get):
+    def test_local_ollama_multimodal_caption_qwen_vl(self, mock_post, mock_get):
         # Mock status check
         mock_get.return_value.status_code = 200
         mock_get.return_value.json.return_value = {
-            "models": [{"name": "qwen3-vl:8b"}]
+            "models": [{"name": "qwen2.5vl:7b"}]
         }
 
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = {
             "response": "Geological cross-section depicting open-cast coal seam at 45m depth.",
-            "model": "qwen3-vl:8b",
+            "model": "qwen2.5vl:7b",
             "prompt_eval_count": 120,
             "eval_count": 40,
             "total_duration": 600000000,
@@ -185,19 +185,19 @@ class TestPhase3LocalAI(unittest.TestCase):
         provider = LocalOllamaProvider(host="http://localhost:11434")
         req = AIRequest(
             prompt="Generate a factual caption for this visual evidence.",
-            model="qwen3-vl:8b",
+            model="qwen2.5vl:7b",
             images_base64=["iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="]
         )
         resp = provider.generate_multimodal(req)
 
         self.assertIn("Geological cross-section", resp.text)
-        self.assertEqual(resp.model, "qwen3-vl:8b")
+        self.assertEqual(resp.model, "qwen2.5vl:7b")
 
         # Verify POST payload sent images array to Ollama
         call_args = mock_post.call_args
         self.assertIsNotNone(call_args)
         body = call_args[1]["json"]
-        self.assertEqual(body["model"], "qwen3-vl:8b")
+        self.assertEqual(body["model"], "qwen2.5vl:7b")
         self.assertIn("images", body)
         self.assertEqual(len(body["images"]), 1)
 
@@ -231,24 +231,24 @@ class TestPhase3LocalAI(unittest.TestCase):
     @patch("backend.services.ai_providers.local_ollama.requests.get")
     @patch("backend.services.ai_providers.local_ollama.requests.post")
     def test_ollama_missing_model_behavior(self, mock_post, mock_get):
-        # Ollama daemon is running, but model qwen3:8b is not pulled
+        # Ollama daemon is running, but model qwen2.5:7b is not pulled
         mock_get.return_value.status_code = 200
         mock_get.return_value.json.return_value = {"models": [{"name": "llama3:latest"}]}
 
         mock_post.return_value.status_code = 404
-        mock_post.text = "model 'qwen3:8b' not found, try pulling it first"
-        mock_post.return_value.text = "model 'qwen3:8b' not found, try pulling it first"
+        mock_post.text = "model 'qwen2.5:7b' not found, try pulling it first"
+        mock_post.return_value.text = "model 'qwen2.5:7b' not found, try pulling it first"
 
         provider = LocalOllamaProvider(host="http://localhost:11434")
         models = provider.list_models()
-        self.assertNotIn("qwen3:8b", models)
+        self.assertNotIn("qwen2.5:7b", models)
 
-        req = AIRequest(prompt="Analyze", model="qwen3:8b")
+        req = AIRequest(prompt="Analyze", model="qwen2.5:7b")
         resp = provider.generate(req)
 
         self.assertFalse(resp.success)
         self.assertEqual(resp.status, "model_unavailable")
-        self.assertIn("ollama pull qwen3:8b", resp.error)
+        self.assertIn("ollama pull qwen2.5:7b", resp.error)
         self.assertEqual(resp.text, "")
 
     # -------------------------------------------------------------------------
@@ -375,7 +375,7 @@ class TestPhase3LocalAI(unittest.TestCase):
         mock_provider.is_available.return_value = True
         mock_provider.generate.return_value = AIResponse(
             text="The operation maintained steady production of 350 tons [EV-FACT-01].",
-            model="qwen3:8b",
+            model="qwen2.5:7b",
             provider="local_ollama",
             prompt_tokens=60,
             completion_tokens=25,
@@ -390,7 +390,7 @@ class TestPhase3LocalAI(unittest.TestCase):
             job_id="job-test-1",
             owner_id="OFFICER_A",
             provider_name="local_ollama",
-            model_name="qwen3:8b"
+            model_name="qwen2.5:7b"
         )
 
         self.assertTrue(result["success"])
@@ -404,7 +404,7 @@ class TestPhase3LocalAI(unittest.TestCase):
         self.assertEqual(derived_item["classification"], "AI ANALYSIS")
         self.assertEqual(derived_item["layer"], "derived")
         self.assertEqual(derived_item["confidence"], 0.85)  # AI Analysis must never have 1.0 confidence
-        self.assertEqual(derived_item["metadata"]["ai_model"], "qwen3:8b")
+        self.assertEqual(derived_item["metadata"]["ai_model"], "qwen2.5:7b")
         self.assertEqual(derived_item["metadata"]["ai_provider"], "local_ollama")
 
     # -------------------------------------------------------------------------
@@ -434,7 +434,7 @@ class TestPhase3LocalAI(unittest.TestCase):
         mock_provider.is_available.return_value = True
         mock_provider.generate_multimodal.return_value = AIResponse(
             text="Highwall face showing horizontal coal seam stratification.",
-            model="qwen3-vl:8b",
+            model="qwen2.5vl:7b",
             provider="local_ollama",
             prompt_tokens=100,
             completion_tokens=30,
@@ -449,7 +449,7 @@ class TestPhase3LocalAI(unittest.TestCase):
             evidence_id="EV-IMG-01",
             owner_id="OFFICER_A",
             provider_name="local_ollama",
-            model_name="qwen3-vl:8b"
+            model_name="qwen2.5vl:7b"
         )
 
         self.assertTrue(result["success"])

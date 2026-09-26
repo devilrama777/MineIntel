@@ -139,29 +139,40 @@ def save_dossier(dossier: Dict[str, Any]) -> None:
                         now_ms
                     ))
 
-                    # Save conflicts
-                    for conf in dossier.get("conflicts", []):
-                        cur.execute("""
+                    # Save conflicts in batch to avoid sequential network round trips
+                    conflicts = dossier.get("conflicts", [])
+                    if conflicts:
+                        from psycopg2.extras import execute_values
+                        conflict_rows = [
+                            (
+                                conf.get("conflict_id"),
+                                job_id,
+                                owner_id,
+                                conf.get("conflict_type", ""),
+                                conf.get("severity", ""),
+                                conf.get("topic", ""),
+                                conf.get("entity_or_metric", ""),
+                                conf.get("status", "flagged_for_review"),
+                                json.dumps(conf),
+                                now_ms,
+                                now_ms
+                            )
+                            for conf in conflicts
+                        ]
+                        execute_values(
+                            cur,
+                            """
                             INSERT INTO mineintel_conflicts
                             (conflict_id, job_id, owner_id, conflict_type, severity, topic, entity_or_metric, status, conflict_data, created_at, updated_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            VALUES %s
                             ON CONFLICT (conflict_id) DO UPDATE SET
                                 status = EXCLUDED.status,
                                 conflict_data = EXCLUDED.conflict_data,
                                 updated_at = EXCLUDED.updated_at
-                        """, (
-                            conf.get("conflict_id"),
-                            job_id,
-                            owner_id,
-                            conf.get("conflict_type", ""),
-                            conf.get("severity", ""),
-                            conf.get("topic", ""),
-                            conf.get("entity_or_metric", ""),
-                            conf.get("status", "flagged_for_review"),
-                            json.dumps(conf),
-                            now_ms,
-                            now_ms
-                        ))
+                            """,
+                            conflict_rows,
+                            page_size=500
+                        )
                 conn.commit()
             return
         except Exception as e:

@@ -51,7 +51,7 @@ class AIResponse:
         text: str = "",
         success: bool = True,
         provider: str = "local_ollama",
-        model: str = "qwen3:8b",
+        model: str = "qwen2.5:7b",
         duration_ms: int = 0,
         duration_seconds: Optional[float] = None,
         tokens_used: Optional[int] = None,
@@ -130,7 +130,7 @@ class BaseAIProvider(ABC):
 
     @abstractmethod
     def generate_multimodal(self, req: AIRequest) -> AIResponse:
-        """Executes multimodal visual analysis request (e.g. Qwen3-VL-8B)."""
+        """Executes multimodal visual analysis request (e.g. qwen2.5vl:7b)."""
         pass
 
     @abstractmethod

@@ -169,6 +169,10 @@ export function WorkerApp() {
   const [activeView, setActiveView] = useState<ActiveView>('editor');
   const [taskStatus, setTaskStatus] = useState<'IDLE' | 'PENDING' | 'RUNNING' | 'AWAITING_INPUT' | 'VALIDATING' | 'RETRYING' | 'COMPLETED' | 'FAILED'>('IDLE');
   const isProcessing = taskStatus !== 'IDLE' && taskStatus !== 'COMPLETED' && taskStatus !== 'FAILED';
+  const [sectionsCompleted, setSectionsCompleted] = useState<number>(0);
+  const [totalSections, setTotalSections] = useState<number>(0);
+  const [activeSections, setActiveSections] = useState<string[]>([]);
+  const [completedSections, setCompletedSections] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentReport, setCurrentReport] = useState<GeneratedReport | null>(null);
 
@@ -509,6 +513,10 @@ export function WorkerApp() {
     setCurrentTool('');
     setCurrentStage('');
     setProgressReason('');
+    setSectionsCompleted(0);
+    setTotalSections(0);
+    setActiveSections([]);
+    setCompletedSections([]);
     setErrorMessage(null);
 
     try {
@@ -527,6 +535,18 @@ export function WorkerApp() {
           }
           if (detail?.progressReason !== undefined) {
             setProgressReason(detail.progressReason || '');
+          }
+          if (detail?.sections_completed !== undefined) {
+            setSectionsCompleted(detail.sections_completed);
+          }
+          if (detail?.total_sections !== undefined) {
+            setTotalSections(detail.total_sections);
+          }
+          if (detail?.active_sections !== undefined) {
+            setActiveSections(detail.active_sections);
+          }
+          if (detail?.completed_sections !== undefined) {
+            setCompletedSections(detail.completed_sections);
           }
         }
       );
@@ -1097,6 +1117,10 @@ export function WorkerApp() {
           currentStage={currentStage}
           progressReason={progressReason}
           statusMessage={errorMessage || undefined}
+          sections_completed={sectionsCompleted}
+          total_sections={totalSections}
+          active_sections={activeSections}
+          completed_sections={completedSections}
         />
       )}
 

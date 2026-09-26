@@ -79,25 +79,6 @@ class AuthService {
         };
       }
 
-      // 2. Probe auth endpoint to check if environment credentials are set
-      const probeResp = await fetch(`${API_BASE}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ officer_id: '', password: '' }),
-      });
-
-      if (probeResp.status === 503) {
-        const errData = await probeResp.json().catch(() => ({}));
-        return {
-          configured: false,
-          reachable: true,
-          message:
-            errData.detail ||
-            'Authentication is unconfigured. Production credentials must be supplied via MINEINTEL_OFFICER_ID and MINEINTEL_AUTH_PASSWORD environment variables.',
-        };
-      }
-
-      // If status is 401 or anything else, authentication is configured
       return {
         configured: true,
         reachable: true,

@@ -4,7 +4,7 @@ MineIntel Phase 6: Report Planner Service Orchestrator
 Coordinates the dynamic planning lifecycle:
 - Retrieves Phase 2 evidence, Phase 4 dossiers, and Phase 5 charts
 - Generates data-driven section/subsection structures with topic & chronology alignment
-- Optionally refines titles with Phase 3 Qwen3-8B advisor
+- Optionally refines titles with Phase 3 qwen2.5:7b advisor
 - Evaluates evidence sufficiency and manages plan versions
 - Persists machine-readable plans in Neon/local store with user ownership isolation
 """

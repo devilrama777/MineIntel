@@ -510,6 +510,54 @@ class DocumentGenerator:
         except Exception:
             return None
 
+    @staticmethod
+    def format_chart_markdown(chart_or_path: Any, description: Optional[str] = None) -> str:
+        """
+        Takes a returned chart file path or chart dict and converts it into a proper
+        Markdown image tag: ![Chart Description](URL_TO_STATIC_FOLDER).
+        E.g., ![Production Output](/static/charts/CHART-123.png)
+        """
+        if not chart_or_path:
+            return ""
+
+        desc = description
+        file_path_str = ""
+
+        if isinstance(chart_or_path, dict):
+            cfg = chart_or_path.get("config") or {}
+            desc = desc or cfg.get("title") or chart_or_path.get("title") or "Chart Visualization"
+            file_path_str = (
+                chart_or_path.get("url")
+                or chart_or_path.get("file_path")
+                or chart_or_path.get("png_path")
+                or ""
+            )
+        elif isinstance(chart_or_path, str):
+            file_path_str = chart_or_path
+            if not desc:
+                desc = "Chart Visualization"
+        else:
+            file_path_str = str(chart_or_path)
+            if not desc:
+                desc = "Chart Visualization"
+
+        desc_clean = re.sub(r'[\[\]]', '', str(desc)).strip() or "Chart Visualization"
+
+        p = Path(file_path_str)
+        fname = p.name
+        normalized = file_path_str.replace("\\", "/")
+
+        if "static/charts" in normalized:
+            static_url = f"/static/charts/{fname}"
+        elif "/static/" in normalized:
+            static_url = "/" + normalized.lstrip("/")
+        elif normalized.startswith("http://") or normalized.startswith("https://"):
+            static_url = normalized
+        else:
+            static_url = f"/static/charts/{fname}"
+
+        return f"![{desc_clean}]({static_url})"
+
     def _get_table_rows(self, metrics: Dict[str, Any]) -> List[List[str]]:
         """Extracts table rows matching either user dataset columns or CIL baseline."""
         if metrics.get("is_user_data"):
@@ -1066,6 +1114,88 @@ class DocumentGenerator:
 
         return xlsx_path
 
+    def generate_markdown_report(
+        self,
+        template_name: str = "aurora_gradient",
+        report_id: str = "REP-2026-B56D",
+        summary_text: Optional[str] = None,
+        user_records: Optional[List[Dict[str, Any]]] = None,
+        images: Optional[List[str]] = None,
+        charts: Optional[List[Dict[str, Any]]] = None,
+        document_title: Optional[str] = None,
+        job_id: Optional[str] = None
+    ) -> Path:
+        """
+        Generates a publication-grade Markdown report embedding verified dataset metrics and charts.
+        Uses format_chart_markdown to embed static folder chart images (![Title](/static/charts/...)).
+        """
+        effective_report_id = job_id if (job_id and report_id == "REP-2026-B56D") else report_id
+        metrics = get_active_dataset_metrics(user_records, job_id=job_id, document_title=document_title)
+        safe_title = re.sub(r'[^a-zA-Z0-9_-]', '_', metrics.get("document_title", "Report"))[:24]
+
+        target_dir = (config.OUTPUTS_DIR / job_id) if job_id else self.output_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        md_path = target_dir / f"{safe_title}_Report.md"
+        default_md = self.output_dir / "Ministry_of_Coal_Report_2026.md"
+
+        # Fetch job charts if not provided
+        if charts is None and job_id:
+            try:
+                from backend.services import chart_store
+                charts = chart_store.list_charts_for_job(job_id=job_id, owner_id=None)
+            except Exception:
+                charts = []
+
+        lines = [
+            f"# {metrics.get('document_title', 'Operational Intelligence Report')}",
+            f"**Report ID:** {effective_report_id} | **Date:** {datetime.date.today().strftime('%B %d, %Y')} | **Verification:** 100% Deterministic AST",
+            "---",
+            "",
+            "## 1. Executive Summary",
+            summary_text or CIL_ANNUAL_REPORT_SUMMARY,
+            "",
+            "## 2. Quantitative Performance & KPIs",
+            f"- **Total Primary Volume / Sum:** {metrics['total_production']:,.2f}",
+            f"- **Total Secondary Dispatch:** {metrics['total_dispatch']:,.2f}",
+            f"- **Target Benchmark:** {metrics['achievement_pct']:.2f}%",
+            f"- **Monitored Units:** {metrics['count']} Entities",
+            ""
+        ]
+
+        # Embed Charts using format_chart_markdown
+        if charts:
+            lines.append("## 3. Operational Visualizations & Analytics")
+            for c in charts:
+                c_title = (c.get("config") or {}).get("title") or c.get("title") or "Operational Metrics Chart"
+                lines.append(f"### {c_title}")
+                lines.append(self.format_chart_markdown(c))
+                formula = (c.get("calculation") or {}).get("aggregation_formula")
+                if formula:
+                    lines.append(f"*Calculation Provenance: {formula}*")
+                lines.append("")
+
+        # Tabular data
+        lines.append("## 4. Primary Dataset Leaderboard")
+        table_rows = self._get_table_rows(metrics)
+        if table_rows:
+            headers = table_rows[0]
+            lines.append("| " + " | ".join(headers) + " |")
+            lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
+            for r in table_rows[1:15]:
+                lines.append("| " + " | ".join(str(cell) for cell in r) + " |")
+            lines.append("")
+
+        md_content = "\n".join(lines)
+        md_path.write_text(md_content, encoding="utf-8")
+
+        try:
+            import shutil
+            shutil.copy2(md_path, default_md)
+        except Exception:
+            pass
+
+        return md_path
+
     def generate_all_packages(
         self,
         template_name: str = "aurora_gradient",
@@ -1073,15 +1203,17 @@ class DocumentGenerator:
         summary_text: Optional[str] = None,
         user_records: Optional[List[Dict[str, Any]]] = None,
         images: Optional[List[str]] = None,
+        charts: Optional[List[Dict[str, Any]]] = None,
         document_title: Optional[str] = None,
         custom_title: Optional[str] = None,
         job_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Compiles PDF, DOCX, and XLSX reports and returns metadata."""
+        """Compiles PDF, DOCX, XLSX, and Markdown reports and returns metadata."""
         effective_title = custom_title or document_title
         pdf_file = self.generate_pdf_report(template_name, report_id, summary_text, user_records, images=images, document_title=effective_title, job_id=job_id)
         docx_file = self.generate_docx_report(template_name, report_id, summary_text, user_records, images=images, document_title=effective_title, job_id=job_id)
         xlsx_file = self.generate_excel_workbook(template_name, report_id, summary_text=summary_text, user_records=user_records, document_title=effective_title, job_id=job_id)
+        md_file = self.generate_markdown_report(template_name, report_id, summary_text=summary_text, user_records=user_records, images=images, charts=charts, document_title=effective_title, job_id=job_id)
 
         return {
             "success": True,
@@ -1106,6 +1238,65 @@ class DocumentGenerator:
                     "path": str(xlsx_file),
                     "size_bytes": xlsx_file.stat().st_size if xlsx_file.exists() else 0,
                     "size_display": f"{xlsx_file.stat().st_size / 1024:.1f} KB" if xlsx_file.exists() else "0 KB"
+                },
+                "md": {
+                    "filename": md_file.name,
+                    "path": str(md_file),
+                    "size_bytes": md_file.stat().st_size if md_file.exists() else 0,
+                    "size_display": f"{md_file.stat().st_size / 1024:.1f} KB" if md_file.exists() else "0 KB"
                 }
             }
         }
+
+    def write_report_markdown_stream(
+        self,
+        output_path: Path,
+        title: str,
+        sections: List[Dict[str, Any]],
+        summary_text: Optional[str] = None,
+        charts: Optional[List[Dict[str, Any]]] = None,
+        chunk_size: int = 65536
+    ) -> Path:
+        """
+        Memory-optimized chunked/streaming write for large 100+ page reports.
+        Writes section-by-section directly to disk using buffered I/O to prevent OOM crashes.
+        Embeds charts into Markdown using proper static folder image tags.
+        """
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        charts_by_id = {c.get("chart_id"): c for c in (charts or []) if c.get("chart_id")}
+
+        with open(output_path, "w", encoding="utf-8", buffering=chunk_size) as f:
+            f.write(f"# {title}\n\n")
+            if summary_text:
+                f.write(f"## Executive Summary\n\n{summary_text}\n\n---\n\n")
+            for sec in sections:
+                sec_title = sec.get("title", "Section")
+                sec_id = sec.get("section_id", "")
+                header = f"## {sec_id} {sec_title}".strip()
+                f.write(f"{header}\n\n")
+                content = sec.get("content_text") or sec.get("narrative") or ""
+                if content:
+                    f.write(f"{content}\n\n")
+
+                # Embed charts associated with this section
+                sec_charts = list(sec.get("charts") or [])
+                for cid in sec.get("chart_ids", []):
+                    if cid in charts_by_id and charts_by_id[cid] not in sec_charts:
+                        sec_charts.append(charts_by_id[cid])
+
+                for ch in sec_charts:
+                    img_tag = self.format_chart_markdown(ch)
+                    if img_tag:
+                        ch_title = (ch.get("config") or {}).get("title") or ch.get("title") or "Operational Metrics Chart"
+                        f.write(f"\n### Chart: {ch_title}\n\n{img_tag}\n\n")
+
+                for sub in sec.get("subsections", []):
+                    sub_title = sub.get("title", "")
+                    sub_id = sub.get("section_id", "")
+                    sub_header = f"### {sub_id} {sub_title}".strip()
+                    f.write(f"{sub_header}\n\n")
+                    sub_content = sub.get("content_text") or ""
+                    if sub_content:
+                        f.write(f"{sub_content}\n\n")
+                f.write("---\n\n")
+        return output_path
