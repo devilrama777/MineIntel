@@ -27,14 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileSidebar,
   onNavigateProfile,
 }) => {
-  const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentDateTime(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  const [currentDateTime] = useState(() => new Date());
 
   const formattedDate = currentDateTime.toLocaleDateString(undefined, {
     weekday: 'short',

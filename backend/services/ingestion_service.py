@@ -605,7 +605,7 @@ class IngestionEngine:
         - Updates job state in Ingestion Store
         """
         now_ms = int(time.time() * 1000)
-        job_id = f"ingest_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+        job_id = f"job_{uuid.uuid4()}"
         job_dir = config.OUTPUTS_DIR / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -625,6 +625,31 @@ class IngestionEngine:
         evidence_files: List[EvidenceFileRecord] = []
         completed_count = 0
         failed_count = 0
+
+        # Extract and persist active dataset records for this job if tabular file exists
+        try:
+            for filename, file_bytes in files:
+                low = filename.lower()
+                if low.endswith(".csv"):
+                    import io
+                    df = pd.read_csv(io.BytesIO(file_bytes), encoding="utf-8", encoding_errors="ignore")
+                    records = df.to_dict(orient="records")
+                    if records:
+                        (job_dir / "active_dataset.json").write_text(json.dumps(records, default=str), encoding="utf-8")
+                        break
+                elif low.endswith((".xlsx", ".xls")):
+                    import io
+                    excel_map = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
+                    for _, s_df in excel_map.items():
+                        if not s_df.empty:
+                            records = s_df.to_dict(orient="records")
+                            if records:
+                                (job_dir / "active_dataset.json").write_text(json.dumps(records, default=str), encoding="utf-8")
+                                break
+                    if (job_dir / "active_dataset.json").exists():
+                        break
+        except Exception as ds_err:
+            logger.warning(f"Could not persist active_dataset.json for job {job_id}: {ds_err}")
 
         for filename, file_bytes in files:
             rec = cls.process_evidence_file(

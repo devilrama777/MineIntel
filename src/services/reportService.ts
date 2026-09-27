@@ -113,12 +113,12 @@ class LocalDesktopService {
           },
           {
             id: 'srv-math-engine',
-            name: 'Deterministic Math Engine',
-            engine: 'Python IEEE 754 Variance & Audit Engine',
+            name: 'Quantitative Audit Engine',
+            engine: 'Statistical Variance & Audit Engine',
             status: 'healthy',
             latency: '0ms',
-            detail: 'Deterministic numerical variance calculations (Zero AI Hallucination Guarantee)',
-            metrics: 'Deterministic Math Active',
+            detail: 'Quantitative variance and operational benchmark reconciliation',
+            metrics: 'Variance Audit Active',
           },
           {
             id: 'srv-document-gen',
@@ -209,41 +209,30 @@ class LocalDesktopService {
         }
       }
 
-      // Check Phase 7 job report histories
+      // Populate completed jobs from jobsResp directly without secondary N+1 network requests
       if (jobsResp && jobsResp.ok) {
         const jData = await jobsResp.json().catch(() => ({}));
         const jobs = jData.jobs || [];
         if (Array.isArray(jobs)) {
-          for (const j of jobs.slice(0, 10)) {
-            try {
-              const repResp = await fetch(`${API_BASE}/api/reports/job/${j.job_id}/history`, {
-                headers: this.getAuthHeaders(),
+          for (const j of jobs) {
+            const id = j.job_id;
+            if (!id || reportsMap.has(id)) continue;
+            if (j.status === 'completed') {
+              reportsMap.set(id, {
+                id,
+                name: j.title || `Regulatory Report: ${id.slice(0, 8)}`,
+                organization: 'MineIntel Sovereign Enclave',
+                reportingPeriod: 'FY 2025-26',
+                description: `Synthesized long document for job ${id.slice(0, 8)}.`,
+                createdAt: j.created_at ? new Date(j.created_at).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+                lastModified: j.completed_at ? new Date(j.completed_at).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+                status: 'Ready for Export',
+                sectionsCount: 1,
+                wordCount: 0,
+                sourcesLinkedCount: j.total_files || 1,
+                validationScore: 100,
+                selectedModel: 'qwen2.5:7b',
               });
-              if (repResp.ok) {
-                const repData = await repResp.json();
-                const jobReports = repData.reports || [];
-                for (const r of jobReports) {
-                  const id = r.report_id || r.id;
-                  if (!id) continue;
-                  reportsMap.set(id, {
-                    id,
-                    name: r.title || `Regulatory Report: ${j.job_id.slice(0, 8)}`,
-                    organization: 'MineIntel Sovereign Enclave',
-                    reportingPeriod: 'FY 2025-26',
-                    description: `Synthesized long document from Report Plan ${r.plan_id || ''}.`,
-                    createdAt: r.created_at ? new Date(r.created_at).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
-                    lastModified: r.completed_at ? new Date(r.completed_at).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
-                    status: r.status === 'completed' ? 'Ready for Export' : 'In Progress',
-                    sectionsCount: r.page_count || 1,
-                    wordCount: 0,
-                    sourcesLinkedCount: j.total_files || 1,
-                    validationScore: 100,
-                    selectedModel: 'qwen2.5:7b',
-                  });
-                }
-              }
-            } catch {
-              // Ignore per-job failures
             }
           }
         }
@@ -412,11 +401,79 @@ class LocalDesktopService {
   // ==========================================
   async getDataSources(): Promise<DataSourceItem[]> {
     try {
-      const res = await fetch(`${API_BASE}/api/ingest/jobs`, {
+      // 1. Ingest/Data Sources persistent SQLite database endpoint
+      let res = await fetch(`${API_BASE}/api/ingest/data-sources`, {
         headers: this.getAuthHeaders(),
-      });
-      if (res.ok) {
+      }).catch(() => null);
+
+      if (!res || !res.ok) {
+        res = await fetch(`${API_BASE}/api/data-sources`, {
+          headers: this.getAuthHeaders(),
+        }).catch(() => null);
+      }
+
+      if (res && res.ok) {
         const data = await res.json();
+        const sources = data.documents || data.data_sources || data.sources || (Array.isArray(data) ? data : []);
+        if (Array.isArray(sources)) {
+          const sourceItems: DataSourceItem[] = sources.map((f: any) => {
+            const ext = (f.file_type || (f.filename ? f.filename.split('.').pop() : (f.name ? f.name.split('.').pop() : 'PDF'))).toUpperCase();
+            const formatType: DataSourceItem['type'] =
+              ext.includes('XLS') ? 'XLSX' :
+              ext.includes('CSV') ? 'CSV' :
+              ext.includes('DOC') ? 'DOCX' :
+              ext.includes('PNG') || ext.includes('JPG') ? 'Images' :
+              f.file_type === 'scanned_pdf' ? 'Scanned PDF' : 'PDF';
+
+            let dateModifiedStr = f.dateModified || '';
+            if (!dateModifiedStr && f.created_at) {
+              try {
+                const ts = typeof f.created_at === 'number' && f.created_at < 1e11 ? f.created_at * 1000 : f.created_at;
+                dateModifiedStr = new Date(ts).toISOString().slice(0, 10);
+              } catch {
+                dateModifiedStr = new Date().toISOString().slice(0, 10);
+              }
+            }
+            if (!dateModifiedStr) {
+              dateModifiedStr = new Date().toISOString().slice(0, 10);
+            }
+
+            const fileName = f.filename || f.name || 'Document';
+            const sizeVal = f.sizeBytes ?? f.file_size ?? f.size ?? 1024;
+            const docId = f.id || f.file_id || `ev-${Math.random().toString(36).slice(2, 10)}`;
+
+            return {
+              id: docId,
+              filename: fileName,
+              name: fileName,
+              type: formatType,
+              sizeBytes: sizeVal,
+              size: sizeVal,
+              dateModified: dateModifiedStr,
+              uploadedAt: dateModifiedStr,
+              sourcePath: `${API_BASE}/api/ingest/files/${docId}/raw`,
+              processingStatus: f.status === 'completed' ? 'indexed' : f.status === 'failed' ? 'failed' : 'processing',
+              pages: f.metadata?.page_count || 1,
+              ocrStatus: f.file_type === 'scanned_pdf' ? 'Completed' : 'Not Required',
+              indexedStatus: f.status === 'completed' ? 'Indexed' : 'Pending',
+              extractedTablesCount: f.metadata?.table_count || 0,
+              extractedImagesCount: f.metadata?.image_count || 0,
+              summary: f.metadata?.summary || `Evidence item ingested from ${fileName}.`,
+              checksum: f.sha256_hash ? `SHA-256:${f.sha256_hash.slice(0, 16)}` : `SHA-256:${docId}`,
+            } as any;
+          });
+
+          this.dataSources = sourceItems;
+          return [...this.dataSources];
+        }
+      }
+
+      // 2. Fallback to /api/ingest/jobs
+      const jobsRes = await fetch(`${API_BASE}/api/ingest/jobs`, {
+        headers: this.getAuthHeaders(),
+      }).catch(() => null);
+      if (jobsRes && jobsRes.ok) {
+        const data = await jobsRes.json();
         const jobs = data.jobs || [];
         const sourceItems: DataSourceItem[] = [];
 
@@ -457,6 +514,111 @@ class LocalDesktopService {
       // Backend offline
     }
     return [...this.dataSources];
+  }
+
+  async uploadDataSourceFiles(files: File[]): Promise<DataSourceItem[]> {
+    if (!files || files.length === 0) return [];
+    try {
+      const formData = new FormData();
+      for (const f of files) {
+        formData.append('files', f);
+      }
+      const res = await fetch(`${API_BASE}/api/ingest/jobs`, {
+        method: 'POST',
+        headers: authService.getAuthHeader(),
+        body: formData,
+      }).catch(() => null);
+
+      if (!res || !res.ok) {
+        for (const f of files) {
+          const singleData = new FormData();
+          singleData.append('file', f);
+          await fetch(`${API_BASE}/api/ingest/upload`, {
+            method: 'POST',
+            headers: authService.getAuthHeader(),
+            body: singleData,
+          }).catch(() => null);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to upload files to backend:', e);
+    }
+    return await this.getDataSources();
+  }
+
+  async generateReport(payload: {
+    file_ids?: string[];
+    fileIds?: string[];
+    reportType?: string;
+    depth?: string;
+    tone?: string;
+    customFocus?: string;
+    fileName?: string;
+    files?: Array<{ name: string; type?: string; fileBase64?: string; rawText?: string }>;
+  }): Promise<{
+    success?: boolean;
+    report_id: string;
+    job_id?: string;
+    reportMarkdown?: string;
+    content?: string;
+    final_report?: string;
+    pdf_path?: string;
+    docx_path?: string;
+    metadata?: any;
+  }> {
+    const file_ids = payload.file_ids || payload.fileIds || [];
+    const resp = await fetch(`${API_BASE}/api/generate-report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.getAuthHeaders(),
+      },
+      body: JSON.stringify({
+        file_ids,
+        fileIds: file_ids,
+        reportType: payload.reportType || 'executive',
+        depth: payload.depth || 'standard',
+        tone: payload.tone || 'analytical',
+        customFocus: payload.customFocus || '',
+        fileName: payload.fileName || 'Executive Audit Report',
+        files: payload.files,
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Report generation failed.');
+    }
+
+    const data = await resp.json();
+    const repId = data.report_id || data.job_id;
+    if (!repId) {
+      throw new Error('Backend failed to return a valid report_id.');
+    }
+    return data;
+  }
+
+  async getReportContent(reportId: string): Promise<{
+    report_id: string;
+    job_id?: string;
+    reportMarkdown: string;
+    metadata?: any;
+  }> {
+    const cleanId = reportId.trim();
+    const res = await fetch(`${API_BASE}/api/reports/${cleanId}`, {
+      headers: this.getAuthHeaders(),
+    });
+    if (!res.ok) {
+      throw new Error(`Report '${reportId}' not found.`);
+    }
+    const data = await res.json();
+    const markdown = data.raw_markdown || data.reportMarkdown || data.final_report || data.content || '';
+    return {
+      report_id: data.report_id || cleanId,
+      job_id: data.job_id || cleanId,
+      reportMarkdown: markdown,
+      metadata: data.metadata || {},
+    };
   }
 
   async runPipelineWithFiles(
@@ -801,6 +963,40 @@ class LocalDesktopService {
     }
 
     return await response.blob();
+  }
+
+  async exportEditedMarkdownPdf(
+    markdownContent: string,
+    reportId?: string,
+    jobId?: string,
+    documentTitle?: string,
+    templateName?: string
+  ): Promise<Blob> {
+    const headers = this.getAuthHeaders();
+    headers['Content-Type'] = 'application/json';
+
+    const resp = await fetch(`${API_BASE}/api/reports/export-markdown-pdf`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        report_id: reportId,
+        job_id: jobId,
+        markdown_content: markdownContent,
+        document_title: documentTitle,
+        template_name: templateName || 'aurora_gradient',
+      }),
+    });
+
+    if (!resp.ok) {
+      let errDetail = 'Failed to compile edited PDF report.';
+      try {
+        const errJson = await resp.json();
+        if (errJson.detail) errDetail = errJson.detail;
+      } catch {}
+      throw new Error(errDetail);
+    }
+
+    return await resp.blob();
   }
 
   async addDataSource(fileData: Partial<DataSourceItem>): Promise<DataSourceItem> {
@@ -1307,3 +1503,4 @@ class LocalDesktopService {
 }
 
 export const desktopService = new LocalDesktopService();
+export const reportService = desktopService;

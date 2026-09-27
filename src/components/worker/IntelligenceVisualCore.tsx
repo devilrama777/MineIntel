@@ -66,13 +66,6 @@ export const IntelligenceVisualCore: React.FC<IntelligenceVisualCoreProps> = ({ 
     };
   }, [isAutoSpinning, isDragging]);
 
-  // Subtle telemetry jitter
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setAccuracy(+(99.5 + Math.random() * 0.4).toFixed(1));
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Universal 360-degree interactive pointer drag handlers (Mouse + Touch + Pen)
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {

@@ -20,15 +20,16 @@ class EvidencePromptBuilder:
     """Constructs verifiable, evidence-grounded system instructions and prompts."""
 
     SYSTEM_REASONING_INSTRUCTION = (
-        "You are MineIntel Sovereign Intelligence Auditor for the Ministry of Coal, Government of India. "
-        "Your duty is to perform rigorous, objective document reasoning grounded strictly in the provided evidence. "
-        "\n\nSTRICT GOVERNANCE RULES:\n"
-        "1. GROUNDING MANDATE: Rely exclusively on the LOCKED FACTS and CALCULATED VALUES supplied below. "
-        "Do NOT invent, extrapolate, or estimate figures not explicitly present.\n"
-        "2. CITATION MANDATE: Every quantitative finding, variance, or deduction must cite its specific evidence ID "
-        "and provenance reference (e.g. `[EVD-FACT-1234: Lakhanpur | Page 1]`).\n"
-        "3. TRUTHFUL REASONING: Clearly separate source facts from analytical deductions. "
-        "If data is missing, explicitly declare the telemetry gap rather than assuming metrics."
+        "You are a Senior Executive Consultant advising executive leadership and the Board of Directors. "
+        "Write in a professional, polished, board-room style. Use a human tone. "
+        "Do not mention the AI process, the tool name, or 'deterministic parity' in the final text. "
+        "Focus on business insights, variances, and strategic actions. "
+        "\n\nEXECUTIVE ADVISORY DIRECTIVES:\n"
+        "1. FACTUAL GROUNDING: Ground all quantitative insights in verified operational data and calculations.\n"
+        "2. BUSINESS INSIGHTS: Explain operational drivers, performance variances, and strategic implications.\n"
+        "3. STRATEGIC ACTIONS: Provide concrete executive recommendations and remedial measures.\n"
+        "4. PROHIBITED JARGON: Do not use machine-speak such as 'Deterministic Math Engines', 'AST Evaluated', "
+        "'Synthetic Records Unit', or 'AI Analytical Synthesis'."
     )
 
     SYSTEM_VL_INSTRUCTION = (
@@ -75,18 +76,17 @@ class EvidencePromptBuilder:
                 narratives.append(it)
 
         sections: List[str] = [
-            "# INGESTED EVIDENCE DOSSIER FOR AUDIT REASONING",
-            "### STRICT GROUNDING RULES:",
-            "1. Ground all findings strictly in LOCKED FACTS and CALCULATED VALUES.",
-            "2. Cite evidence IDs [EV-xxxx] for all numbers.",
-            "3. Prohibit hallucination and ungrounded estimations.",
-            f"- **Total Evidence Items Supplied:** {len(items)}",
-            f"- **Locked Facts:** {len(locked_facts)} | **Calculated Values:** {len(calculated_values)} | **Narrative Texts:** {len(narratives)}",
+            "# EXECUTIVE OPERATIONAL EVIDENCE & DATA BRIEFING",
+            "### EXECUTIVE GUIDELINES:",
+            "1. Ground findings in verified operational records and metrics.",
+            "2. Focus on business insights, variances, and strategic actions.",
+            f"- **Total Evidence Records Supplied:** {len(items)}",
+            f"- **Verified Records:** {len(locked_facts)} | **Reconciled Metrics:** {len(calculated_values)} | **Operational Context:** {len(narratives)}",
             "\n---\n"
         ]
 
         if locked_facts:
-            sections.append("## 1. LOCKED SOURCE FACTS (Source-Faithful, Non-Negotiable)")
+            sections.append("## 1. PRIMARY OPERATIONAL RECORDS & METRICS")
             for fact in locked_facts[:50]:
                 ev_id = fact.get("evidence_id")
                 prov = (fact.get("provenance") or {}).get("filename") or (fact.get("provenance") or {}).get("provenance") or "Source"
@@ -95,7 +95,7 @@ class EvidencePromptBuilder:
             sections.append("\n")
 
         if calculated_values:
-            sections.append("## 2. DETERMINISTIC CALCULATED VALUES (Audit-Verified Computations)")
+            sections.append("## 2. RECONCILED OPERATIONAL CALCULATIONS & PERFORMANCE")
             for calc in calculated_values[:30]:
                 ev_id = calc.get("evidence_id")
                 prov = (calc.get("provenance") or {}).get("sheet_name") or (calc.get("provenance") or {}).get("filename") or (calc.get("provenance") or {}).get("provenance") or "Calculation"
@@ -104,7 +104,7 @@ class EvidencePromptBuilder:
             sections.append("\n")
 
         if narratives:
-            sections.append("## 3. SOURCE TEXT NARRATIVES & OBSERVATIONS")
+            sections.append("## 3. OPERATIONAL CONTEXT & NARRATIVES")
             for narr in narratives[:30]:
                 ev_id = narr.get("evidence_id")
                 prov = (narr.get("provenance") or {}).get("filename") or (narr.get("provenance") or {}).get("provenance") or "Document"

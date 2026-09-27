@@ -18,7 +18,7 @@ interface UploadedFilesListProps {
   activeFileId: string | null;
   isProcessing: boolean;
   onSelectFile: (file: UploadedDataSourceFile) => void;
-  onGenerateReportForFile: (file: UploadedDataSourceFile) => void;
+  onGenerateReportForFile?: (file: UploadedDataSourceFile) => void;
   onDeleteFile: (fileId: string) => void;
   onGoToDataSource: () => void;
 }
@@ -28,7 +28,6 @@ export const UploadedFilesList: React.FC<UploadedFilesListProps> = ({
   activeFileId,
   isProcessing,
   onSelectFile,
-  onGenerateReportForFile,
   onDeleteFile,
   onGoToDataSource,
 }) => {
@@ -40,15 +39,17 @@ export const UploadedFilesList: React.FC<UploadedFilesListProps> = ({
     return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
   };
 
-  const getFileBadge = (name: string, type: string) => {
-    const ext = name.split('.').pop()?.toLowerCase() || '';
-    if (ext === 'pdf' || type.includes('pdf')) {
+  const getFileBadge = (name?: string, type?: string) => {
+    const safeName = name || '';
+    const safeType = (type || '').toLowerCase();
+    const ext = safeName.split('.').pop()?.toLowerCase() || '';
+    if (ext === 'pdf' || safeType.includes('pdf')) {
       return { label: 'PDF', bg: 'bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border-rose-300 dark:border-rose-900/60' };
     }
-    if (ext === 'csv' || ext === 'xlsx' || type.includes('spreadsheet')) {
-      return { label: 'SHEET', bg: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border-emerald-300 dark:border-emerald-900/60' };
+    if (ext === 'csv' || ext === 'xlsx' || ext === 'xls' || safeType.includes('spreadsheet') || safeType.includes('csv')) {
+      return { label: ext === 'csv' ? 'CSV' : 'SHEET', bg: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border-emerald-300 dark:border-emerald-900/60' };
     }
-    if (ext === 'doc' || ext === 'docx') {
+    if (ext === 'doc' || ext === 'docx' || safeType.includes('word')) {
       return { label: 'DOCX', bg: 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300 border-blue-300 dark:border-blue-900/60' };
     }
     return { label: ext.toUpperCase() || 'TXT', bg: 'bg-neutral-100 text-neutral-800 dark:bg-blue-950/80 dark:text-blue-300 border-neutral-300 dark:border-blue-900/60' };
@@ -112,7 +113,11 @@ export const UploadedFilesList: React.FC<UploadedFilesListProps> = ({
       ) : (
         <div className="space-y-3">
           {files.map((file) => {
-            const badge = getFileBadge(file.name, file.type);
+            const fileName = file.name || (file as any).filename || 'Document';
+            const fileType = file.type || (file as any).file_type || 'application/pdf';
+            const fileSize = file.size ?? (file as any).sizeBytes ?? (file as any).file_size ?? 0;
+            const fileDate = file.uploadedAt || (file as any).dateModified || 'Today';
+            const badge = getFileBadge(fileName, fileType);
             const isCurrentActive = activeFileId === file.id;
             const isCurrentlyProcessingThis = isProcessing && isCurrentActive;
 
@@ -141,21 +146,21 @@ export const UploadedFilesList: React.FC<UploadedFilesListProps> = ({
                       </span>
                       <h4 
                         className="font-bold text-sm sm:text-base text-neutral-900 dark:text-white truncate"
-                        title={file.name}
+                        title={fileName}
                       >
-                        {file.name}
+                        {fileName}
                       </h4>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500 dark:text-blue-300/70 font-medium">
                       <span className="flex items-center gap-1">
                         <HardDrive className="w-3.5 h-3.5 text-neutral-400" />
-                        {formatFileSize(file.size)}
+                        {formatFileSize(fileSize)}
                       </span>
                       <span>•</span>
                       <span className="flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5 text-neutral-400" />
-                        {file.uploadedAt}
+                        {fileDate}
                       </span>
                       <span>•</span>
                       <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold">
@@ -166,25 +171,8 @@ export const UploadedFilesList: React.FC<UploadedFilesListProps> = ({
                   </div>
                 </div>
 
-                {/* Actions: Generate Report & Remove */}
+                {/* Actions: Remove */}
                 <div className="flex items-center gap-2.5 pt-2 sm:pt-0 border-t sm:border-t-0 border-neutral-100 dark:border-blue-900/40 justify-end flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => onGenerateReportForFile(file)}
-                    disabled={isProcessing}
-                    className={`group/btn relative overflow-hidden flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold text-white transition-all duration-200 cursor-pointer shadow-md shadow-blue-900/20 hover:shadow-blue-600/30 ${
-                      isCurrentlyProcessingThis
-                        ? 'bg-blue-700 cursor-wait opacity-90'
-                        : 'bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 hover:scale-[1.02] active:scale-[0.98]'
-                    }`}
-                  >
-                    <MineIntelLogo variant="icon-only" size={18} />
-                    <span>
-                      {isCurrentlyProcessingThis ? 'Synthesizing...' : 'Generate Report'}
-                    </span>
-                    <ArrowRight className="w-4 h-4 text-white transition-transform group-hover/btn:translate-x-0.5" />
-                  </button>
-
                   <button
                     type="button"
                     onClick={() => onDeleteFile(file.id)}

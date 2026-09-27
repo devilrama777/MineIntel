@@ -113,6 +113,24 @@ def require_auth(
     return session
 
 
+def get_current_user_or_default(
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None)
+) -> Dict[str, Any]:
+    """Dependency retrieving authenticated user or falling back to default LOCAL_OFFICER for smooth dev workflows."""
+    raw_token = token if isinstance(token, str) and token.strip() else None
+    if not raw_token and isinstance(authorization, str) and authorization.strip():
+        if authorization.startswith("Bearer "):
+            raw_token = authorization.split("Bearer ", 1)[1].strip()
+        else:
+            raw_token = authorization.strip()
+    if raw_token:
+        session = verify_session_token(raw_token)
+        if session:
+            return session
+    return {"officer_id": "LOCAL_OFFICER", "role": "Worker", "timestamp": int(time.time() * 1000)}
+
+
 # -------------------------------------------------------------------------
 # AUTHENTICATION ENDPOINTS
 # -------------------------------------------------------------------------

@@ -194,7 +194,7 @@ class LongDocumentBuilder:
 
         elements.append(Spacer(1, 40))
         # Sovereign footer stamp
-        stamp_text = "<i>This official report is deterministically compiled by MineIntel Sovereign Document Intelligence Engine. All numerical facts and figures are mathematically linked to verified immutable source documents.</i>"
+        stamp_text = "<i>Executive Operational Report: Synthesized from verified operational records, performance benchmarks, and reconciled operational data.</i>"
         elements.append(Paragraph(stamp_text, ParagraphStyle("Stamp", fontName="Helvetica-Oblique", fontSize=7.5, leading=10, alignment=1, textColor=colors.HexColor("#64748B"))))
 
         elements.append(PageBreak())
@@ -373,11 +373,11 @@ class LongDocumentBuilder:
                     if (flag.section_id if hasattr(flag, "section_id") else flag.get("section_id")) == sec.section_id:
                         self._build_missing_evidence_alert(flag, elements)
 
-            # AI Analytical Synthesis Narrative (clearly separating AI interpretation from source facts)
+            # Executive Analysis Narrative
             sec_narrative = getattr(sec, "content_text", "") or getattr(sec, "narrative", "")
             if sec_narrative:
                 elements.append(Paragraph(
-                    "<font color='#0D9488'><b>[AI ANALYTICAL SYNTHESIS — GROUNDED IN AUDITED EVIDENCE]</b></font>",
+                    "<font color='#0D9488'><b>[EXECUTIVE ANALYSIS & STRATEGIC INSIGHTS]</b></font>",
                     self.style_sec_h2
                 ))
                 for line in sec_narrative.split("\n"):
@@ -510,7 +510,7 @@ class LongDocumentBuilder:
             sec_narrative = getattr(sec, "content_text", "") or getattr(sec, "narrative", "")
             if sec_narrative:
                 p_syn = doc.add_paragraph()
-                r_badge = p_syn.add_run("[AI ANALYTICAL SYNTHESIS — GROUNDED IN AUDITED EVIDENCE]\n")
+                r_badge = p_syn.add_run("[EXECUTIVE ANALYSIS & STRATEGIC INSIGHTS]\n")
                 r_badge.bold = True
                 r_badge.font.color.rgb = RGBColor(13, 148, 136)
                 p_syn.add_run(sec_narrative)
@@ -579,7 +579,7 @@ class LongDocumentBuilder:
 
                 sec_narrative = getattr(sec, "content_text", "") or getattr(sec, "narrative", "")
                 if sec_narrative:
-                    f.write("> 🤖 **[AI ANALYTICAL SYNTHESIS — GROUNDED IN AUDITED EVIDENCE]**\n>\n")
+                    f.write("> **[EXECUTIVE ANALYSIS & STRATEGIC INSIGHTS]**\n>\n")
                     for l in sec_narrative.splitlines():
                         if l.strip():
                             f.write(f"> {l}\n")

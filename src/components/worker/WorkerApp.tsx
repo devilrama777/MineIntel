@@ -65,7 +65,7 @@ import {
 } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { useAuth } from '../../context/AuthContext';
-import { desktopService } from '../../services/reportService';
+import { desktopService, reportService } from '../../services/reportService';
 
 function ensureFileObject(item: { name: string; type?: string; file?: File; fileBase64?: string; rawText?: string }): File {
   if (item.file instanceof File) {
@@ -157,7 +157,86 @@ export function WorkerApp() {
     }
   }, [uploadedFiles]);
 
-  // Initial workspace starts clean with no pre-selected documents
+  // Task 1: Fetch persistent Data Sources from SQLite backend on mount
+  useEffect(() => {
+    let isMounted = true;
+    reportService.getDataSources().then((sources) => {
+      if (!isMounted) return;
+      if (sources && sources.length > 0) {
+        const mapped: UploadedDataSourceFile[] = sources.map((s: any) => ({
+          id: s.id || s.file_id,
+          name: s.name || s.filename || 'Document',
+          filename: s.filename || s.name || 'Document',
+          type: s.type || s.file_type || 'application/pdf',
+          size: s.size ?? s.sizeBytes ?? s.file_size ?? 0,
+          sizeBytes: s.sizeBytes ?? s.size ?? s.file_size ?? 0,
+          uploadedAt: s.uploadedAt || s.dateModified || 'Today',
+          dateModified: s.dateModified || s.uploadedAt || 'Today',
+        }));
+        setUploadedFiles(mapped);
+      }
+    }).catch((err) => {
+      console.error('Failed to fetch persistent data sources on mount:', err);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Task 3: URL sync and load report by report_id from URL
+  useEffect(() => {
+    const handleUrlSync = async () => {
+      try {
+        const searchParams = new URLSearchParams(window.location.search);
+        const reportIdParam = searchParams.get('report_id') || searchParams.get('reportId');
+        const pathname = window.location.pathname;
+
+        if (pathname.includes('/preview') || reportIdParam) {
+          if (reportIdParam) {
+            try {
+              const reportData = await reportService.getReportContent(reportIdParam);
+              if (reportData && reportData.reportMarkdown) {
+                const loadedReport: GeneratedReport = {
+                  id: reportData.report_id,
+                  jobId: reportData.job_id,
+                  reportId: reportData.report_id,
+                  fileName: reportData.metadata?.title || `Executive Report: ${reportData.report_id}`,
+                  fileType: 'application/pdf',
+                  reportMarkdown: reportData.reportMarkdown,
+                  metadata: {
+                    title: reportData.metadata?.title || `Executive Report: ${reportData.report_id}`,
+                    reportType: reportData.metadata?.reportType || 'executive',
+                    depth: reportData.metadata?.depth || 'standard',
+                    tone: reportData.metadata?.tone || 'analytical',
+                    wordCount: reportData.reportMarkdown.split(/\s+/).length,
+                    readingTimeMinutes: Math.max(1, Math.round(reportData.reportMarkdown.split(/\s+/).length / 200)),
+                    generatedAt: reportData.metadata?.generatedAt || new Date().toISOString(),
+                  },
+                };
+                setCurrentReport(loadedReport);
+                setActiveView('preview');
+                return;
+              }
+            } catch (fetchErr) {
+              console.warn('Could not fetch report for URL report_id:', reportIdParam, fetchErr);
+            }
+          }
+          setActiveView('preview');
+        } else if (pathname.includes('/datasource')) {
+          setActiveView('datasource');
+        } else if (pathname.includes('/export')) {
+          setActiveView('export');
+        }
+      } catch (err) {
+        console.error('Error synchronizing URL state:', err);
+      }
+    };
+
+    handleUrlSync();
+    window.addEventListener('popstate', handleUrlSync);
+    return () => window.removeEventListener('popstate', handleUrlSync);
+  }, []);
 
   // Configuration State
   const [reportType, setReportType] = useState<ReportType>('executive');
@@ -242,7 +321,7 @@ export function WorkerApp() {
   };
 
   // Handle multiple files selection in Data Source Upload Document & Ingest
-  const handleFilesSelected = (files: File[]) => {
+  const handleFilesSelected = async (files: File[]) => {
     setErrorMessage(null);
     files.forEach((file) => {
       const isBinary = file.type.includes('pdf') || 
@@ -297,7 +376,25 @@ export function WorkerApp() {
         reader.readAsText(file);
       }
     });
-    showToast(`${files.length} document${files.length > 1 ? 's' : ''} staged for ingestion!`);
+
+    // Task 1: Upload to persistent SQLite / SQLAlchemy backend
+    try {
+      const persisted = await reportService.uploadDataSourceFiles(files);
+      if (persisted && persisted.length > 0) {
+        const mapped: UploadedDataSourceFile[] = persisted.map((s) => ({
+          id: s.id,
+          name: s.filename,
+          type: s.type,
+          size: s.sizeBytes,
+          uploadedAt: s.dateModified,
+        }));
+        setUploadedFiles(mapped);
+      }
+    } catch (persistErr) {
+      console.error('Failed to persist uploaded files to database:', persistErr);
+    }
+
+    showToast(`${files.length} document${files.length > 1 ? 's' : ''} saved to database!`);
   };
 
   const handleRemoveStagedFile = (fileId: string) => {
@@ -387,6 +484,25 @@ export function WorkerApp() {
       };
       reader.readAsText(file);
     }
+
+    // Persist single file to SQLite backend
+    reportService.uploadDataSourceFiles([file]).then((persisted) => {
+      if (persisted && persisted.length > 0) {
+        const mapped: UploadedDataSourceFile[] = persisted.map((s: any) => ({
+          id: s.id || s.file_id,
+          name: s.name || s.filename || file.name,
+          filename: s.filename || s.name || file.name,
+          type: s.type || s.file_type || file.type || 'application/pdf',
+          size: s.size ?? s.sizeBytes ?? file.size,
+          sizeBytes: s.sizeBytes ?? s.size ?? file.size,
+          uploadedAt: s.uploadedAt || s.dateModified || 'Today',
+          dateModified: s.dateModified || s.uploadedAt || 'Today',
+        }));
+        setUploadedFiles(mapped);
+      }
+    }).catch((err) => {
+      console.error('Failed to persist single file upload:', err);
+    });
   };
 
   const handleClearFile = () => {
@@ -520,51 +636,72 @@ export function WorkerApp() {
     setErrorMessage(null);
 
     try {
-      // Execute the sovereign pipeline via Agent Task Orchestration
-      const result = await desktopService.runPipelineWithFiles(
-        filesToProcess,
-        customFocus,
-        reportTitle,
-        (status, detail) => {
-          setTaskStatus(status);
-          if (detail?.currentTool !== undefined) {
-            setCurrentTool(detail.currentTool || '');
-          }
-          if (detail?.currentStage !== undefined) {
-            setCurrentStage(detail.currentStage || '');
-          }
-          if (detail?.progressReason !== undefined) {
-            setProgressReason(detail.progressReason || '');
-          }
-          if (detail?.sections_completed !== undefined) {
-            setSectionsCompleted(detail.sections_completed);
-          }
-          if (detail?.total_sections !== undefined) {
-            setTotalSections(detail.total_sections);
-          }
-          if (detail?.active_sections !== undefined) {
-            setActiveSections(detail.active_sections);
-          }
-          if (detail?.completed_sections !== undefined) {
-            setCompletedSections(detail.completed_sections);
-          }
-        }
-      );
+      setTaskStatus('RUNNING');
+      setCurrentTool('ReportSynthesisEngine');
+      setCurrentStage('Synthesizing Report via /api/generate-report...');
+      setProgressReason('Compiling evidence and generating executive report...');
+      setSectionsCompleted(1);
+      setTotalSections(1);
 
-      const newReport: GeneratedReport = {
-        id: result.report_id || result.job_id,
-        jobId: result.job_id,
-        reportId: result.report_id,
+      // 1. Collect target file IDs from selected files or uploaded repository
+      const targetFileIds: string[] = [];
+      if (selectedFileIds.length > 0) {
+        targetFileIds.push(...selectedFileIds);
+      } else if (options?.selectedDocs && options.selectedDocs.length > 0) {
+        targetFileIds.push(...options.selectedDocs.map((d) => d.id));
+      } else if (activeFileId) {
+        targetFileIds.push(activeFileId);
+      } else if (uploadedFiles.length > 0) {
+        targetFileIds.push(uploadedFiles[0].id);
+      }
+
+      // 2. Task 2: Trigger POST /api/generate-report with selected file IDs
+      const result = await reportService.generateReport({
+        file_ids: targetFileIds,
+        fileIds: targetFileIds,
+        reportType,
+        depth,
+        tone,
+        customFocus,
         fileName: reportTitle,
+        files: filesToProcess.map((f) => ({
+          name: f.name,
+          type: f.type,
+        })),
+      });
+
+      // 3. Response: Verify backend returns a report_id
+      const reportId = result.report_id || result.job_id;
+      if (!reportId) {
+        throw new Error('Backend generation did not return a valid report_id.');
+      }
+
+      const reportMarkdown = result.reportMarkdown || result.content || result.final_report || '';
+      const newReport: GeneratedReport = {
+        id: reportId,
+        jobId: result.job_id || reportId,
+        reportId: reportId,
+        fileName: result.metadata?.title || reportTitle || `Executive Report: ${reportId}`,
         fileType: 'application/pdf',
-        reportMarkdown: result.markdown_content,
-        metadata: result.metadata,
+        reportMarkdown: reportMarkdown,
+        metadata: result.metadata || {
+          title: reportTitle,
+          reportType,
+          depth,
+          tone,
+          wordCount: reportMarkdown.split(/\s+/).length,
+          readingTimeMinutes: Math.max(1, Math.round(reportMarkdown.split(/\s+/).length / 200)),
+          generatedAt: new Date().toISOString(),
+        },
         customFocus,
       };
 
       setCurrentReport(newReport);
-      setActiveView('preview');
       setReportsHistory((prev) => [newReport, ...prev.slice(0, 19)]); // keep last 20
+
+      // 4. Redirect: In frontend, use window.history.pushState to move to /preview?report_id={report_id}
+      window.history.pushState({ report_id: reportId }, '', `/preview?report_id=${reportId}`);
+      setActiveView('preview');
       showToast('Executive report synthesized successfully! Viewing in Preview.');
       scrollToTop();
     } catch (err: any) {
@@ -580,6 +717,43 @@ export function WorkerApp() {
 
   const handleGenerateReport = async () => {
     await executeReportGeneration();
+  };
+
+  // Task 3: Final Export sending edited Markdown to /api/reports/export-markdown-pdf and downloading PDF
+  const handleFinalExportPdf = async () => {
+    try {
+      showToast('Compiling edited Markdown into PDF report...');
+      const markdown = currentReport?.reportMarkdown || rawText || '';
+      if (!markdown || !markdown.trim()) {
+        throw new Error('No report markdown available to export.');
+      }
+
+      const targetReportId = currentReport?.reportId || currentReport?.id || `REP-${Date.now()}`;
+      const targetJobId = currentReport?.jobId || undefined;
+      const docTitle = currentReport?.fileName || fileName || 'MineIntel_Executive_Report';
+
+      const blob = await reportService.exportEditedMarkdownPdf(
+        markdown,
+        targetReportId,
+        targetJobId,
+        docTitle,
+        'aurora_gradient'
+      );
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeName = docTitle.replace(/\.[^/.]+$/, '').replace(/[^\w\-]+/g, '_');
+      a.download = `${safeName}_Executive_Report.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      showToast('Final PDF report exported and downloaded successfully!');
+    } catch (err: any) {
+      console.error('Final PDF export failed:', err);
+      showToast(`Export error: ${err.message || 'Could not export PDF'}`);
+    }
   };
 
   // Real backend report artifact downloader
@@ -664,6 +838,7 @@ export function WorkerApp() {
   };
 
   const handleNewReport = () => {
+    window.history.pushState({}, '', '/');
     setCurrentReport(null);
     handleClearFile();
     setCustomFocus('');
@@ -678,6 +853,7 @@ export function WorkerApp() {
   };
 
   const handleSelectDataSource = () => {
+    window.history.pushState({}, '', '/datasource');
     setActiveView('datasource');
     setIsMobileSidebarOpen(false);
     scrollToTop();
@@ -690,11 +866,17 @@ export function WorkerApp() {
         handleSelectUploadedFile(uploadedFiles[0]);
       }
     }
+    if (currentReport?.id) {
+      window.history.pushState({ report_id: currentReport.id }, '', `/preview?report_id=${currentReport.id}`);
+    } else {
+      window.history.pushState({}, '', '/preview');
+    }
     setActiveView('preview');
     scrollToTop();
   };
 
   const handleExportReport = () => {
+    window.history.pushState({}, '', '/export');
     setIsMobileSidebarOpen(false);
     if (!fileName && rawText.trim().length === 0 && !fileBase64 && !currentReport) {
       if (uploadedFiles.length > 0) {
@@ -858,6 +1040,7 @@ export function WorkerApp() {
                   });
                 }
               }}
+              onFinalExportPdf={handleFinalExportPdf}
             />
           ) : activeView === 'export' ? (
             /* VIEW 3: EXPORT SECTION (PDF and DOCX options) */
@@ -890,6 +1073,12 @@ export function WorkerApp() {
               canGenerate={canGenerate}
               isProcessing={isProcessing}
               isDark={isDark}
+              uploadedFiles={uploadedFiles}
+              onDeleteUploadedFile={handleDeleteUploadedFile}
+              onNavigateToNewReport={() => {
+                setActiveView('editor');
+                scrollToTop();
+              }}
             />
           ) : activeView === 'profile' ? (
             /* VIEW 5: AUTHENTICATED USER PROFILE */

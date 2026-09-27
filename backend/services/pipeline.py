@@ -7,23 +7,50 @@ from typing import Any, Dict, List, Optional
 
 from backend import config
 from backend.services.converter import MarkdownConverter
-try:
-    from backend.services.gemma_client import GemmaClient
-except ImportError:
-    class GemmaClient:  # type: ignore
-        def __init__(self, *args, **kwargs):
-            self.model = "qwen2.5:7b"
-        def generate_systematic_report(self, llama_analysis="", math_audit_markdown="", **kwargs):
-            return {"final_report": f"# Systematic Report\n\n## Analysis\n{llama_analysis}\n\n## Math Audit\n{math_audit_markdown}"}
+from backend.services.ai_inference_service import ai_inference_service
+from backend.services.ai_providers.base import AIRequest
 
-try:
-    from backend.services.llama_client import LlamaClient
-except ImportError:
-    class LlamaClient:  # type: ignore
-        def __init__(self, *args, **kwargs):
-            self.model = "qwen2.5:7b"
-        def analyze_document(self, markdown_content="", **kwargs):
-            return {"analysis": f"Document Analysis Summary:\n{markdown_content[:500]}"}
+
+class LlamaClient:
+    """Real AI inference client using qwen2.5:7b for document analysis."""
+    def __init__(self, *args, **kwargs):
+        self.model = getattr(config, "LOCAL_MODEL_QWEN25", "qwen2.5:7b")
+
+    def analyze_document(self, markdown_content: str = "", **kwargs) -> Dict[str, Any]:
+        provider = ai_inference_service._get_provider()
+        req = AIRequest(
+            prompt=f"Perform a comprehensive executive analysis of this operational document. Extract key figures, metrics, and trends:\n\n{markdown_content[:6000]}",
+            system_instruction="You are an Executive Intelligence Analyst. Deliver factual, quantitative operational insights based strictly on the document text.",
+            model=self.model,
+            temperature=0.1
+        )
+        resp = provider.generate(req)
+        analysis_text = resp.text if resp.success and resp.text else f"Document Analysis Summary:\n{markdown_content[:500]}"
+        return {"analysis": analysis_text}
+
+
+class GemmaClient:
+    """Real AI inference client using qwen2.5:7b for systematic report synthesis."""
+    def __init__(self, *args, **kwargs):
+        self.model = getattr(config, "LOCAL_MODEL_QWEN25", "qwen2.5:7b")
+
+    def generate_systematic_report(self, llama_analysis: str = "", math_audit_markdown: str = "", **kwargs) -> Dict[str, Any]:
+        provider = ai_inference_service._get_provider()
+        prompt = (
+            f"Synthesize an official Board-Level Executive Operational Report based on this validated analysis and audited figures:\n\n"
+            f"### Document Analysis\n{llama_analysis}\n\n"
+            f"### Verified Mathematical Audit\n{math_audit_markdown}\n\n"
+            f"Format as clean, board-ready Markdown with Executive Summary, Operational Findings, and Strategic Directives."
+        )
+        req = AIRequest(
+            prompt=prompt,
+            system_instruction="You are a Senior Executive Consultant delivering a publication-grade corporate dossier for the Board of Directors.",
+            model=self.model,
+            temperature=0.1
+        )
+        resp = provider.generate(req)
+        report_text = resp.text if resp.success and resp.text else f"# Systematic Report\n\n## Analysis\n{llama_analysis}\n\n## Math Audit\n{math_audit_markdown}"
+        return {"final_report": report_text}
 
 from backend.services.math_engine import MathEngine
 

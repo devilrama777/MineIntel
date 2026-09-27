@@ -9,6 +9,7 @@ import secrets
 import shutil
 import time
 import uuid
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import numpy as np
@@ -42,9 +43,11 @@ from backend.services.report_generator_service import report_generator_service
 from backend.services.report_editor_service import report_editor_service
 from backend.services.learning_service import learning_service
 
+from backend.database import init_db, Document, SessionLocal, get_db
 from backend.routers.auth import (
     router as auth_router,
     require_auth,
+    get_current_user_or_default,
     create_session_token,
     verify_session_token,
     auth_captcha,
@@ -111,6 +114,27 @@ pipeline_service = DocumentPipeline()
 converter_service = MarkdownConverter()
 math_engine = MathEngine()
 document_generator = DocumentGenerator()
+
+# Initialize SQLite tables on startup
+init_db()
+
+
+@app.get("/api/data-sources")
+@app.get("/api/sources")
+def get_root_data_sources(db: SessionLocal = Depends(get_db)):
+    """
+    Direct endpoint returning all previously uploaded files from SQLite Document table via db.query(Document).all().
+    Ensures L3 persistent Data Sources across browser refreshes.
+    """
+    documents = db.query(Document).order_by(Document.created_at.desc()).all()
+    docs_data = [d.to_dict() for d in documents]
+    return {
+        "success": True,
+        "documents": docs_data,
+        "data_sources": docs_data,
+        "sources": docs_data,
+        "count": len(docs_data)
+    }
 
 
 # -------------------------------------------------------------------------
@@ -1754,6 +1778,8 @@ class WorkerGenerateReportRequest(BaseModel):
     fileBase64: Optional[str] = None
     rawText: Optional[str] = None
     files: Optional[List[WorkerFilePayload]] = None
+    file_ids: Optional[List[str]] = None
+    fileIds: Optional[List[str]] = None
     reportType: Optional[str] = "executive"
     depth: Optional[str] = "standard"
     tone: Optional[str] = "analytical"
@@ -1768,16 +1794,30 @@ async def generate_worker_report(
 ):
     """
     Worker Report Generation API adapter.
-    Executes the unified multi-file Phase 1–9 backend pipeline:
-    - Phase 1: Multi-file evidence ingestion and normalization
-    - Phase 4: Intelligence dossier organization
-    - Phase 5: Chart & table detection
-    - Phase 6: Systematic report planning
-    - Phase 7: Long-document report compilation (PDF, DOCX, Markdown)
+    Accepts selected file IDs from persistent database or direct payloads.
+    Executes the multi-file Phase 1–9 backend pipeline and returns report_id.
     """
     payload_files: List[Tuple[str, bytes]] = []
 
-    if req.files and len(req.files) > 0:
+    # 1. Fetch persistent documents by file IDs if provided
+    target_file_ids = req.file_ids or req.fileIds or []
+    if target_file_ids:
+        db = SessionLocal()
+        try:
+            docs = db.query(Document).filter(Document.id.in_(target_file_ids)).all()
+            for doc in docs:
+                p = Path(doc.raw_path)
+                if p.exists() and p.is_file():
+                    payload_files.append((doc.filename, p.read_bytes()))
+                elif doc.normalized_path and Path(doc.normalized_path).exists():
+                    payload_files.append((doc.filename, Path(doc.normalized_path).read_bytes()))
+                else:
+                    payload_files.append((doc.filename, f"# Evidence File: {doc.filename}\nType: {doc.file_type}\n".encode("utf-8")))
+        finally:
+            db.close()
+
+    # 2. Add files payload if provided
+    if not payload_files and req.files and len(req.files) > 0:
         for f_item in req.files:
             fname = f_item.name or "document.pdf"
             f_bytes = b""
@@ -1793,7 +1833,7 @@ async def generate_worker_report(
                 f_bytes = f_item.rawText.encode("utf-8")
             if f_bytes:
                 payload_files.append((fname, f_bytes))
-    elif req.fileBase64 or req.rawText:
+    elif not payload_files and (req.fileBase64 or req.rawText):
         fname = req.fileName or "Uploaded_Document.pdf"
         f_bytes = b""
         if req.fileBase64:
@@ -1808,6 +1848,18 @@ async def generate_worker_report(
             f_bytes = req.rawText.encode("utf-8")
         if f_bytes:
             payload_files.append((fname, f_bytes))
+
+    # 3. Fallback to latest persistent document in database if no files specified
+    if not payload_files:
+        db = SessionLocal()
+        try:
+            latest_doc = db.query(Document).order_by(Document.created_at.desc()).first()
+            if latest_doc:
+                p = Path(latest_doc.raw_path)
+                if p.exists() and p.is_file():
+                    payload_files.append((latest_doc.filename, p.read_bytes()))
+        finally:
+            db.close()
 
     if not payload_files:
         raise HTTPException(
@@ -1843,38 +1895,47 @@ async def generate_worker_report(
         except Exception as ce:
             logger.warning(f"Phase 5 chart detection warning for job {job_id}: {ce}")
 
-        # Phase 6: Report Planning
         report_title = (
             Path(payload_files[0][0]).stem.replace("_", " ").title() + " Report"
             if len(payload_files) == 1
             else f"Executive Synthesis ({len(payload_files)} Sources)"
         )
-        plan_res = planner_service.generate_plan(
-            job_id=job_id,
-            owner_id=owner_id,
-            title=report_title,
-            use_ai=False,
-            custom_instruction=req.customFocus
-        )
-        plan_id = plan_res.get("plan", {}).get("plan_id") if isinstance(plan_res, dict) else getattr(plan_res, "plan_id", None)
+        custom_focus = req.customFocus or "Analyze operational evidence, variance drivers, and strategic actions."
+        agent_prompt = f"Synthesize comprehensive board-level operational report for '{report_title}'. Custom Focus: {custom_focus}"
 
-        # Phase 7: Long-Document Generation (PDF, DOCX, Markdown)
-        gen_res = report_generator_service.generate_report(
-            job_id=job_id,
-            owner_id=owner_id,
-            plan_id=plan_id,
-            formats=["pdf", "docx", "md"],
-            title_override=report_title
+        # Forced Integration: Execute AgentCoordinator.run() with real Qwen synthesis
+        from backend.services.agent.agent_coordinator import AgentCoordinator
+        coordinator = AgentCoordinator(owner_id=owner_id)
+
+        # Execute full 10-stage deterministic autonomous pipeline:
+        # LOAD_MANIFEST -> VERIFY_INGESTION -> EVIDENCE_ANALYSIS (chunked Qwen summarization) ->
+        # INTELLIGENCE -> CHARTS -> PLANNING -> WRITING (Qwen prompt with real evidence_items & chunk_summaries) ->
+        # VALIDATE -> COMPILE_MARKDOWN_ARTIFACT -> VERIFY_ARTIFACT
+        agent_state = coordinator.run(
+            task_id=job_id,
+            prompt=agent_prompt
         )
 
-        report_id = gen_res.get("report_id") or f"rep_{job_id}"
-        md_path = gen_res.get("md_path")
+        report_id = agent_state.structured_state.get("report_id") or f"rep_{uuid.uuid4()}"
+        artifacts = agent_state.structured_state.get("artifacts") or {}
+        md_path = artifacts.get("md")
         report_markdown = ""
         if md_path and Path(md_path).exists():
             try:
                 report_markdown = Path(md_path).read_text(encoding="utf-8")
             except Exception:
                 report_markdown = ""
+
+        # If md_path wasn't directly found, check outputs/{job_id}/
+        if not report_markdown:
+            job_dir = config.OUTPUTS_DIR / job_id
+            for cand in [job_dir / "04_final_systematic_report.md", job_dir / f"{job_id}.md", job_dir / f"{report_id}.md"]:
+                if cand.exists():
+                    try:
+                        report_markdown = cand.read_text(encoding="utf-8")
+                        break
+                    except Exception:
+                        pass
 
         if not report_markdown:
             report_markdown = (
@@ -1885,6 +1946,76 @@ async def generate_worker_report(
                 f"Analysis completed successfully across {len(payload_files)} evidence source(s).\n"
             )
 
+        # Query database evidence_store to extract real structured tables/records from uploaded files
+        from backend.services import evidence_store
+        ev_res = evidence_store.query_evidence(job_id=job_id, owner_id=owner_id, limit=5000)
+        ev_items = ev_res.get("items", []) if isinstance(ev_res, dict) else ev_res
+
+        # Extract real table records from evidence items if present
+        actual_records = None
+        candidate_rows = []
+        for it in ev_items:
+            c_json = it.get("content_json") or {}
+            if isinstance(c_json, dict):
+                if "table_data" in c_json and isinstance(c_json["table_data"], list) and c_json["table_data"]:
+                    actual_records = c_json["table_data"]
+                    break
+                elif "rows" in c_json and isinstance(c_json["rows"], list) and c_json["rows"]:
+                    actual_records = c_json["rows"]
+                    break
+                elif len(c_json) > 1 and not any(k in c_json for k in ["width", "height", "format", "snippet", "char_count", "page"]):
+                    candidate_rows.append(c_json)
+            elif isinstance(c_json, list) and len(c_json) > 0 and isinstance(c_json[0], dict):
+                actual_records = c_json
+                break
+        if not actual_records and candidate_rows:
+            actual_records = candidate_rows
+
+        # Force fresh publication-grade Corporate Dossier PDF and DOCX generation into isolated outputs/{job_id}/
+        pdf_file = document_generator.generate_pdf_report(
+            template_name="corporate_dossier",
+            report_id=report_id,
+            summary_text=report_markdown,
+            user_records=actual_records,
+            document_title=report_title,
+            job_id=job_id
+        )
+        docx_file = document_generator.generate_docx_report(
+            template_name="corporate_dossier",
+            report_id=report_id,
+            summary_text=report_markdown,
+            user_records=actual_records,
+            document_title=report_title,
+            job_id=job_id
+        )
+
+        pdf_path_str = str(pdf_file) if pdf_file and Path(pdf_file).exists() else artifacts.get("pdf")
+        docx_path_str = str(docx_file) if docx_file and Path(docx_file).exists() else artifacts.get("docx")
+
+        # Ensure report markdown is persisted to disk and outputs directory for both report_id and job_id
+        for target_id in [job_id, report_id]:
+            t_dir = config.OUTPUTS_DIR / target_id
+            t_dir.mkdir(parents=True, exist_ok=True)
+            (t_dir / "04_final_systematic_report.md").write_text(report_markdown, encoding="utf-8")
+            (t_dir / f"{target_id}.md").write_text(report_markdown, encoding="utf-8")
+
+        # Record in history store
+        try:
+            from backend.services.history_manager import record_report
+            record_report(
+                report_id=report_id,
+                title=report_title,
+                template_id="corporate_dossier",
+                template_name="Corporate Dossier",
+                theme="Executive Corporate",
+                auditor_id=owner_id,
+                records_count=len(payload_files),
+                summary_snippet=report_markdown[:250],
+                job_id=job_id
+            )
+        except Exception as rec_err:
+            logger.warning(f"Failed to record history for {report_id}: {rec_err}")
+
         word_count = len(report_markdown.split())
         reading_time = max(1, round(word_count / 200))
 
@@ -1893,8 +2024,10 @@ async def generate_worker_report(
             "job_id": job_id,
             "report_id": report_id,
             "reportMarkdown": report_markdown,
-            "pdf_path": gen_res.get("pdf_path"),
-            "docx_path": gen_res.get("docx_path"),
+            "content": report_markdown,
+            "final_report": report_markdown,
+            "pdf_path": pdf_path_str,
+            "docx_path": docx_path_str,
             "metadata": {
                 "title": report_title,
                 "reportType": req.reportType or "executive",
@@ -2541,13 +2674,12 @@ def download_report_format(fmt: str, template: Optional[str] = None, job_id: Opt
                 )
 
         # Search job directories exclusively for generated report files (never raw uploaded files)
-        job_dirs = [config.REPORTS_DIR / effective_job_id, config.OUTPUTS_DIR / effective_job_id]
+        job_dirs = [config.OUTPUTS_DIR / effective_job_id, config.REPORTS_DIR / effective_job_id]
         for jd in job_dirs:
             if jd.exists():
                 matching = [
                     f for f in jd.glob(f"*.{fmt}")
-                    if (f.name.lower().startswith("report_") or f.name.lower().startswith("ministry_") or tpl_key in f.name.lower())
-                    and f.stat().st_size > 0
+                    if not f.name.startswith("ev_") and f.stat().st_size > 0
                 ]
                 if matching:
                     return FileResponse(
@@ -2594,20 +2726,9 @@ def download_report_format(fmt: str, template: Optional[str] = None, job_id: Opt
                 headers={"Content-Disposition": f'attachment; filename="{target_fname}"'}
             )
 
-    # Fallback to default format file
-    for d in search_dirs:
-        candidate = d / default_fname
-        if candidate.exists() and candidate.stat().st_size > 0:
-            return FileResponse(
-                path=candidate,
-                filename=target_fname,
-                media_type=media_type,
-                headers={"Content-Disposition": f'attachment; filename="{target_fname}"'}
-            )
-
     raise HTTPException(
         status_code=404,
-        detail=f"Report '{target_fname}' not found. Please generate the report first or try again later."
+        detail=f"Report '{target_fname}' not found. Please generate the report first or check job_id."
     )
 
 
@@ -2620,38 +2741,18 @@ def export_report_v1(req: ReportExportRequest):
     if fmt not in ("pdf", "docx", "xlsx", "csv"):
         fmt = "pdf"
 
-    title = req.report_title or "MineIntel_Technical_Evaluation_ML-492"
-    job_id = req.job_id.strip() if isinstance(req.job_id, str) and req.job_id.strip() else None
+    title = req.report_title or "MineIntel_Executive_Report"
+    job_id = req.job_id.strip() if isinstance(req.job_id, str) and req.job_id.strip() else f"job_{uuid.uuid4()}"
 
-    # Check if job_id is directly a generated report in Phase 7 report_generator_store
-    if job_id:
-        existing_report = report_generator_service.get_report(job_id, owner_id=None)
-        if existing_report:
-            return {
-                "status": "success",
-                "filename": f"{title}.{fmt}",
-                "saved_path": str(existing_report.get(f"{fmt}_path", "")),
-                "download_url": f"/api/reports/{job_id}/download?format={fmt}"
-            }
-        job_reports = report_generator_service.list_reports(job_id=job_id, owner_id="")
-        if job_reports:
-            latest_rep = job_reports[0]
-            rep_id = latest_rep.get("report_id")
-            return {
-                "status": "success",
-                "filename": f"{title}.{fmt}",
-                "saved_path": str(latest_rep.get(f"{fmt}_path", "")),
-                "download_url": f"/api/reports/{rep_id}/download?format={fmt}"
-            }
-
+    # Force fresh generation into outputs/{job_id}/
     if fmt == "pdf":
-        gen_path = document_generator.generate_pdf_report(template_name="bento_grid", job_id=job_id)
+        gen_path = document_generator.generate_pdf_report(template_name="bento_grid", job_id=job_id, document_title=title)
         filename = f"{title}.pdf"
     elif fmt == "docx":
-        gen_path = document_generator.generate_docx_report(template_name="bento_grid", job_id=job_id)
+        gen_path = document_generator.generate_docx_report(template_name="bento_grid", job_id=job_id, document_title=title)
         filename = f"{title}.docx"
     else:
-        gen_path = document_generator.generate_excel_workbook(template_name="bento_grid", job_id=job_id)
+        gen_path = document_generator.generate_excel_workbook(template_name="bento_grid", job_id=job_id, document_title=title)
         filename = f"{title}.xlsx"
 
     saved_path = str(gen_path) if gen_path else ""
@@ -2668,8 +2769,54 @@ def export_report_v1(req: ReportExportRequest):
         "status": "success",
         "filename": filename,
         "saved_path": saved_path,
-        "download_url": f"/api/reports/download/{fmt}?template=bento_grid" + (f"&job_id={job_id}" if job_id else "")
+        "download_url": f"/api/reports/download/{fmt}?template=bento_grid&job_id={job_id}"
     }
+
+
+class ExportMarkdownPdfRequest(BaseModel):
+    report_id: Optional[str] = None
+    job_id: Optional[str] = None
+    markdown_content: str
+    document_title: Optional[str] = None
+    template_name: Optional[str] = "corporate_dossier"
+
+
+@app.post("/api/reports/export-markdown-pdf")
+def export_markdown_pdf_endpoint(
+    req: ExportMarkdownPdfRequest,
+    auth: Dict[str, Any] = Depends(get_current_user_or_default)
+):
+    """
+    Directly compiles and exports the user's edited Markdown into a publication-grade PDF artifact
+    using DocumentGenerator, and streams back the downloadable PDF.
+    """
+    if not req.markdown_content or not req.markdown_content.strip():
+        raise HTTPException(status_code=400, detail="Markdown content cannot be empty.")
+
+    title = req.document_title or "MineIntel_Executive_Report"
+    safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', title)[:40]
+    template = req.template_name or "corporate_dossier"
+    rep_id = req.report_id or f"REP-2026-{uuid.uuid4().hex[:4].upper()}"
+
+    gen_path = document_generator.generate_pdf_report(
+        template_name=template,
+        report_id=rep_id,
+        summary_text=req.markdown_content,
+        document_title=title,
+        job_id=req.job_id
+    )
+
+    if not gen_path or not Path(gen_path).exists():
+        raise HTTPException(status_code=500, detail="Failed to compile PDF report from Markdown.")
+
+    target_fname = f"{safe_title}.pdf"
+    return FileResponse(
+        path=gen_path,
+        filename=target_fname,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{target_fname}"'}
+    )
+
 
 
 class AgentReviewProposeEditRequest(BaseModel):
@@ -2729,25 +2876,52 @@ def system_open_file(req: SystemOpenFileRequest):
 
 @app.get("/api/reports/{job_id}")
 def get_report(job_id: str):
-    """Retrieves all generated artifacts and reports for a given job."""
-    job_dir = config.OUTPUTS_DIR / job_id
-    if not job_dir.exists():
-        raise HTTPException(status_code=404, detail="Job ID not found.")
+    """Retrieves all generated artifacts and reports for a given job or report_id."""
+    clean_id = job_id.strip()
+    job_dir = config.OUTPUTS_DIR / clean_id
+    if not job_dir.exists() and clean_id.startswith("rep_"):
+        alt_dir = config.OUTPUTS_DIR / clean_id[4:]
+        if alt_dir.exists():
+            job_dir = alt_dir
 
-    def read_artifact(fname: str) -> Optional[str]:
-        p = job_dir / fname
-        return p.read_text(encoding="utf-8") if p.exists() else None
+    final_md = None
+    metadata = {}
 
-    meta_file = job_dir / "metadata.json"
-    metadata = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
+    if job_dir.exists():
+        def read_artifact(fname: str) -> Optional[str]:
+            p = job_dir / fname
+            return p.read_text(encoding="utf-8") if p.exists() else None
+
+        meta_file = job_dir / "metadata.json"
+        metadata = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
+        final_md = (
+            read_artifact("04_final_systematic_report.md") or 
+            read_artifact(f"{clean_id}.md") or
+            read_artifact("report.md")
+        )
+
+    # Check report generator service / store if not found on direct path
+    if not final_md:
+        try:
+            from backend.services.report_generator_store import get_report as store_get_report
+            rep_rec = store_get_report(clean_id)
+            if rep_rec and rep_rec.get("md_path") and Path(rep_rec["md_path"]).exists():
+                final_md = Path(rep_rec["md_path"]).read_text(encoding="utf-8")
+                metadata = rep_rec
+        except Exception:
+            pass
+
+    if not final_md and not job_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Report '{job_id}' not found.")
 
     return {
-        "job_id": job_id,
+        "job_id": clean_id,
+        "report_id": clean_id,
         "metadata": metadata,
-        "raw_markdown": read_artifact("01_raw_converted.md"),
-        "llama_analysis": read_artifact("02_llama_analysis.md"),
-        "math_audit": json.loads(read_artifact("03_math_audit.json") or "{}"),
-        "final_report": read_artifact("04_final_systematic_report.md")
+        "raw_markdown": final_md,
+        "final_report": final_md or "",
+        "reportMarkdown": final_md or "",
+        "content": final_md or ""
     }
 
 
@@ -2995,10 +3169,32 @@ if not config.IS_VERCEL and backend_static_dir.exists():
     from starlette.staticfiles import StaticFiles
     app.mount("/static", StaticFiles(directory=str(backend_static_dir)), name="backend_static")
 
-# Mount static directory for frontend UI (when NOT in serverless mode)
+# Mount static directory for frontend UI with SPA client-side fallback (when NOT in serverless mode)
 static_dir = Path(__file__).resolve().parent.parent / "dist"
 if not static_dir.exists():
     static_dir = backend_static_dir
 if not config.IS_VERCEL and static_dir.exists():
     from starlette.staticfiles import StaticFiles
-    app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+    from starlette.responses import FileResponse, JSONResponse
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    class SPAStaticFiles(StaticFiles):
+        async def get_response(self, path: str, scope):
+            clean_path = path.replace("\\", "/").lstrip("/")
+            if clean_path.startswith("api/") or clean_path == "api":
+                return JSONResponse(status_code=404, content={"detail": "Not Found"})
+            try:
+                return await super().get_response(path, scope)
+            except StarletteHTTPException as ex:
+                if ex.status_code == 404:
+                    index_path = Path(self.directory) / "index.html"
+                    if index_path.exists():
+                        return FileResponse(str(index_path))
+                raise
+            except Exception:
+                index_path = Path(self.directory) / "index.html"
+                if index_path.exists():
+                    return FileResponse(str(index_path))
+                raise
+
+    app.mount("/", SPAStaticFiles(directory=str(static_dir), html=True), name="static")

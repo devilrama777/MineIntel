@@ -11,6 +11,7 @@ Consumes the persisted Phase 6 Report Plan and executes full multi-format docume
 
 import logging
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 from backend import config
@@ -75,7 +76,7 @@ class ReportGeneratorService:
         charts = chart_store.list_charts_for_job(job_id=job_id, owner_id=owner_id)
 
         now_ms = int(time.time() * 1000)
-        report_id = f"rep_{job_id[:8]}_{now_ms}"
+        report_id = f"rep_{uuid.uuid4()}"
 
         # Initialize tracking artifact
         artifact = GeneratedReportArtifact(

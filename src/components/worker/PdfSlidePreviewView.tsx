@@ -9,7 +9,10 @@ import {
   X, 
   Check, 
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  FileCode,
+  Layers,
+  ArrowRight
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { GeneratedReport } from './types';
@@ -30,6 +33,7 @@ interface PdfSlidePreviewViewProps {
   currentReport?: GeneratedReport | null;
   onJumpToExport: () => void;
   onUpdateRawText?: (updatedText: string) => void;
+  onFinalExportPdf?: () => void;
 }
 
 export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
@@ -38,7 +42,8 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
   rawText = '',
   currentReport,
   onJumpToExport,
-  onUpdateRawText
+  onUpdateRawText,
+  onFinalExportPdf,
 }) => {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
 
@@ -105,30 +110,42 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
   }, [parsedSlides]);
 
   // =====================================================================
-  // EDIT PDF STATE & HANDLERS
+  // EDIT PDF & MARKDOWN STATE & HANDLERS
   // =====================================================================
   const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [editMode, setEditMode] = useState<'slide' | 'full'>('slide');
   const [editTitle, setEditTitle] = useState<string>('');
   const [editSubtitle, setEditSubtitle] = useState<string>('');
   const [editContent, setEditContent] = useState<string>('');
+  const [editFullMarkdown, setEditFullMarkdown] = useState<string>('');
   const [editSavedToast, setEditSavedToast] = useState<string | null>(null);
 
   const currentSlide = slides[currentSlideIndex] || slides[0];
 
-  // When opening edit mode, populate fields from current slide
+  // When opening edit mode, populate fields from current slide and full markdown
   const handleOpenEdit = () => {
     if (isEditing) {
-      // Toggle off
       setIsEditing(false);
       return;
     }
     setEditTitle(currentSlide.title);
     setEditSubtitle(currentSlide.subtitle || '');
     setEditContent(currentSlide.content);
+    setEditFullMarkdown(currentReport?.reportMarkdown || initialContent);
     setIsEditing(true);
   };
 
   const handleSaveEdit = () => {
+    if (editMode === 'full') {
+      if (onUpdateRawText) {
+        onUpdateRawText(editFullMarkdown);
+      }
+      setIsEditing(false);
+      setEditSavedToast('Full Markdown document updated successfully!');
+      setTimeout(() => setEditSavedToast(null), 3000);
+      return;
+    }
+
     const updatedSlides = [...slides];
     updatedSlides[currentSlideIndex] = {
       ...currentSlide,
@@ -175,7 +192,6 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
   // Keyboard navigation for presentation slides
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Only navigate if user is not actively typing in an input or textarea
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
         return;
       }
@@ -190,6 +206,13 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentSlideIndex, totalSlides, isEditing]);
 
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   return (
     <div id="pdf-preview-page" className="w-full flex flex-col space-y-4 animate-fade-in">
       
@@ -203,85 +226,91 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
           <button 
             type="button" 
             onClick={() => setEditSavedToast(null)}
-            className="text-xs font-bold text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 cursor-pointer"
+            className="p-1 rounded-lg hover:bg-emerald-200/50 dark:hover:bg-emerald-900/50 cursor-pointer"
           >
-            Dismiss
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* ===================================================================== */}
-      {/* TOP HEADER TOOLBAR                                                    */}
-      {/* ONLY TWO BUTTONS: 1. Edit PDF, 2. Download                           */}
-      {/* ===================================================================== */}
-      <div className="flex flex-wrap items-center justify-between gap-4 p-4 sm:px-6 py-3.5 rounded-2xl bg-white dark:bg-[#0b162a] border border-neutral-200/80 dark:border-blue-900/50 shadow-sm">
+      {/* Top Controls Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#0b162a] border border-neutral-200/80 dark:border-blue-900/50 shadow-xs">
         
         {/* Left: Document Info */}
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center flex-shrink-0 shadow-md shadow-blue-500/20">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-800/60 flex items-center justify-center text-blue-600 dark:text-blue-400 shadow-2xs flex-shrink-0">
             <FileText className="w-5 h-5" />
           </div>
-
-          <div className="truncate">
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="font-outfit font-extrabold text-sm sm:text-base text-neutral-900 dark:text-white truncate">
-                {currentReport?.fileName ? `Report: ${currentReport.fileName}` : hasReport ? 'Generated Intelligence Report' : 'Executive Report Preview'}
-              </h1>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider flex-shrink-0 ${
-                hasReport 
-                  ? 'bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300' 
-                  : 'bg-neutral-100 dark:bg-blue-950/40 text-neutral-500 dark:text-neutral-400'
-              }`}>
-                {hasReport ? 'Executive Report' : 'No Report'}
+              <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900">
+                AI Synthesized Report
               </span>
+              <h1 className="font-outfit text-base sm:text-lg font-bold text-neutral-900 dark:text-white truncate">
+                {currentReport?.fileName || fileName || 'Executive Report'}
+              </h1>
             </div>
-            <div className="flex items-center gap-2 text-[11px] text-neutral-500 dark:text-blue-200/70">
-              {fileSize && <span>{(fileSize / 1024).toFixed(0)} KB</span>}
+            <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-blue-300/70 mt-0.5">
+              <span>{totalSlides} {totalSlides === 1 ? 'Slide' : 'Slides'}</span>
               {fileSize && <span>•</span>}
+              {fileSize && <span>{formatFileSize(fileSize)}</span>}
+              <span>•</span>
               <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
-                <ShieldCheck className="w-3.5 h-3.5" /> High-Resolution PDF Presentation
+                <ShieldCheck className="w-3.5 h-3.5" /> Ready for Export
               </span>
             </div>
           </div>
         </div>
 
-        {/* Right: EXACTLY TWO BUTTONS AS REQUESTED */}
-        <div className="flex items-center gap-3">
+        {/* Right: Actions */}
+        <div className="flex flex-wrap items-center gap-2.5">
           
-          {/* BUTTON 1: EDIT PDF */}
+          {/* BUTTON 1: EDIT PDF / MARKDOWN */}
           <button
             id="btn-edit-pdf"
             type="button"
             disabled={!hasReport}
             onClick={handleOpenEdit}
-            className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold border transition-all duration-200 flex items-center gap-2 shadow-xs active:scale-95 ${
+            className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold border transition-all duration-200 flex items-center gap-2 shadow-xs active:scale-95 ${
               !hasReport
                 ? 'opacity-40 cursor-not-allowed bg-neutral-100 dark:bg-blue-950/20 text-neutral-400 dark:text-neutral-500 border-neutral-200 dark:border-blue-900/30'
                 : isEditing
                 ? 'bg-amber-500 hover:bg-amber-600 border-amber-600 text-white shadow-amber-500/20 cursor-pointer'
                 : 'bg-white dark:bg-blue-950/40 border-neutral-300 dark:border-blue-800 text-neutral-700 dark:text-blue-200 hover:bg-neutral-100 dark:hover:bg-blue-900/60 cursor-pointer'
             }`}
-            title={hasReport ? "Edit the PDF slide content" : "Generate a report first to edit"}
+            title={hasReport ? "Edit the Markdown content" : "Generate a report first to edit"}
           >
             <Edit3 className="w-4 h-4" />
-            <span>{isEditing ? 'Editing Mode Active' : 'Edit PDF'}</span>
+            <span>{isEditing ? 'Editing Mode Active' : 'Edit Markdown'}</span>
           </button>
 
-          {/* BUTTON 2: DOWNLOAD (Jumps to Export Section) */}
+          {/* BUTTON 2: FINAL EXPORT (PDF) */}
+          <button
+            id="btn-final-export-pdf"
+            type="button"
+            disabled={!hasReport}
+            onClick={onFinalExportPdf || onJumpToExport}
+            className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-extrabold transition-all duration-200 flex items-center gap-2 active:scale-95 ${
+              !hasReport
+                ? 'opacity-40 cursor-not-allowed bg-neutral-200 dark:bg-neutral-800 text-neutral-500 border border-neutral-300 dark:border-neutral-700'
+                : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/25 cursor-pointer'
+            }`}
+            title={hasReport ? "Export final edited Markdown as PDF" : "Generate a report first to export"}
+          >
+            <Download className="w-4 h-4" />
+            <span>Final Export (PDF)</span>
+          </button>
+
+          {/* BUTTON 3: MORE EXPORT OPTIONS */}
           <button
             id="btn-preview-download-export"
             type="button"
             disabled={!hasReport}
             onClick={onJumpToExport}
-            className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 flex items-center gap-2 active:scale-95 ${
-              !hasReport
-                ? 'opacity-40 cursor-not-allowed bg-neutral-200 dark:bg-neutral-800 text-neutral-500 border border-neutral-300 dark:border-neutral-700'
-                : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/25 cursor-pointer'
-            }`}
-            title={hasReport ? "Jump to Export Section for PDF / DOCX options" : "Generate a report first to download"}
+            className="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold text-neutral-700 dark:text-blue-200 bg-neutral-100 hover:bg-neutral-200 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 border border-neutral-200 dark:border-blue-900/60 transition-all cursor-pointer"
+            title="More Export Options"
           >
-            <Download className="w-4 h-4" />
-            <span>Download</span>
+            <span>Options</span>
           </button>
 
         </div>
@@ -357,12 +386,39 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
 
               {/* Slide Content: Either Display or Editing Mode */}
               {isEditing ? (
-                /* INLINE SLIDE EDITOR */
+                /* INLINE SLIDE & MARKDOWN EDITOR */
                 <div className="flex-1 flex flex-col space-y-3 overflow-y-auto pr-1">
                   <div className="flex items-center justify-between pb-2 border-b border-neutral-200 dark:border-blue-900/40">
-                    <span className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                      <Edit3 className="w-3.5 h-3.5" /> Editing Slide {currentSlideIndex + 1} Content
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditMode('slide')}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          editMode === 'slide'
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'bg-neutral-100 dark:bg-blue-950/60 text-neutral-600 dark:text-blue-300'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Layers className="w-3.5 h-3.5" /> Slide {currentSlideIndex + 1}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setEditMode('full')}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          editMode === 'full'
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'bg-neutral-100 dark:bg-blue-950/60 text-neutral-600 dark:text-blue-300'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <FileCode className="w-3.5 h-3.5" /> Full Markdown
+                        </span>
+                      </button>
+                    </div>
+
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
@@ -376,46 +432,68 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
                         onClick={handleSaveEdit}
                         className="px-3 py-1 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1 cursor-pointer"
                       >
-                        <Save className="w-3.5 h-3.5" /> Save Slide
+                        <Save className="w-3.5 h-3.5" /> Save {editMode === 'full' ? 'Markdown' : 'Slide'}
                       </button>
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-bold text-neutral-500 dark:text-blue-300 mb-1">
-                      Slide Title
-                    </label>
-                    <input
-                      type="text"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl text-sm font-bold bg-neutral-50 dark:bg-blue-950/60 border border-neutral-300 dark:border-blue-800 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
+                  {editMode === 'slide' ? (
+                    <>
+                      <div>
+                        <label className="block text-[11px] font-bold text-neutral-500 dark:text-blue-300 mb-1">
+                          Slide Title
+                        </label>
+                        <input
+                          type="text"
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl text-sm font-bold bg-neutral-50 dark:bg-blue-950/60 border border-neutral-300 dark:border-blue-800 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
 
-                  <div>
-                    <label className="block text-[11px] font-bold text-neutral-500 dark:text-blue-300 mb-1">
-                      Slide Subtitle
-                    </label>
-                    <input
-                      type="text"
-                      value={editSubtitle}
-                      onChange={(e) => setEditSubtitle(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl text-xs font-medium bg-neutral-50 dark:bg-blue-950/60 border border-neutral-300 dark:border-blue-800 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-neutral-500 dark:text-blue-300 mb-1">
+                          Slide Subtitle
+                        </label>
+                        <input
+                          type="text"
+                          value={editSubtitle}
+                          onChange={(e) => setEditSubtitle(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl text-xs font-medium bg-neutral-50 dark:bg-blue-950/60 border border-neutral-300 dark:border-blue-800 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
 
-                  <div className="flex-1 flex flex-col min-h-[140px]">
-                    <label className="block text-[11px] font-bold text-neutral-500 dark:text-blue-300 mb-1">
-                      Slide Body Content (Markdown supported)
-                    </label>
-                    <textarea
-                      value={editContent}
-                      onChange={(e) => setEditContent(e.target.value)}
-                      rows={5}
-                      className="w-full flex-1 px-3 py-2 rounded-xl text-xs font-mono bg-neutral-50 dark:bg-blue-950/60 border border-neutral-300 dark:border-blue-800 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
+                      <div className="flex-1 flex flex-col min-h-[140px]">
+                        <label className="block text-[11px] font-bold text-neutral-500 dark:text-blue-300 mb-1">
+                          Slide Body Content (Markdown supported)
+                        </label>
+                        <textarea
+                          value={editContent}
+                          onChange={(e) => setEditContent(e.target.value)}
+                          rows={6}
+                          className="w-full flex-1 px-3 py-2 rounded-xl text-xs font-mono bg-neutral-50 dark:bg-blue-950/60 border border-neutral-300 dark:border-blue-800 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 leading-relaxed"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex-1 flex flex-col min-h-[220px]">
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-[11px] font-bold text-neutral-500 dark:text-blue-300">
+                          Complete Report Markdown (Full Document)
+                        </label>
+                        <span className="text-[10px] font-mono text-neutral-400">
+                          {editFullMarkdown.length} characters
+                        </span>
+                      </div>
+                      <textarea
+                        value={editFullMarkdown}
+                        onChange={(e) => setEditFullMarkdown(e.target.value)}
+                        rows={12}
+                        className="w-full flex-1 px-3.5 py-2.5 rounded-xl text-xs font-mono bg-neutral-50 dark:bg-blue-950/60 border border-neutral-300 dark:border-blue-800 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 leading-relaxed resize-y"
+                        placeholder="# Report Title..."
+                      />
+                    </div>
+                  )}
                 </div>
               ) : (
                 /* NORMAL DISPLAY MODE */
@@ -448,36 +526,59 @@ export const PdfSlidePreviewView: React.FC<PdfSlidePreviewViewProps> = ({
                   <span>•</span>
                   <span>Strictly Confidential</span>
                 </div>
-                <div className="flex items-center gap-2 font-mono">
+                <div className="flex items-center gap-1 font-mono">
                   <span>Page {currentSlideIndex + 1}</span>
+                  <span>/</span>
+                  <span>{totalSlides}</span>
                 </div>
               </div>
+
+            </div>
+          </div>
+
+          {/* SLIDE DECK NAVIGATION BAR */}
+          <div className="flex items-center justify-between mt-4 px-2">
+            <button
+              type="button"
+              id="btn-prev-slide"
+              onClick={handlePrevSlide}
+              disabled={currentSlideIndex === 0}
+              className="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-white dark:bg-[#0b162a] border border-neutral-200 dark:border-blue-900/50 text-neutral-700 dark:text-blue-200 hover:bg-neutral-100 dark:hover:bg-blue-900/40 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Previous</span>
+            </button>
+
+            {/* Slide dots indicator */}
+            <div className="flex items-center gap-1.5">
+              {slides.map((_, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    setCurrentSlideIndex(idx);
+                    setIsEditing(false);
+                  }}
+                  className={`h-2 rounded-full transition-all cursor-pointer ${
+                    idx === currentSlideIndex 
+                      ? 'w-6 bg-blue-600 dark:bg-blue-400' 
+                      : 'w-2 bg-neutral-300 dark:bg-blue-950 hover:bg-neutral-400'
+                  }`}
+                  aria-label={`Jump to slide ${idx + 1}`}
+                />
+              ))}
             </div>
 
-            {/* Quick Slide Navigation Bar below card */}
-            <div className="flex items-center justify-center gap-3 mt-4">
-              <button
-                type="button"
-                onClick={handlePrevSlide}
-                disabled={currentSlideIndex === 0}
-                className="px-4 py-2 rounded-xl bg-white dark:bg-[#0b162a] border border-neutral-200 dark:border-blue-900/50 text-neutral-700 dark:text-blue-200 text-xs font-bold hover:bg-neutral-100 dark:hover:bg-blue-900/40 disabled:opacity-30 disabled:pointer-events-none transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-              >
-                <ChevronLeft className="w-4 h-4" /> Previous Slide
-              </button>
-
-              <div className="px-3 py-1.5 rounded-xl bg-white dark:bg-[#0b162a] border border-neutral-200 dark:border-blue-900/50 text-xs font-mono font-bold text-neutral-700 dark:text-blue-200 shadow-sm">
-                {currentSlideIndex + 1} / {totalSlides}
-              </div>
-
-              <button
-                type="button"
-                onClick={handleNextSlide}
-                disabled={currentSlideIndex >= totalSlides - 1}
-                className="px-4 py-2 rounded-xl bg-white dark:bg-[#0b162a] border border-neutral-200 dark:border-blue-900/50 text-neutral-700 dark:text-blue-200 text-xs font-bold hover:bg-neutral-100 dark:hover:bg-blue-900/40 disabled:opacity-30 disabled:pointer-events-none transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-              >
-                Next Slide <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
+            <button
+              type="button"
+              id="btn-next-slide"
+              onClick={handleNextSlide}
+              disabled={currentSlideIndex === totalSlides - 1}
+              className="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-white dark:bg-[#0b162a] border border-neutral-200 dark:border-blue-900/50 text-neutral-700 dark:text-blue-200 hover:bg-neutral-100 dark:hover:bg-blue-900/40 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
+            >
+              <span>Next</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
 
         </main>

@@ -297,7 +297,6 @@ class ChartService:
             validation_notes=[err_msg]
         )
 
-        calc_record = chart_calculator._parse_num(0)  # dummy to avoid unused
         from backend.services.chart_models import ChartCalculationRecord
         calc = ChartCalculationRecord(
             calculation_type="fallback_placeholder",

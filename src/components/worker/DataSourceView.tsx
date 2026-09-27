@@ -1,11 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Database, 
   Image as ImageIcon,
-  X
+  X,
+  FileText,
+  FileCheck,
+  Trash2,
+  HardDrive,
+  Clock,
+  CheckCircle2,
+  ArrowRight,
+  Plus
 } from 'lucide-react';
 import { UploadZone } from './UploadZone';
 import { SampleDocument, UploadedDataSourceFile } from './types';
+import { reportService } from '../../services/reportService';
 
 interface DataSourceViewProps {
   fileName: string;
@@ -23,7 +32,10 @@ interface DataSourceViewProps {
   onGenerate: () => void;
   canGenerate: boolean;
   isProcessing: boolean;
-  isDark: boolean;
+  isDark?: boolean;
+  uploadedFiles?: UploadedDataSourceFile[];
+  onDeleteUploadedFile?: (fileId: string) => void;
+  onNavigateToNewReport?: () => void;
 }
 
 export const DataSourceView: React.FC<DataSourceViewProps> = ({
@@ -42,8 +54,78 @@ export const DataSourceView: React.FC<DataSourceViewProps> = ({
   onGenerate,
   canGenerate,
   isProcessing,
+  uploadedFiles = [],
+  onDeleteUploadedFile,
+  onNavigateToNewReport,
 }) => {
   const [showScreenshotModal, setShowScreenshotModal] = useState(false);
+  const [persistentFiles, setPersistentFiles] = useState<UploadedDataSourceFile[]>(uploadedFiles);
+
+  // Task 1: Fetch persistent Data Sources from SQLite backend on mount
+  useEffect(() => {
+    let isMounted = true;
+    reportService.getDataSources().then((sources) => {
+      if (!isMounted) return;
+      if (sources && sources.length > 0) {
+        const mapped: UploadedDataSourceFile[] = sources.map((s: any) => ({
+          id: s.id || s.file_id,
+          name: s.name || s.filename || 'Document',
+          filename: s.filename || s.name || 'Document',
+          type: s.type || s.file_type || 'application/pdf',
+          size: s.size ?? s.sizeBytes ?? s.file_size ?? 0,
+          sizeBytes: s.sizeBytes ?? s.size ?? s.file_size ?? 0,
+          uploadedAt: s.uploadedAt || s.dateModified || 'Today',
+          dateModified: s.dateModified || s.uploadedAt || 'Today',
+        }));
+        setPersistentFiles(mapped);
+      }
+    }).catch((err) => {
+      console.error('Failed to retrieve persistent data sources in DataSourceView:', err);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      setPersistentFiles(uploadedFiles);
+    }
+  }, [uploadedFiles]);
+
+  const activeFiles = uploadedFiles && uploadedFiles.length > 0 ? uploadedFiles : persistentFiles;
+
+  const handleDeleteFile = (fileId: string) => {
+    setPersistentFiles((prev) => prev.filter((f) => f.id !== fileId));
+    if (onDeleteUploadedFile) {
+      onDeleteUploadedFile(fileId);
+    }
+  };
+
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+  };
+
+  const getFileBadge = (name?: string, type?: string) => {
+    const safeName = name || '';
+    const safeType = (type || '').toLowerCase();
+    const ext = safeName.split('.').pop()?.toLowerCase() || '';
+    if (ext === 'pdf' || safeType.includes('pdf')) {
+      return { label: 'PDF', bg: 'bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border-rose-300 dark:border-rose-900/60' };
+    }
+    if (ext === 'csv' || ext === 'xlsx' || ext === 'xls' || safeType.includes('spreadsheet') || safeType.includes('csv')) {
+      return { label: ext === 'csv' ? 'CSV' : 'SHEET', bg: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border-emerald-300 dark:border-emerald-900/60' };
+    }
+    if (ext === 'doc' || ext === 'docx' || safeType.includes('word')) {
+      return { label: 'DOCX', bg: 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300 border-blue-300 dark:border-blue-900/60' };
+    }
+    return { label: ext.toUpperCase() || 'TXT', bg: 'bg-neutral-100 text-neutral-800 dark:bg-blue-950/80 dark:text-blue-300 border-neutral-300 dark:border-blue-900/60' };
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -55,9 +137,14 @@ export const DataSourceView: React.FC<DataSourceViewProps> = ({
               <Database className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="font-outfit text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white tracking-tight">
-                Data Source
-              </h1>
+              <div className="flex items-center gap-2.5">
+                <h1 className="font-outfit text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white tracking-tight">
+                  Data Source
+                </h1>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900">
+                  {activeFiles.length} {activeFiles.length === 1 ? 'File' : 'Files'} Ingested
+                </span>
+              </div>
               <p className="text-xs sm:text-sm text-neutral-500 dark:text-blue-200/70 mt-0.5">
                 Upload and ingest your documents to synthesize executive intelligence reports.
               </p>
@@ -66,6 +153,17 @@ export const DataSourceView: React.FC<DataSourceViewProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
+          {activeFiles.length > 0 && onNavigateToNewReport && (
+            <button
+              type="button"
+              onClick={onNavigateToNewReport}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md shadow-blue-500/20 transition-all cursor-pointer"
+            >
+              <span>Go to New Report</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
+
           {/* Reference Screenshot Button */}
           <button
             type="button"
@@ -74,7 +172,7 @@ export const DataSourceView: React.FC<DataSourceViewProps> = ({
             title="View reference screenshot"
           >
             <ImageIcon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-            <span>View Architecture Screenshot</span>
+            <span>Architecture</span>
           </button>
         </div>
       </div>
@@ -100,6 +198,98 @@ export const DataSourceView: React.FC<DataSourceViewProps> = ({
           showAutoPrompt={false}
           showGenerateButton={false}
         />
+      </div>
+
+      {/* Data Source Ingested Files List */}
+      <div className="w-full p-5 sm:p-6 rounded-3xl bg-white dark:bg-[#0b162a] border border-blue-900/20 dark:border-blue-500/20 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-100 dark:border-blue-900/40">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-900/60">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-outfit text-base sm:text-lg font-extrabold text-neutral-900 dark:text-white">
+                Data Source Ingested Files ({activeFiles.length})
+              </h3>
+              <p className="text-xs text-neutral-500 dark:text-blue-200/70">
+                All documents currently active in sovereign storage and available for report synthesis.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {activeFiles.length === 0 ? (
+          <div className="p-8 rounded-2xl bg-neutral-50/50 dark:bg-[#070e1c]/40 border border-dashed border-neutral-200 dark:border-blue-900/40 text-center flex flex-col items-center justify-center">
+            <FileText className="w-10 h-10 text-neutral-400 dark:text-blue-400/60 mb-2" />
+            <p className="font-bold text-sm text-neutral-700 dark:text-neutral-300">
+              No files in Data Source yet
+            </p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 max-w-sm">
+              Use the upload area above to ingest PDF, CSV, Excel, or DOCX files. They will immediately appear here.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {activeFiles.map((file) => {
+              const fileName = file.name || (file as any).filename || 'Document';
+              const fileType = file.type || (file as any).file_type || 'application/pdf';
+              const fileSize = file.size ?? (file as any).sizeBytes ?? (file as any).file_size ?? 0;
+              const fileDate = file.uploadedAt || (file as any).dateModified || 'Today';
+              const badge = getFileBadge(fileName, fileType);
+              return (
+                <div
+                  key={file.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-2xl border border-neutral-200/90 dark:border-blue-900/40 bg-neutral-50/60 dark:bg-[#070e1c]/60 hover:border-blue-400/60 dark:hover:border-blue-700/60 transition-all shadow-2xs"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-900/60 text-blue-600 dark:text-blue-400 flex-shrink-0">
+                      <FileCheck className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded-md border ${badge.bg}`}>
+                          {badge.label}
+                        </span>
+                        <h4 className="font-bold text-sm text-neutral-900 dark:text-white truncate" title={fileName}>
+                          {fileName}
+                        </h4>
+                      </div>
+                      <div className="flex items-center gap-2.5 text-xs text-neutral-500 dark:text-blue-300/70 mt-1">
+                        <span className="flex items-center gap-1">
+                          <HardDrive className="w-3.5 h-3.5 text-neutral-400" />
+                          {formatFileSize(fileSize)}
+                        </span>
+                        <span>•</span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-neutral-400" />
+                          {fileDate}
+                        </span>
+                        <span>•</span>
+                        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Ingested
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {(onDeleteUploadedFile || handleDeleteFile) && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteFile(file.id)}
+                      disabled={isProcessing}
+                      className="self-end sm:self-center p-2 rounded-xl text-neutral-400 hover:text-rose-600 dark:text-neutral-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
+                      title="Remove file from Data Source"
+                      aria-label="Remove file"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Screenshot Reference Modal */}

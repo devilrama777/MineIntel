@@ -100,15 +100,8 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
   const [dragError, setDragError] = useState<string | null>(null);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [promptGeneratedSuccess, setPromptGeneratedSuccess] = useState(false);
-  const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
+  const [currentDateTime] = useState(() => new Date());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentDateTime(new Date());
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   const formatFileSize = (bytes?: number) => {
     if (!bytes) return '';

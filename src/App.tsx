@@ -44,6 +44,7 @@ import { Loader2 } from 'lucide-react';
 
 function DesktopAppContent() {
   const { isAuthenticated, isLoading, user } = useAuth();
+  const isMasterUser = user?.role === 'Senior Officer' || user?.is_master === true;
   const [activeView, setActiveView] = useState<AppView>('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -161,17 +162,25 @@ function DesktopAppContent() {
     } catch (err) {
       console.error('Failed to load desktop data:', err);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isMasterUser]);
 
+  // Controlled Mount Hook: Load initial desktop data once on mount / authentication change
   useEffect(() => {
-    refreshAllData();
-  }, [refreshAllData]);
+    if (isAuthenticated && isMasterUser) {
+      refreshAllData();
+    }
+  }, [isAuthenticated, isMasterUser, refreshAllData]);
 
-  // Active real-time background pipeline synchronization
-  // Periodically polls processing jobs, data sources, evidence, sections, and editor blocks
+  // Controlled Poll for pipeline synchronization (replaces unthrottled setInterval)
+  // Ensures linear execution: triggers the next poll ONLY after the previous call has resolved,
+  // enforces a minimum delay of 5 seconds (5000ms), and cancels cleanly on unmount.
   useEffect(() => {
-    if (!isAuthenticated) return;
-    const interval = setInterval(async () => {
+    if (!isAuthenticated || !isMasterUser) return;
+
+    let isMounted = true;
+    let timerId: NodeJS.Timeout | null = null;
+
+    const pollPipelineData = async () => {
       try {
         const [updatedJobs, updatedSources, updatedEvs, updatedSecs, updatedBlks, updatedReps] =
           await Promise.all([
@@ -182,6 +191,9 @@ function DesktopAppContent() {
             desktopService.getEditorBlocks(),
             desktopService.getReports(),
           ]);
+
+        if (!isMounted) return;
+
         setJobs(updatedJobs);
         setDataSources(updatedSources);
         setEvidenceList(updatedEvs);
@@ -189,11 +201,26 @@ function DesktopAppContent() {
         setBlocks(updatedBlks);
         setReports(updatedReps);
       } catch (err) {
-        console.error('Failed to sync pipeline jobs:', err);
+        console.error('Failed to sync pipeline data:', err);
+      } finally {
+        // Linear Execution: Schedule the next poll ONLY after the previous one has resolved,
+        // with a minimum delay of 5 seconds
+        if (isMounted) {
+          timerId = setTimeout(pollPipelineData, 5000);
+        }
       }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isAuthenticated]);
+    };
+
+    // Initial delay before background polling to allow mount fetch to complete
+    timerId = setTimeout(pollPipelineData, 5000);
+
+    return () => {
+      isMounted = false;
+      if (timerId) {
+        clearTimeout(timerId);
+      }
+    };
+  }, [isAuthenticated, isMasterUser]);
 
   // Global Desktop Keyboard shortcuts: Cmd/Ctrl+K, Cmd/Ctrl+N, Cmd/Ctrl+\, F11
   useEffect(() => {
@@ -344,7 +371,6 @@ function DesktopAppContent() {
   }
 
   // Dual application routing: Worker -> WorkerApp; Senior Officer -> Existing MineIntel
-  const isMasterUser = user?.role === 'Senior Officer' || user?.is_master === true;
   if (!isMasterUser) {
     return <WorkerApp />;
   }
