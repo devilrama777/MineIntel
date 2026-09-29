@@ -181,9 +181,6 @@ CHUNK_OVERLAP_CHARS = int(os.getenv("CHUNK_OVERLAP_CHARS", "500"))
 
 # Sole AI Provider Configuration: Local Ollama Only
 AI_PROVIDER = os.getenv("MINEINTEL_AI_PROVIDER", "local_ollama")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
-CLOUD_AI_TIMEOUT = int(os.getenv("CLOUD_AI_TIMEOUT", "30"))
 
 # Local Ollama AI Configuration
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
@@ -191,11 +188,7 @@ LOCAL_MODEL_QWEN25 = os.getenv("MINEINTEL_LOCAL_MODEL_QWEN25", "qwen2.5:7b")
 LOCAL_MODEL_QWEN2_VL = os.getenv("MINEINTEL_LOCAL_MODEL_QWEN2_VL", "qwen2.5vl:7b")
 LOCAL_AI_TIMEOUT = int(os.getenv("LOCAL_AI_TIMEOUT", "60"))
 
-# Legacy model name aliases for backward-compatible pipeline invocations
-LLAMA_MODEL = LOCAL_MODEL_QWEN25
-GEMMA_MODEL = LOCAL_MODEL_QWEN25
-GEMMA_FALLBACK_MODEL = LOCAL_MODEL_QWEN25
-
 # Request timeout (seconds)
 LLM_TIMEOUT = LOCAL_AI_TIMEOUT
+
 

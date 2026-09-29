@@ -18,7 +18,7 @@ import requests
 
 logger = logging.getLogger("mineintel")
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -47,6 +47,7 @@ from backend.database import init_db, Document, SessionLocal, get_db
 from backend.routers.auth import (
     router as auth_router,
     require_auth,
+    get_current_user,
     get_current_user_or_default,
     create_session_token,
     verify_session_token,
@@ -77,6 +78,7 @@ from backend.routers.ingest import (
     get_evidence_file_details,
     download_raw_evidence_file,
     get_normalized_evidence_content,
+    upload_single_evidence_file as upload_file,
 )
 from backend.routers.agent import (
     router as agent_router,
@@ -85,6 +87,7 @@ from backend.routers.agent import (
     get_agent_task_status,
     AgentTaskRequest,
 )
+from backend.routers.metrics import router as metrics_router
 
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
@@ -94,7 +97,9 @@ app = FastAPI(
 
 # Enable CORS for frontend integration
 # With wildcard origins, credentials must be disabled per browser CORS policy
-_allowed_origins = config.CORS_ORIGINS
+_base_origins = config.CORS_ORIGINS or []
+_default_dev_origins = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173"]
+_allowed_origins = list(dict.fromkeys(_base_origins + _default_dev_origins)) if "*" not in _base_origins else ["*"]
 _allow_creds = (_allowed_origins != ["*"])
 
 app.add_middleware(
@@ -109,6 +114,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(ingest_router)
 app.include_router(agent_router)
+app.include_router(metrics_router)
 
 pipeline_service = DocumentPipeline()
 converter_service = MarkdownConverter()
@@ -280,29 +286,10 @@ def health_check():
         "cloud_ai_active": False,
         "cloud_model": None,
         "installed_models": ai_status.get("installed_models", []),
-        "default_llama_model": provider.default_text_model,
-        "default_gemma_model": provider.default_text_model,
+        "default_text_model": provider.default_text_model,
+        "default_vl_model": provider.default_vl_model,
         "configured_text_model": provider.default_text_model,
         "status_detail": ai_status.get("status")
-    }
-
-
-
-@app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
-    """Uploads a PDF, CSV, or spreadsheet file to the backend with size and extension validation."""
-    ext = validate_uploaded_file(file)
-    safe_filename = "".join(c for c in file.filename if c.isalnum() or c in "._- ").strip()[:100]
-    file_id = f"{uuid.uuid4().hex[:8]}_{safe_filename}"
-    save_path = config.UPLOADS_DIR / file_id
-
-    save_uploaded_file(file, save_path)
-
-    return {
-        "file_id": file_id,
-        "filename": file.filename,
-        "file_type": ext.lstrip("."),
-        "file_path": str(save_path)
     }
 
 
@@ -1721,15 +1708,11 @@ def run_math_audit(req: MathRequest):
 async def run_full_pipeline(
     file: UploadFile = File(...),
     custom_command: Optional[str] = Form(None),
-    custom_llama_command: Optional[str] = Form(None),
     custom_calculations_json: Optional[str] = Form(None),
     custom_report_command: Optional[str] = Form(None),
-    llama_model: Optional[str] = Form(None),
-    gemma_model: Optional[str] = Form(None),
-    route_media_to_gemma: bool = Form(True)
+    model_override: Optional[str] = Form(None)
 ):
     """Executes the full end-to-end multi-stage pipeline on an uploaded file."""
-    effective_custom_cmd = custom_command or custom_llama_command
     # 1. Validate and save uploaded file
     validate_uploaded_file(file)
     safe_filename = "".join(c for c in file.filename if c.isalnum() or c in "._- ").strip()[:100]
@@ -1749,12 +1732,10 @@ async def run_full_pipeline(
     try:
         pipeline_output = pipeline_service.process_file(
             file_path=save_path,
-            custom_llama_cmd=effective_custom_cmd,
+            custom_analysis_cmd=custom_command,
             custom_calculations=custom_calcs,
             custom_report_cmd=custom_report_command,
-            llama_model_override=llama_model,
-            gemma_model_override=gemma_model,
-            route_multimedia_to_gemma=route_media_to_gemma
+            model_override=model_override
         )
         return pipeline_output
     except Exception as e:
@@ -1766,41 +1747,121 @@ async def run_full_pipeline(
 
 
 class WorkerFilePayload(BaseModel):
-    name: str
-    type: Optional[str] = "application/pdf"
+    name: Optional[str] = "document.txt"
+    type: Optional[str] = "text/plain"
     fileBase64: Optional[str] = None
     rawText: Optional[str] = None
+    content: Optional[str] = None
+    text: Optional[str] = None
+    base64: Optional[str] = None
 
 
 class WorkerGenerateReportRequest(BaseModel):
     fileName: Optional[str] = "Uploaded Document"
-    fileType: Optional[str] = "application/pdf"
+    fileType: Optional[str] = "text/plain"
     fileBase64: Optional[str] = None
     rawText: Optional[str] = None
+    content: Optional[str] = None
     files: Optional[List[WorkerFilePayload]] = None
     file_ids: Optional[List[str]] = None
     fileIds: Optional[List[str]] = None
+    selectedSources: Optional[List[str]] = None
+    job_id: Optional[str] = None
+    jobId: Optional[str] = None
     reportType: Optional[str] = "executive"
     depth: Optional[str] = "standard"
     tone: Optional[str] = "analytical"
     customFocus: Optional[str] = ""
+    sync: Optional[bool] = False
 
 
 @app.post("/api/generate-report")
 async def generate_worker_report(
     req: WorkerGenerateReportRequest,
-    authorization: Optional[str] = Header(None),
-    token: Optional[str] = Query(None)
+    background_tasks: BackgroundTasks,
+    auth: Dict[str, Any] = Depends(require_auth)
 ):
     """
     Worker Report Generation API adapter.
-    Accepts selected file IDs from persistent database or direct payloads.
-    Executes the multi-file Phase 1–9 backend pipeline and returns report_id.
+    Brute-forces raw data ingestion directly into AgentCoordinator:
+    1. Extracts raw text and bytes from files payload, rawText, fileBase64.
+    2. Reads directly from outputs/{job_id} and uploads/ folders.
+    3. Injects the raw text directly into the agent prompt, bypassing parser failures.
+    4. If no real data is found anywhere, returns 'ERROR: No real data found in database. Ingestion failed.'
     """
     payload_files: List[Tuple[str, bytes]] = []
+    raw_documents_text_parts: List[str] = []
 
-    # 1. Fetch persistent documents by file IDs if provided
-    target_file_ids = req.file_ids or req.fileIds or []
+    target_file_ids = req.file_ids or req.fileIds or req.selectedSources or []
+    req_job_id = req.job_id or req.jobId
+
+    has_explicit_input = bool(
+        (req.rawText and req.rawText.strip()) or
+        (req.content and req.content.strip()) or
+        req.fileBase64 or
+        (req.files and len(req.files) > 0) or
+        (target_file_ids and len(target_file_ids) > 0) or
+        req_job_id
+    )
+
+    if not has_explicit_input:
+        raise HTTPException(
+            status_code=400,
+            detail="ERROR: No real data found in database. Ingestion failed."
+        )
+
+    # 1. Direct text/content in top-level request
+    direct_top_text = req.rawText or req.content
+    if direct_top_text and direct_top_text.strip():
+        fname = req.fileName or "direct_input.txt"
+        clean_text = direct_top_text.replace("\x00", "").strip()
+        raw_documents_text_parts.append(f"--- Document: {fname} ---\n{clean_text}")
+        payload_files.append((fname, clean_text.encode("utf-8")))
+
+    # 2. Direct top-level base64
+    if req.fileBase64:
+        fname = req.fileName or "uploaded_document.pdf"
+        b64 = req.fileBase64.strip()
+        if "," in b64:
+            b64 = b64.split(",", 1)[1]
+        try:
+            f_bytes = base64.b64decode(b64)
+            payload_files.append((fname, f_bytes))
+            try:
+                txt = f_bytes.decode("utf-8", errors="ignore").replace("\x00", "").strip()
+                if txt:
+                    raw_documents_text_parts.append(f"--- Document: {fname} ---\n{txt}")
+            except Exception:
+                pass
+        except Exception as b64_err:
+            logger.warning(f"Failed to decode base64 for file '{fname}': {b64_err}")
+
+    # 3. Process files array if provided
+    if req.files and len(req.files) > 0:
+        for f_item in req.files:
+            fname = f_item.name or "document.txt"
+            item_text = f_item.rawText or f_item.content or f_item.text
+            if item_text and item_text.strip():
+                clean_item_text = item_text.replace("\x00", "").strip()
+                raw_documents_text_parts.append(f"--- Document: {fname} ---\n{clean_item_text}")
+                payload_files.append((fname, clean_item_text.encode("utf-8")))
+            elif f_item.fileBase64 or f_item.base64:
+                b64 = (f_item.fileBase64 or f_item.base64).strip()
+                if "," in b64:
+                    b64 = b64.split(",", 1)[1]
+                try:
+                    f_bytes = base64.b64decode(b64)
+                    payload_files.append((fname, f_bytes))
+                    try:
+                        txt = f_bytes.decode("utf-8", errors="ignore").replace("\x00", "").strip()
+                        if txt:
+                            raw_documents_text_parts.append(f"--- Document: {fname} ---\n{txt}")
+                    except Exception:
+                        pass
+                except Exception as b_err:
+                    logger.warning(f"Failed to decode base64 for '{fname}': {b_err}")
+
+    # 4. Fetch persistent documents by file IDs or selectedSources
     if target_file_ids:
         db = SessionLocal()
         try:
@@ -1808,216 +1869,131 @@ async def generate_worker_report(
             for doc in docs:
                 p = Path(doc.raw_path)
                 if p.exists() and p.is_file():
-                    payload_files.append((doc.filename, p.read_bytes()))
+                    b = p.read_bytes()
+                    payload_files.append((doc.filename, b))
+                    try:
+                        txt = b.decode("utf-8", errors="ignore").replace("\x00", "").strip()
+                        if txt:
+                            raw_documents_text_parts.append(f"--- Document: {doc.filename} ---\n{txt}")
+                    except Exception:
+                        pass
                 elif doc.normalized_path and Path(doc.normalized_path).exists():
-                    payload_files.append((doc.filename, Path(doc.normalized_path).read_bytes()))
-                else:
-                    payload_files.append((doc.filename, f"# Evidence File: {doc.filename}\nType: {doc.file_type}\n".encode("utf-8")))
+                    b = Path(doc.normalized_path).read_bytes()
+                    payload_files.append((doc.filename, b))
+                    try:
+                        txt = b.decode("utf-8", errors="ignore").replace("\x00", "").strip()
+                        if txt:
+                            raw_documents_text_parts.append(f"--- Document: {doc.filename} ---\n{txt}")
+                    except Exception:
+                        pass
         finally:
             db.close()
 
-    # 2. Add files payload if provided
-    if not payload_files and req.files and len(req.files) > 0:
-        for f_item in req.files:
-            fname = f_item.name or "document.pdf"
-            f_bytes = b""
-            if f_item.fileBase64:
-                b64 = f_item.fileBase64.strip()
-                if "," in b64:
-                    b64 = b64.split(",", 1)[1]
-                try:
-                    f_bytes = base64.b64decode(b64)
-                except Exception as b64_err:
-                    logger.warning(f"Failed to decode base64 for file '{fname}': {b64_err}")
-            elif f_item.rawText:
-                f_bytes = f_item.rawText.encode("utf-8")
-            if f_bytes:
-                payload_files.append((fname, f_bytes))
-    elif not payload_files and (req.fileBase64 or req.rawText):
-        fname = req.fileName or "Uploaded_Document.pdf"
-        f_bytes = b""
-        if req.fileBase64:
-            b64 = req.fileBase64.strip()
-            if "," in b64:
-                b64 = b64.split(",", 1)[1]
+        # Check if target_file_ids correspond to directories in outputs/ or files in uploads/
+        for fid in target_file_ids:
+            job_out = config.OUTPUTS_DIR / fid
+            if job_out.exists() and job_out.is_dir():
+                for cand in [job_out / "01_raw_converted.md", job_out / "00_normalized.txt"]:
+                    if cand.exists() and cand.is_file():
+                        txt = cand.read_text(encoding="utf-8", errors="ignore").replace("\x00", "").strip()
+                        if txt:
+                            raw_documents_text_parts.append(f"--- Document: {fid}/{cand.name} ---\n{txt}")
+                            payload_files.append((f"{fid}_{cand.name}", txt.encode("utf-8")))
+            # Also check uploads folder for exact or prefix filename
+            if config.UPLOADS_DIR.exists():
+                for uf in config.UPLOADS_DIR.glob(f"*{fid}*"):
+                    if uf.is_file() and uf.stat().st_size > 0:
+                        b = uf.read_bytes()
+                        payload_files.append((uf.name, b))
+                        try:
+                            txt = b.decode("utf-8", errors="ignore").replace("\x00", "").strip()
+                            if txt:
+                                raw_documents_text_parts.append(f"--- Document: {uf.name} ---\n{txt}")
+                        except Exception:
+                            pass
+
+    # 5. Check if job_id / jobId was provided and check outputs/{job_id}/
+    if req_job_id:
+        job_out = config.OUTPUTS_DIR / req_job_id
+        if job_out.exists() and job_out.is_dir():
+            for cand in [job_out / "01_raw_converted.md", job_out / "00_normalized.txt", job_out / "04_final_systematic_report.md"]:
+                if cand.exists() and cand.is_file():
+                    txt = cand.read_text(encoding="utf-8", errors="ignore").replace("\x00", "").strip()
+                    if txt:
+                        raw_documents_text_parts.append(f"--- Document: {cand.name} ---\n{txt}")
+                        payload_files.append((cand.name, txt.encode("utf-8")))
+
+    # Compile raw_documents_text
+    raw_documents_text = "\n\n".join(raw_documents_text_parts).replace("\x00", "").strip()
+    if not raw_documents_text and payload_files:
+        for fname, fbytes in payload_files:
             try:
-                f_bytes = base64.b64decode(b64)
-            except Exception as b64_err:
-                logger.warning(f"Failed to decode base64 for file '{fname}': {b64_err}")
-        elif req.rawText:
-            f_bytes = req.rawText.encode("utf-8")
-        if f_bytes:
-            payload_files.append((fname, f_bytes))
+                txt = fbytes.decode("utf-8", errors="ignore").replace("\x00", "").strip()
+                if txt:
+                    raw_documents_text += f"\n\n--- Document: {fname} ---\n{txt}"
+            except Exception:
+                pass
+        raw_documents_text = raw_documents_text.replace("\x00", "").strip()
 
-    # 3. Fallback to latest persistent document in database if no files specified
-    if not payload_files:
-        db = SessionLocal()
-        try:
-            latest_doc = db.query(Document).order_by(Document.created_at.desc()).first()
-            if latest_doc:
-                p = Path(latest_doc.raw_path)
-                if p.exists() and p.is_file():
-                    payload_files.append((latest_doc.filename, p.read_bytes()))
-        finally:
-            db.close()
-
-    if not payload_files:
+    # If completely no real data found:
+    if not payload_files and not raw_documents_text:
         raise HTTPException(
             status_code=400,
-            detail="Please provide at least one valid document file or document text to analyze."
+            detail="ERROR: No real data found in database. Ingestion failed."
         )
 
-    owner_id = "LOCAL_OFFICER"
-    raw_token = token if isinstance(token, str) and token.strip() else None
-    if not raw_token and isinstance(authorization, str) and authorization.strip():
-        if authorization.startswith("Bearer "):
-            raw_token = authorization.split("Bearer ", 1)[1].strip()
-        else:
-            raw_token = authorization.strip()
-    if raw_token:
-        session = verify_session_token(raw_token)
-        if session and session.get("officer_id"):
-            owner_id = session["officer_id"]
-    try:
-        # Phase 1: Unified Multi-File Evidence Ingestion Engine
-        manifest = ingestion_engine.create_ingestion_job(owner_id=owner_id, files=payload_files)
-        job_id = manifest["job_id"]
+    owner_id = auth.get("officer_id") or "LOCAL_OFFICER"
+    job_id = str(uuid.uuid4())
+    doc_name = payload_files[0][0] if payload_files else "Operational Document"
+    report_title = (
+        Path(doc_name).stem.replace("_", " ").title() + " Report"
+        if len(payload_files) <= 1
+        else f"Executive Synthesis ({len(payload_files)} Sources)"
+    )
+    custom_focus = req.customFocus or "Analyze operational evidence, variance drivers, and strategic actions."
+    agent_prompt = (
+        f"Synthesize comprehensive board-level operational report for '{report_title}'.\n"
+        f"Custom Focus: {custom_focus}\n\n"
+        f"### RAW INGESTED DOCUMENT CONTENT (GROUND TRUTH EVIDENCE):\n"
+        f"{raw_documents_text}\n"
+    )
 
-        # Phase 4: Intelligence Organization
-        try:
-            intelligence_service.organize_job_evidence(job_id=job_id, owner_id=owner_id)
-        except Exception as ie:
-            logger.warning(f"Phase 4 intelligence organization warning for job {job_id}: {ie}")
+    from backend.services.agent.agent_coordinator import AgentCoordinator
+    from backend.services.agent.agent_models import AgentTaskStatus
+    coordinator = AgentCoordinator(owner_id=owner_id)
+    coordinator.initialize_task(task_id=job_id)
 
-        # Phase 5: Chart & Table Detection
-        try:
-            chart_service.detect_tables(job_id=job_id, owner_id=owner_id)
-        except Exception as ce:
-            logger.warning(f"Phase 5 chart detection warning for job {job_id}: {ce}")
-
-        report_title = (
-            Path(payload_files[0][0]).stem.replace("_", " ").title() + " Report"
-            if len(payload_files) == 1
-            else f"Executive Synthesis ({len(payload_files)} Sources)"
-        )
-        custom_focus = req.customFocus or "Analyze operational evidence, variance drivers, and strategic actions."
-        agent_prompt = f"Synthesize comprehensive board-level operational report for '{report_title}'. Custom Focus: {custom_focus}"
-
-        # Forced Integration: Execute AgentCoordinator.run() with real Qwen synthesis
-        from backend.services.agent.agent_coordinator import AgentCoordinator
-        coordinator = AgentCoordinator(owner_id=owner_id)
-
-        # Execute full 10-stage deterministic autonomous pipeline:
-        # LOAD_MANIFEST -> VERIFY_INGESTION -> EVIDENCE_ANALYSIS (chunked Qwen summarization) ->
-        # INTELLIGENCE -> CHARTS -> PLANNING -> WRITING (Qwen prompt with real evidence_items & chunk_summaries) ->
-        # VALIDATE -> COMPILE_MARKDOWN_ARTIFACT -> VERIFY_ARTIFACT
+    if req.sync:
+        # Synchronous execution mode for tests
         agent_state = coordinator.run(
             task_id=job_id,
-            prompt=agent_prompt
+            prompt=agent_prompt,
+            files=payload_files,
+            custom_focus=custom_focus,
+            raw_text=raw_documents_text
         )
+        if getattr(agent_state, "status", None) == AgentTaskStatus.FAILED or str(getattr(agent_state, "status", "")) == "FAILED":
+            err_msg = agent_state.error.message if agent_state.error else "ERROR: No real data found in database. Ingestion failed."
+            raise HTTPException(status_code=400, detail=err_msg)
 
-        report_id = agent_state.structured_state.get("report_id") or f"rep_{uuid.uuid4()}"
+        report_id = agent_state.structured_state.get("report_id") or job_id
         artifacts = agent_state.structured_state.get("artifacts") or {}
         md_path = artifacts.get("md")
         report_markdown = ""
         if md_path and Path(md_path).exists():
-            try:
-                report_markdown = Path(md_path).read_text(encoding="utf-8")
-            except Exception:
-                report_markdown = ""
-
-        # If md_path wasn't directly found, check outputs/{job_id}/
+            report_markdown = Path(md_path).read_text(encoding="utf-8")
         if not report_markdown:
             job_dir = config.OUTPUTS_DIR / job_id
             for cand in [job_dir / "04_final_systematic_report.md", job_dir / f"{job_id}.md", job_dir / f"{report_id}.md"]:
                 if cand.exists():
-                    try:
-                        report_markdown = cand.read_text(encoding="utf-8")
-                        break
-                    except Exception:
-                        pass
+                    report_markdown = cand.read_text(encoding="utf-8")
+                    break
 
         if not report_markdown:
-            report_markdown = (
-                f"# {report_title}\n\n"
-                f"**Report Reference:** MIN/REP/{job_id}/v1\n\n"
-                f"---\n\n"
-                f"## Executive Summary\n\n"
-                f"Analysis completed successfully across {len(payload_files)} evidence source(s).\n"
+            raise HTTPException(
+                status_code=400,
+                detail="ERROR: No real data found in database. Ingestion failed."
             )
-
-        # Query database evidence_store to extract real structured tables/records from uploaded files
-        from backend.services import evidence_store
-        ev_res = evidence_store.query_evidence(job_id=job_id, owner_id=owner_id, limit=5000)
-        ev_items = ev_res.get("items", []) if isinstance(ev_res, dict) else ev_res
-
-        # Extract real table records from evidence items if present
-        actual_records = None
-        candidate_rows = []
-        for it in ev_items:
-            c_json = it.get("content_json") or {}
-            if isinstance(c_json, dict):
-                if "table_data" in c_json and isinstance(c_json["table_data"], list) and c_json["table_data"]:
-                    actual_records = c_json["table_data"]
-                    break
-                elif "rows" in c_json and isinstance(c_json["rows"], list) and c_json["rows"]:
-                    actual_records = c_json["rows"]
-                    break
-                elif len(c_json) > 1 and not any(k in c_json for k in ["width", "height", "format", "snippet", "char_count", "page"]):
-                    candidate_rows.append(c_json)
-            elif isinstance(c_json, list) and len(c_json) > 0 and isinstance(c_json[0], dict):
-                actual_records = c_json
-                break
-        if not actual_records and candidate_rows:
-            actual_records = candidate_rows
-
-        # Force fresh publication-grade Corporate Dossier PDF and DOCX generation into isolated outputs/{job_id}/
-        pdf_file = document_generator.generate_pdf_report(
-            template_name="corporate_dossier",
-            report_id=report_id,
-            summary_text=report_markdown,
-            user_records=actual_records,
-            document_title=report_title,
-            job_id=job_id
-        )
-        docx_file = document_generator.generate_docx_report(
-            template_name="corporate_dossier",
-            report_id=report_id,
-            summary_text=report_markdown,
-            user_records=actual_records,
-            document_title=report_title,
-            job_id=job_id
-        )
-
-        pdf_path_str = str(pdf_file) if pdf_file and Path(pdf_file).exists() else artifacts.get("pdf")
-        docx_path_str = str(docx_file) if docx_file and Path(docx_file).exists() else artifacts.get("docx")
-
-        # Ensure report markdown is persisted to disk and outputs directory for both report_id and job_id
-        for target_id in [job_id, report_id]:
-            t_dir = config.OUTPUTS_DIR / target_id
-            t_dir.mkdir(parents=True, exist_ok=True)
-            (t_dir / "04_final_systematic_report.md").write_text(report_markdown, encoding="utf-8")
-            (t_dir / f"{target_id}.md").write_text(report_markdown, encoding="utf-8")
-
-        # Record in history store
-        try:
-            from backend.services.history_manager import record_report
-            record_report(
-                report_id=report_id,
-                title=report_title,
-                template_id="corporate_dossier",
-                template_name="Corporate Dossier",
-                theme="Executive Corporate",
-                auditor_id=owner_id,
-                records_count=len(payload_files),
-                summary_snippet=report_markdown[:250],
-                job_id=job_id
-            )
-        except Exception as rec_err:
-            logger.warning(f"Failed to record history for {report_id}: {rec_err}")
-
-        word_count = len(report_markdown.split())
-        reading_time = max(1, round(word_count / 200))
 
         return {
             "success": True,
@@ -2026,25 +2002,46 @@ async def generate_worker_report(
             "reportMarkdown": report_markdown,
             "content": report_markdown,
             "final_report": report_markdown,
-            "pdf_path": pdf_path_str,
-            "docx_path": docx_path_str,
+            "pdf_path": artifacts.get("pdf"),
+            "docx_path": artifacts.get("docx"),
+            "status": "COMPLETED",
             "metadata": {
                 "title": report_title,
                 "reportType": req.reportType or "executive",
                 "depth": req.depth or "standard",
                 "tone": req.tone or "analytical",
-                "wordCount": word_count,
-                "readingTimeMinutes": reading_time,
+                "wordCount": len(report_markdown.split()),
+                "readingTimeMinutes": max(1, round(len(report_markdown.split()) / 200)),
                 "totalFiles": len(payload_files),
                 "generatedAt": datetime.now(timezone.utc).isoformat()
             }
         }
-    except Exception as e:
-        logger.error(f"Worker report generation error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Report generation failed: {str(e)}"
-        )
+
+    # Autonomous Background Task Dispatch (Production standard)
+    background_tasks.add_task(
+        coordinator.run,
+        task_id=job_id,
+        prompt=agent_prompt,
+        files=payload_files,
+        custom_focus=custom_focus,
+        raw_text=raw_documents_text
+    )
+
+    return {
+        "success": True,
+        "job_id": job_id,
+        "report_id": job_id,
+        "status": "RUNNING",
+        "message": "Autonomous report synthesis initiated successfully.",
+        "metadata": {
+            "title": report_title,
+            "reportType": req.reportType or "executive",
+            "depth": req.depth or "standard",
+            "tone": req.tone or "analytical",
+            "totalFiles": len(payload_files),
+            "generatedAt": datetime.now(timezone.utc).isoformat()
+        }
+    }
 
 
 @app.get("/api/worker/data-sources")
@@ -2074,12 +2071,10 @@ def export_worker_report_alias(fmt: str, job_id: Optional[str] = Query(None)):
 async def run_pipeline_stream(
     file: Optional[UploadFile] = File(None),
     raw_csv_text: Optional[str] = Form(None),
-    custom_llama_command: Optional[str] = Form(None),
+    custom_command: Optional[str] = Form(None),
     custom_calculations_json: Optional[str] = Form(None),
     custom_report_command: Optional[str] = Form(None),
-    llama_model: Optional[str] = Form(None),
-    gemma_model: Optional[str] = Form(None),
-    route_media_to_gemma: bool = Form(True)
+    model_override: Optional[str] = Form(None)
 ):
     """Executes the pipeline yielding live Server-Sent Events (SSE) progress milestones."""
     if not file and not raw_csv_text:
@@ -2107,12 +2102,10 @@ async def run_pipeline_stream(
         try:
             for event in pipeline_service.process_file_stream(
                 file_path=save_path,
-                custom_llama_cmd=custom_llama_command,
+                custom_analysis_cmd=custom_command,
                 custom_calculations=custom_calcs,
                 custom_report_cmd=custom_report_command,
-                llama_model_override=llama_model,
-                gemma_model_override=gemma_model,
-                route_multimedia_to_gemma=route_media_to_gemma
+                model_override=model_override
             ):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as err:
@@ -2198,59 +2191,7 @@ async def quick_preview(
     }
 
 
-@app.post("/api/pipeline/auto-generate-prompt")
-async def auto_generate_prompt(
-    category: Optional[str] = Form(None),
-    filename: Optional[str] = Form(None)
-):
-    """Synthesizes high-impact executive directives based on coal production patterns, colliery variance, and logistics."""
-    import random
 
-    prompts_by_category = {
-        "high_yield": [
-            "Prioritize top mega-collieries (Gevra, Kusmunda, Dipka), analyze heavy earthmoving machinery efficiency, and flag stripping ratio bottlenecks.",
-            "Isolate high-yield opencast basins yielding >15,000 MT, verify daily extraction quotas, and project Q3 production trajectory.",
-            "Benchmark tier-1 opencast mines against annual MoC production charter, isolating volume contributors across SECL and MCL basins."
-        ],
-        "variance_audit": [
-            "Perform statistical anomaly audit across all 18 basins, isolating collieries with >3% target fulfillment variance against statutory quotas.",
-            "Audit production variance across coalfield basins, highlight overperforming and lagging mines, and calculate net national deficit index.",
-            "Execute mathematical variance breakdown comparing actual extraction against scheduled union budget targets with determinism verification."
-        ],
-        "logistics": [
-            "Audit First-Mile rail connectivity, evaluate rakes availability at siding nodes, and calculate power plant thermal coal buffer reserves.",
-            "Track thermal power dispatch efficiency, evaluate offtake-to-extraction ratios, and map wagon turnaround times across Korba and Talcher.",
-            "Assess multimodal evacuation corridors, monitor merry-go-round conveyor throughput, and verify critical power plant coal stockpiles."
-        ],
-        "esg": [
-            "Evaluate eco-reclamation hectarage, solar mine transitions, mine water treatment recycling, and zero-harm safety statutory records.",
-            "Audit sustainable mining parameters: first-mile rail adoption %, afforestation offset compliance, and carbon abatement progress.",
-            "Benchmark zero-harm safety indices, overburden dump stability monitoring, and environmental statutory clearance conformity."
-        ],
-        "statutory": [
-            "Compile statutory audit format focusing on union budget fulfillment, state royalty allocations, and public accounts committee review.",
-            "Perform parliamentary accountability analysis: royalty distributions, district mineral foundation (DMF) allocations, and audit trails.",
-            "Verify compliance with Mines Act guidelines, statutory vigilance oversight, and 100% deterministic cryptographic audit hashing."
-        ]
-    }
-
-    all_general_prompts = [
-        "Conduct comprehensive strategic review isolating mega-collieries, thermal power plant dispatch ratios, and statutory audit integrity.",
-        "Synthesize national extraction leaderboard, calculate colliery variance against target quotas, and evaluate rail evacuation corridors.",
-        "Perform deep-dive colliery operational audit: benchmark extraction velocity, identify dispatch bottlenecks, and assess regional quotas.",
-        "Audit high-capacity opencast mining assets, verify statutory compliance metrics, and formulate executive ministerial directives."
-    ]
-
-    if category and category in prompts_by_category:
-        selected = random.choice(prompts_by_category[category])
-    else:
-        selected = random.choice(all_general_prompts)
-
-    return {
-        "status": "success",
-        "prompt": selected,
-        "category": category or "general"
-    }
 
 
 
@@ -2334,18 +2275,10 @@ def fill_template_content(template_id: str, req: Optional[TemplateFillRequest] =
             data_summary = llama_file.read_text(encoding="utf-8")
 
     if not data_summary:
-        summary_path = config.PROCESSED_OUTPUT_DIR / "llama_summary.md"
-        if summary_path.exists():
-            data_summary = summary_path.read_text(encoding="utf-8")
-        else:
-            top_colls = ", ".join(f"{c['name']} ({c['production']:,.1f} MT)" for c in metrics['collieries'][:3])
-            data_summary = (
-                f"Total Production: {metrics['total_production']:,.2f} MT | "
-                f"Total Dispatch: {metrics['total_dispatch']:,.2f} MT | "
-                f"Target Fulfillment: {metrics['achievement_pct']:.2f}% | "
-                f"Offtake Ratio: {metrics['offtake_ratio']:.2f}% | "
-                f"Top Units: {top_colls}."
-            )
+        raise HTTPException(
+            status_code=400,
+            detail="ERROR: No real data found in database. Ingestion failed."
+        )
 
     # Load template prompt
     prompt_file = config.PROMPTS_DIR / f"template_{tpl_key}.txt"
@@ -2604,9 +2537,10 @@ def generate_report_package(
         if rep_file.exists():
             summary_text = rep_file.read_text(encoding="utf-8")
     if not summary_text:
-        summary_path = config.PROCESSED_OUTPUT_DIR / "llama_summary.md"
-        if summary_path.exists():
-            summary_text = summary_path.read_text(encoding="utf-8")
+        raise HTTPException(
+            status_code=400,
+            detail="ERROR: No real data found in database. Ingestion failed."
+        )
 
     result = document_generator.generate_all_packages(
         template_name=tpl,
@@ -2625,9 +2559,9 @@ def download_report_format(fmt: str, template: Optional[str] = None, job_id: Opt
         return download_active_csv(job_id=job_id)
 
     mapping = {
-        "pdf": ("Ministry_of_Coal_Report_2026.pdf", "application/pdf"),
-        "docx": ("Ministry_of_Coal_Report_2026.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
-        "xlsx": ("Ministry_of_Coal_Report_2026.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        "pdf": ("MineIntel_Executive_Report.pdf", "application/pdf"),
+        "docx": ("MineIntel_Executive_Report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        "xlsx": ("MineIntel_Executive_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
     }
     if fmt not in mapping:
         raise HTTPException(status_code=400, detail=f"Unsupported format: {fmt}. Choose from pdf, docx, xlsx, csv.")

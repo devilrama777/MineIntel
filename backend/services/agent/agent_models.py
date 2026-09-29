@@ -10,6 +10,9 @@ class AgentTaskStatus(str, Enum):
     RETRYING = "RETRYING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    PENDING_REVIEW = "PENDING_REVIEW"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
 
 class WorkflowStage(str, Enum):
     LOAD_MANIFEST = "LOAD_MANIFEST"
@@ -56,6 +59,14 @@ class AgentTaskState(BaseModel):
     structured_state: Dict[str, Any] = Field(default_factory=dict, description="Compact structured state accumulated by the agent.")
     evidence_references: List[str] = Field(default_factory=list, description="List of IDs pointing to existing structured evidence.")
     
+    # Review and Approval tracking fields
+    created_by: str = Field(default="", description="Officer who created the task.")
+    submitted_for_review_at: Optional[int] = Field(default=None, description="Timestamp when task entered review.")
+    reviewed_by: Optional[str] = Field(default=None, description="Senior officer who approved or rejected.")
+    reviewed_at: Optional[int] = Field(default=None, description="Timestamp when reviewed.")
+    rejection_reason: Optional[str] = Field(default=None, description="Reason for rejection if rejected.")
+    rejection_count: int = Field(default=0, description="Total number of times task was rejected.")
+
     # Conflict policy metadata
     conflict_logs: List[Dict[str, Any]] = Field(default_factory=list, description="Logs documenting conflicts detected across sources.")
     

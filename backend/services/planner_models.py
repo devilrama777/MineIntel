@@ -22,6 +22,8 @@ class SectionType(str, Enum):
     TABULAR_AUDIT = "tabular_audit"
     CHART_VISUALIZATION = "chart_visualization"
     STATUTORY_COMPLIANCE = "statutory_compliance"
+    GENERAL_NARRATIVE = "general_narrative"
+    RECOMMENDATIONS = "recommendations"
 
 
 class PlanStatus(str, Enum):
@@ -114,9 +116,9 @@ class ReportPlan:
     plan_id: str
     job_id: str
     owner_id: str
-    version: int
-    status: str
-    title: str
+    title: str = "Executive Report"
+    version: int = 1
+    status: str = "draft"
     subtitle: Optional[str] = None
     sections: List[PlannedSection] = field(default_factory=list)
     total_evidence_referenced: int = 0

@@ -9,39 +9,54 @@ from backend import config
 from backend.services.converter import MarkdownConverter
 from backend.services.ai_inference_service import ai_inference_service
 from backend.services.ai_providers.base import AIRequest
+from backend.services.math_engine import MathEngine
+
+logger = logging.getLogger("mineintel.pipeline")
 
 
-class LlamaClient:
-    """Real AI inference client using qwen2.5:7b for document analysis."""
+class AIReasoningClient:
+    """Sovereign local AI reasoning and synthesis client powered by Qwen 2.5."""
+
     def __init__(self, *args, **kwargs):
         self.model = getattr(config, "LOCAL_MODEL_QWEN25", "qwen2.5:7b")
 
-    def analyze_document(self, markdown_content: str = "", **kwargs) -> Dict[str, Any]:
+    def analyze_document(self, markdown_content: str = "", custom_command: Optional[str] = None, **kwargs) -> Dict[str, Any]:
         provider = ai_inference_service._get_provider()
+        prompt = (
+            f"Perform a comprehensive executive analysis of this operational document. "
+            f"Extract key figures, metrics, and trends:\n\n{markdown_content[:6000]}"
+        )
+        if custom_command:
+            prompt = f"{custom_command}\n\n{prompt}"
+
         req = AIRequest(
-            prompt=f"Perform a comprehensive executive analysis of this operational document. Extract key figures, metrics, and trends:\n\n{markdown_content[:6000]}",
+            prompt=prompt,
             system_instruction="You are an Executive Intelligence Analyst. Deliver factual, quantitative operational insights based strictly on the document text.",
             model=self.model,
             temperature=0.1
         )
         resp = provider.generate(req)
-        analysis_text = resp.text if resp.success and resp.text else f"Document Analysis Summary:\n{markdown_content[:500]}"
-        return {"analysis": analysis_text}
+        if not resp.success or not resp.text:
+            raise RuntimeError(resp.error or "Local AI document analysis failed. No fallback allowed.")
+        return {"analysis": resp.text, "model_used": resp.model}
 
-
-class GemmaClient:
-    """Real AI inference client using qwen2.5:7b for systematic report synthesis."""
-    def __init__(self, *args, **kwargs):
-        self.model = getattr(config, "LOCAL_MODEL_QWEN25", "qwen2.5:7b")
-
-    def generate_systematic_report(self, llama_analysis: str = "", math_audit_markdown: str = "", **kwargs) -> Dict[str, Any]:
+    def generate_systematic_report(
+        self,
+        analysis: str = "",
+        math_audit_markdown: str = "",
+        custom_instructions: Optional[str] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
         provider = ai_inference_service._get_provider()
         prompt = (
             f"Synthesize an official Board-Level Executive Operational Report based on this validated analysis and audited figures:\n\n"
-            f"### Document Analysis\n{llama_analysis}\n\n"
+            f"### Document Analysis\n{analysis}\n\n"
             f"### Verified Mathematical Audit\n{math_audit_markdown}\n\n"
             f"Format as clean, board-ready Markdown with Executive Summary, Operational Findings, and Strategic Directives."
         )
+        if custom_instructions:
+            prompt = f"Focus Directive: {custom_instructions}\n\n{prompt}"
+
         req = AIRequest(
             prompt=prompt,
             system_instruction="You are a Senior Executive Consultant delivering a publication-grade corporate dossier for the Board of Directors.",
@@ -49,12 +64,9 @@ class GemmaClient:
             temperature=0.1
         )
         resp = provider.generate(req)
-        report_text = resp.text if resp.success and resp.text else f"# Systematic Report\n\n## Analysis\n{llama_analysis}\n\n## Math Audit\n{math_audit_markdown}"
-        return {"final_report": report_text}
-
-from backend.services.math_engine import MathEngine
-
-logger = logging.getLogger("mineintel.pipeline")
+        if not resp.success or not resp.text:
+            raise RuntimeError(resp.error or "Local AI systematic report synthesis failed. No fallback allowed.")
+        return {"final_report": resp.text, "model_used": resp.model}
 
 
 class DocumentPipeline:
@@ -62,19 +74,17 @@ class DocumentPipeline:
 
     def __init__(self):
         self.converter = MarkdownConverter()
-        self.llama_client = LlamaClient() if LlamaClient else None
         self.math_engine = MathEngine()
-        self.gemma_client = GemmaClient() if GemmaClient else None
+        self.ai_client = AIReasoningClient()
 
     def process_file(
         self,
         file_path: Path,
-        custom_llama_cmd: Optional[str] = None,
+        custom_analysis_cmd: Optional[str] = None,
         custom_calculations: Optional[List[Dict[str, Any]]] = None,
         custom_report_cmd: Optional[str] = None,
-        llama_model_override: Optional[str] = None,
-        gemma_model_override: Optional[str] = None,
-        route_multimedia_to_gemma: bool = True
+        model_override: Optional[str] = None,
+        **kwargs
     ) -> Dict[str, Any]:
         """Runs the entire multi-stage pipeline sequentially and saves artifacts with strict job isolation."""
         job_id = f"job_{int(time.time())}_{uuid.uuid4().hex[:6]}"
@@ -93,7 +103,6 @@ class DocumentPipeline:
         file_type = conversion_result["file_type"]
         extracted_images = conversion_result.get("extracted_images", [])
         extracted_audio = conversion_result.get("extracted_audio", [])
-        has_multimedia = conversion_result.get("has_multimedia", False)
         records = conversion_result.get("records", [])
         stage_timings["conversion_sec"] = round(time.time() - t0, 2)
 
@@ -112,26 +121,22 @@ class DocumentPipeline:
         # Save 01_raw_converted.md
         (job_dir / "01_raw_converted.md").write_text(raw_markdown, encoding="utf-8")
 
-        # STAGE 2: Reasoning & Analytical Extraction (bounded chunking supported)
+        # STAGE 2: Reasoning & Analytical Extraction
         t0 = time.time()
-        should_bypass_llama_media = route_multimedia_to_gemma and has_multimedia
-        llama_res = self.llama_client.analyze_document(
+        analysis_res = self.ai_client.analyze_document(
             markdown_content=raw_markdown,
-            file_type=file_type,
-            custom_command=custom_llama_cmd,
-            model=llama_model_override,
-            bypass_media=should_bypass_llama_media
+            custom_command=custom_analysis_cmd
         )
-        stage_timings["llama_sec"] = round(time.time() - t0, 2)
-        llama_analysis = llama_res.get("analysis", "")
+        stage_timings["analysis_sec"] = round(time.time() - t0, 2)
+        analysis_text = analysis_res.get("analysis", "")
 
-        # Save 02_llama_analysis.md
-        (job_dir / "02_llama_analysis.md").write_text(llama_analysis, encoding="utf-8")
+        # Save 02_analysis.md
+        (job_dir / "02_llama_analysis.md").write_text(analysis_text, encoding="utf-8")
 
         # STAGE 3: Deterministic Mathematical Calculation & Audit
         t0 = time.time()
         math_audit = self.math_engine.process_math_checks(
-            analysis_text=llama_analysis,
+            analysis_text=analysis_text,
             custom_calculations=custom_calculations
         )
         stage_timings["math_sec"] = round(time.time() - t0, 2)
@@ -143,17 +148,13 @@ class DocumentPipeline:
 
         # STAGE 4: Report Synthesis
         t0 = time.time()
-        gemma_res = self.gemma_client.generate_systematic_report(
-            llama_analysis=llama_analysis,
+        synthesis_res = self.ai_client.generate_systematic_report(
+            analysis=analysis_text,
             math_audit_markdown=math_audit["audit_markdown"],
-            custom_instructions=custom_report_cmd,
-            model_override=gemma_model_override,
-            extracted_images=extracted_images,
-            extracted_audio=extracted_audio,
-            document_title=file_path.stem.replace("_", " ").title()
+            custom_instructions=custom_report_cmd
         )
-        stage_timings["gemma_sec"] = round(time.time() - t0, 2)
-        final_report = gemma_res.get("final_report", "")
+        stage_timings["synthesis_sec"] = round(time.time() - t0, 2)
+        final_report = synthesis_res.get("final_report", "")
 
         # Save 04_final_systematic_report.md
         (job_dir / "04_final_systematic_report.md").write_text(final_report, encoding="utf-8")
@@ -162,7 +163,7 @@ class DocumentPipeline:
         t0 = time.time()
         from backend.services.document_generator import DocumentGenerator
         doc_gen = DocumentGenerator(output_dir=job_dir)
-        summary_to_use = final_report if final_report.strip() else llama_analysis
+        summary_to_use = final_report if final_report.strip() else analysis_text
         doc_pkg = doc_gen.generate_all_packages(
             template_name="aurora_gradient",
             report_id=job_id,
@@ -182,18 +183,14 @@ class DocumentPipeline:
             "file_type": file_type,
             "total_duration_sec": total_duration,
             "stage_timings_sec": stage_timings,
-            "llama_model": llama_res.get("model_used"),
-            "gemma_model": gemma_res.get("model_used"),
-            "is_fallback": llama_res.get("is_fallback", False) or gemma_res.get("is_fallback", False),
+            "ai_model": analysis_res.get("model_used"),
             "math_checks_count": math_audit["total_checks"],
-            "multimodal_routed_to_gemma": should_bypass_llama_media,
             "images_extracted_count": len(extracted_images),
             "audio_extracted_count": len(extracted_audio),
             "status": "COMPLETED"
         }
         (job_dir / "metadata.json").write_text(json.dumps(summary_meta, indent=2), encoding="utf-8")
 
-        # Record into history
         from backend.services.history_manager import record_report
         record_report(
             report_id=job_id,
@@ -210,11 +207,9 @@ class DocumentPipeline:
             "success": True,
             "metadata": summary_meta,
             "raw_markdown": raw_markdown,
-            "llama_analysis": llama_analysis,
+            "analysis": analysis_text,
             "math_audit": math_audit,
             "final_report": final_report,
-            "extracted_images": extracted_images,
-            "extracted_audio": extracted_audio,
             "report_package": doc_pkg,
             "output_directory": str(job_dir)
         }
@@ -222,12 +217,11 @@ class DocumentPipeline:
     def process_file_stream(
         self,
         file_path: Path,
-        custom_llama_cmd: Optional[str] = None,
+        custom_analysis_cmd: Optional[str] = None,
         custom_calculations: Optional[List[Dict[str, Any]]] = None,
         custom_report_cmd: Optional[str] = None,
-        llama_model_override: Optional[str] = None,
-        gemma_model_override: Optional[str] = None,
-        route_multimedia_to_gemma: bool = True
+        model_override: Optional[str] = None,
+        **kwargs
     ):
         """Yields real-time SSE progress events as each pipeline stage completes."""
         job_id = f"job_{int(time.time())}_{uuid.uuid4().hex[:6]}"
@@ -259,7 +253,6 @@ class DocumentPipeline:
         file_type = conversion_result["file_type"]
         extracted_images = conversion_result.get("extracted_images", [])
         extracted_audio = conversion_result.get("extracted_audio", [])
-        has_multimedia = conversion_result.get("has_multimedia", False)
         records = conversion_result.get("records", [])
         stage_timings["conversion_sec"] = round(time.time() - t0, 2)
         (job_dir / "01_raw_converted.md").write_text(raw_markdown, encoding="utf-8")
@@ -275,26 +268,21 @@ class DocumentPipeline:
         (job_dir / "active_media_assets.json").write_text(json.dumps(media_meta, indent=2), encoding="utf-8")
 
         # STAGE 2: Reasoning & Extraction
-        should_bypass_llama_media = route_multimedia_to_gemma and has_multimedia
-        msg_media = f" ({len(extracted_images)} images isolated)" if should_bypass_llama_media else ""
         yield {
-            "stage": "llama",
+            "stage": "analysis",
             "progress": 55,
-            "message": f"Analyzing data relationships & numerical structures{msg_media}...",
+            "message": "Analyzing data relationships & numerical structures...",
             "job_id": job_id,
             "stage_info": f"Converted {len(raw_markdown)} characters of Markdown"
         }
         t0 = time.time()
-        llama_res = self.llama_client.analyze_document(
+        analysis_res = self.ai_client.analyze_document(
             markdown_content=raw_markdown,
-            file_type=file_type,
-            custom_command=custom_llama_cmd,
-            model=llama_model_override,
-            bypass_media=should_bypass_llama_media
+            custom_command=custom_analysis_cmd
         )
-        stage_timings["llama_sec"] = round(time.time() - t0, 2)
-        llama_analysis = llama_res.get("analysis", "")
-        (job_dir / "02_llama_analysis.md").write_text(llama_analysis, encoding="utf-8")
+        stage_timings["analysis_sec"] = round(time.time() - t0, 2)
+        analysis_text = analysis_res.get("analysis", "")
+        (job_dir / "02_llama_analysis.md").write_text(analysis_text, encoding="utf-8")
 
         # STAGE 3: Deterministic Mathematical Calculation & Audit
         yield {
@@ -305,7 +293,7 @@ class DocumentPipeline:
         }
         t0 = time.time()
         math_audit = self.math_engine.process_math_checks(
-            analysis_text=llama_analysis,
+            analysis_text=analysis_text,
             custom_calculations=custom_calculations
         )
         stage_timings["math_sec"] = round(time.time() - t0, 2)
@@ -313,7 +301,7 @@ class DocumentPipeline:
 
         # STAGE 4: Report Synthesis
         yield {
-            "stage": "gemma",
+            "stage": "synthesis",
             "progress": 90,
             "message": "Formatting executive insights and integrating figures into publication template...",
             "job_id": job_id,
@@ -321,17 +309,13 @@ class DocumentPipeline:
             "multimedia_count": len(extracted_images) + len(extracted_audio)
         }
         t0 = time.time()
-        gemma_res = self.gemma_client.generate_systematic_report(
-            llama_analysis=llama_analysis,
+        synthesis_res = self.ai_client.generate_systematic_report(
+            analysis=analysis_text,
             math_audit_markdown=math_audit["audit_markdown"],
-            custom_instructions=custom_report_cmd,
-            model_override=gemma_model_override,
-            extracted_images=extracted_images,
-            extracted_audio=extracted_audio,
-            document_title=file_path.stem.replace("_", " ").title()
+            custom_instructions=custom_report_cmd
         )
-        stage_timings["gemma_sec"] = round(time.time() - t0, 2)
-        final_report = gemma_res.get("final_report", "")
+        stage_timings["synthesis_sec"] = round(time.time() - t0, 2)
+        final_report = synthesis_res.get("final_report", "")
         (job_dir / "04_final_systematic_report.md").write_text(final_report, encoding="utf-8")
 
         # STAGE 5: Document Generation
@@ -343,7 +327,7 @@ class DocumentPipeline:
         }
         from backend.services.document_generator import DocumentGenerator
         doc_gen = DocumentGenerator(output_dir=job_dir)
-        summary_to_use = final_report if final_report.strip() else llama_analysis
+        summary_to_use = final_report if final_report.strip() else analysis_text
         doc_pkg = doc_gen.generate_all_packages(
             template_name="aurora_gradient",
             report_id=job_id,
@@ -361,11 +345,8 @@ class DocumentPipeline:
             "file_type": file_type,
             "total_duration_sec": total_duration,
             "stage_timings_sec": stage_timings,
-            "llama_model": llama_res.get("model_used"),
-            "gemma_model": gemma_res.get("model_used"),
-            "is_fallback": llama_res.get("is_fallback", False) or gemma_res.get("is_fallback", False),
+            "ai_model": analysis_res.get("model_used"),
             "math_checks_count": math_audit["total_checks"],
-            "multimodal_routed_to_gemma": should_bypass_llama_media,
             "images_extracted_count": len(extracted_images),
             "audio_extracted_count": len(extracted_audio),
             "status": "COMPLETED"
@@ -388,7 +369,7 @@ class DocumentPipeline:
             "success": True,
             "metadata": summary_meta,
             "raw_markdown": raw_markdown,
-            "llama_analysis": llama_analysis,
+            "analysis": analysis_text,
             "math_audit": math_audit,
             "final_report": final_report,
             "report_package": doc_pkg,

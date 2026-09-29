@@ -23,6 +23,8 @@ class ProvenanceRecord:
     line_end: Optional[int] = None
     dimensions: Optional[List[int]] = None
     snippet: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    ocr_confidence: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None}

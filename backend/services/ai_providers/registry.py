@@ -3,7 +3,7 @@ MineIntel Phase 3: AI Provider Registry & Dispatcher
 
 Provides:
 - Central registry and selection of AI inference providers
-- Automatic local-first or configurable dispatching (auto / local_ollama / openrouter)
+- Centralized Ollama-first inference dispatching (local_ollama)
 - Unified status and diagnostics
 """
 import logging
@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional
 from backend import config
 from backend.services.ai_providers.base import BaseAIProvider
 from backend.services.ai_providers.local_ollama import LocalOllamaProvider
-from backend.services.ai_providers.openrouter import OpenRouterProvider
 
 logger = logging.getLogger("mineintel.ai.registry")
 

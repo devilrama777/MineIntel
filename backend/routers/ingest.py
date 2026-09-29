@@ -49,29 +49,38 @@ async def upload_single_evidence_file(
     ext = Path(file.filename).suffix.lower()
     file_type = "PDF" if ext == ".pdf" else (ext.lstrip(".").upper() or "DOCUMENT")
 
-    owner_id = auth.get("officer_id", "LOCAL_OFFICER")
-    doc = Document(
-        id=file_id,
-        filename=file.filename,
-        file_type=file_type,
-        file_size=len(content),
-        sha256_hash=sha256,
-        raw_path=str(raw_path),
-        normalized_path=str(raw_path),
-        status="completed",
-        owner_id=owner_id,
-        metadata_json=json.dumps({"upload_type": "direct_upload"}),
-        created_at=int(time.time() * 1000)
-    )
-    db.add(doc)
-    db.commit()
-    db.refresh(doc)
+    session_managed = False
+    if not isinstance(db, Session):
+        db = SessionLocal()
+        session_managed = True
+    try:
+        owner_id = auth.get("officer_id", "LOCAL_OFFICER") if isinstance(auth, dict) else "LOCAL_OFFICER"
+        doc = Document(
+            id=file_id,
+            filename=file.filename,
+            file_type=file_type,
+            file_size=len(content),
+            sha256_hash=sha256,
+            raw_path=str(raw_path),
+            normalized_path=str(raw_path),
+            status="completed",
+            owner_id=owner_id,
+            metadata_json=json.dumps({"upload_type": "direct_upload"}),
+            created_at=int(time.time() * 1000)
+        )
+        db.add(doc)
+        db.commit()
+        db.refresh(doc)
 
-    return {
-        "success": True,
-        "document": doc.to_dict(),
-        "file_id": file_id
-    }
+        return {
+            "success": True,
+            "document": doc.to_dict(),
+            "file_id": file_id,
+            "file_path": str(raw_path)
+        }
+    finally:
+        if session_managed:
+            db.close()
 
 
 @router.get("/data-sources")

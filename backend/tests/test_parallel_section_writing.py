@@ -163,8 +163,8 @@ class TestParallelSectionWriting(unittest.TestCase):
             final_state = self.coordinator.process_task("job_parallel_001", "Generate Annual Mining Intelligence Report")
             elapsed_parallel = time.time() - start_time
 
-            # Verify task completed
-            self.assertEqual(final_state.status, AgentTaskStatus.COMPLETED)
+            # Verify task reached review stage
+            self.assertEqual(final_state.status, AgentTaskStatus.PENDING_REVIEW)
 
             # Retrieve saved plan passed to save_plan
             saved_plan_dict = mock_save_plan.call_args[0][0]

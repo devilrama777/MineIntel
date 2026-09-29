@@ -19,6 +19,7 @@ Handles:
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -27,6 +28,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 from PIL import Image
+import pytesseract
+import pymupdf as fitz  # PyMuPDF (avoids deprecation warning)  
 
 from backend import config
 from backend.services.converter import MarkdownConverter
@@ -60,6 +63,28 @@ try:
     import docx
 except ImportError:
     docx = None
+
+
+def _ocr_pdf_page(pdf_path: str, page_num: int, dpi: int = 300):
+    """OCR one PDF page via PyMuPDF render + Tesseract.
+    Returns (text, avg_confidence_0_to_100)."""
+    import io
+    import os
+    from PIL import Image
+    tess_cmd = os.getenv("TESSERACT_CMD")
+    if tess_cmd:
+        pytesseract.pytesseract.tesseract_cmd = tess_cmd
+    doc = fitz.open(pdf_path)
+    page = doc[page_num]
+    pix = page.get_pixmap(dpi=dpi)
+    img = Image.open(io.BytesIO(pix.tobytes("png")))
+    text = pytesseract.image_to_string(img, config="--oem 3 --psm 6")
+    data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+    confs = [int(c) for c in data["conf"]
+             if str(c).lstrip("-").isdigit() and int(c) >= 0]
+    avg_conf = sum(confs) / len(confs) if confs else 0.0
+    doc.close()
+    return text, avg_conf
 
 
 class IngestionEngine:
@@ -213,6 +238,32 @@ class IngestionEngine:
                 f"({total_chars} total characters across {total_pages} pages). "
                 "Raw bitmap pages are preserved immutably for neural OCR processing in Phase 2.\n\n"
             )
+            # OCR scanned PDF pages via PyMuPDF render + Tesseract
+            try:
+                ocr_doc = fitz.open(str(raw_path))
+                for i, page in enumerate(ocr_doc):
+                    page_num = i + 1
+                    try:
+                        ocr_text, avg_conf = _ocr_pdf_page(str(raw_path), page_num=i)
+                        ocr_text = (ocr_text or "").strip()
+                        markdown_sections.append(f"## Page {page_num} (OCR)\n\n{ocr_text}\n\n")
+                        snippet = ocr_text.splitlines()[0][:150] if ocr_text.splitlines() else ""
+                        provenance_list.append(
+                            ProvenanceRecord(
+                                source_type="scanned_pdf",
+                                provenance=f"Page {page_num} (OCR)",
+                                page=page_num,
+                                snippet=snippet,
+                                metadata={"ocr_confidence": float(avg_conf)},
+                                ocr_confidence=float(avg_conf),
+                            )
+                        )
+                    except Exception as page_ocr_err:
+                        logger.warning(f"OCR failed for page {page_num} of {raw_path.name}: {page_ocr_err}")
+                        continue
+                ocr_doc.close()
+            except Exception as ocr_doc_err:
+                logger.warning(f"PyMuPDF failed to process {raw_path.name} for OCR: {ocr_doc_err}")
 
         full_md = "\n".join(markdown_sections)
         file_type = "scanned_pdf" if is_scanned else "pdf"
@@ -594,18 +645,19 @@ class IngestionEngine:
     def create_ingestion_job(
         cls,
         owner_id: str,
-        files: List[Tuple[str, bytes]]
+        files: List[Tuple[str, bytes]],
+        job_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Creates and executes a multi-file Ingestion Job:
-        - Allocates job_id
+        - Allocates or uses provided job_id
         - Processes all files sequentially with immutable raw copies
         - Generates structured evidence items with stable IDs and classifications
         - Constructs job manifest.json with evidence summary
         - Updates job state in Ingestion Store
         """
         now_ms = int(time.time() * 1000)
-        job_id = f"job_{uuid.uuid4()}"
+        job_id = job_id or f"job_{uuid.uuid4()}"
         job_dir = config.OUTPUTS_DIR / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 

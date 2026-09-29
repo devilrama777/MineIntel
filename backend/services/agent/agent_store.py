@@ -55,7 +55,13 @@ def init_agent_schema() -> None:
                         conflict_logs JSONB,
                         execution_history JSONB,
                         created_at BIGINT NOT NULL,
-                        updated_at BIGINT NOT NULL
+                        updated_at BIGINT NOT NULL,
+                        created_by VARCHAR(128),
+                        submitted_for_review_at BIGINT,
+                        reviewed_by VARCHAR(128),
+                        reviewed_at BIGINT,
+                        rejection_reason TEXT,
+                        rejection_count INT DEFAULT 0
                     );
                     DO $$
                     BEGIN
@@ -66,6 +72,12 @@ def init_agent_schema() -> None:
                             ALTER TABLE mineintel_agent_state RENAME COLUMN job_id TO task_id;
                         END IF;
                     END $$;
+                    ALTER TABLE mineintel_agent_state ADD COLUMN IF NOT EXISTS created_by VARCHAR(128);
+                    ALTER TABLE mineintel_agent_state ADD COLUMN IF NOT EXISTS submitted_for_review_at BIGINT;
+                    ALTER TABLE mineintel_agent_state ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(128);
+                    ALTER TABLE mineintel_agent_state ADD COLUMN IF NOT EXISTS reviewed_at BIGINT;
+                    ALTER TABLE mineintel_agent_state ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+                    ALTER TABLE mineintel_agent_state ADD COLUMN IF NOT EXISTS rejection_count INT DEFAULT 0;
                     CREATE INDEX IF NOT EXISTS idx_agent_state_owner 
                     ON mineintel_agent_state (owner_id);
                     CREATE INDEX IF NOT EXISTS idx_agent_state_status 
@@ -90,6 +102,27 @@ def create_task(state_dict: Dict[str, Any]) -> None:
 def update_task_state(state_dict: Dict[str, Any]) -> None:
     """Updates an existing AgentTaskState record in Neon PostgreSQL."""
     _save_or_update(state_dict)
+
+
+def _row_to_task_dict(row: tuple) -> Dict[str, Any]:
+    """Helper converting database row into standard dictionary, handling legacy & extended columns."""
+    return {
+        "task_id": row[0],
+        "owner_id": row[1],
+        "status": row[2],
+        "structured_state": row[3] if isinstance(row[3], dict) else (json.loads(row[3]) if row[3] else {}),
+        "evidence_references": row[4] if isinstance(row[4], list) else (json.loads(row[4]) if row[4] else []),
+        "conflict_logs": row[5] if isinstance(row[5], list) else (json.loads(row[5]) if row[5] else []),
+        "execution_history": row[6] if isinstance(row[6], list) else (json.loads(row[6]) if row[6] else []),
+        "created_at": row[7],
+        "updated_at": row[8],
+        "created_by": row[9] if len(row) > 9 and row[9] is not None else "",
+        "submitted_for_review_at": row[10] if len(row) > 10 else None,
+        "reviewed_by": row[11] if len(row) > 11 else None,
+        "reviewed_at": row[12] if len(row) > 12 else None,
+        "rejection_reason": row[13] if len(row) > 13 else None,
+        "rejection_count": row[14] if len(row) > 14 and row[14] is not None else 0
+    }
 
 
 def _save_or_update(state_dict: Dict[str, Any]) -> None:
@@ -124,8 +157,9 @@ def _save_or_update(state_dict: Dict[str, Any]) -> None:
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO mineintel_agent_state
-                    (task_id, owner_id, status, structured_state, evidence_references, conflict_logs, execution_history, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s)
+                    (task_id, owner_id, status, structured_state, evidence_references, conflict_logs, execution_history, created_at, updated_at,
+                     created_by, submitted_for_review_at, reviewed_by, reviewed_at, rejection_reason, rejection_count)
+                    VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (task_id) DO UPDATE SET
                         owner_id = EXCLUDED.owner_id,
                         status = EXCLUDED.status,
@@ -133,7 +167,13 @@ def _save_or_update(state_dict: Dict[str, Any]) -> None:
                         evidence_references = EXCLUDED.evidence_references,
                         conflict_logs = EXCLUDED.conflict_logs,
                         execution_history = EXCLUDED.execution_history,
-                        updated_at = EXCLUDED.updated_at;
+                        updated_at = EXCLUDED.updated_at,
+                        created_by = EXCLUDED.created_by,
+                        submitted_for_review_at = EXCLUDED.submitted_for_review_at,
+                        reviewed_by = EXCLUDED.reviewed_by,
+                        reviewed_at = EXCLUDED.reviewed_at,
+                        rejection_reason = EXCLUDED.rejection_reason,
+                        rejection_count = EXCLUDED.rejection_count;
                 """, (
                     task_id,
                     owner_id,
@@ -143,7 +183,13 @@ def _save_or_update(state_dict: Dict[str, Any]) -> None:
                     json.dumps(state_dict.get("conflict_logs", [])),
                     json.dumps(state_dict.get("execution_history", [])),
                     state_dict.get("created_at"),
-                    state_dict.get("updated_at")
+                    state_dict.get("updated_at"),
+                    state_dict.get("created_by") if state_dict.get("created_by") is not None else owner_id,
+                    state_dict.get("submitted_for_review_at"),
+                    state_dict.get("reviewed_by"),
+                    state_dict.get("reviewed_at"),
+                    state_dict.get("rejection_reason"),
+                    state_dict.get("rejection_count", 0)
                 ))
             conn.commit()
     except Exception as e:
@@ -162,24 +208,40 @@ def get_task(task_id: str, owner_id: str) -> Optional[Dict[str, Any]]:
         with _get_pg_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT task_id, owner_id, status, structured_state, evidence_references, conflict_logs, execution_history, created_at, updated_at
+                    SELECT task_id, owner_id, status, structured_state, evidence_references, conflict_logs, execution_history, created_at, updated_at,
+                           created_by, submitted_for_review_at, reviewed_by, reviewed_at, rejection_reason, rejection_count
                     FROM mineintel_agent_state WHERE task_id = %s AND owner_id = %s;
                 """, (task_id, owner_id))
                 row = cur.fetchone()
                 if row:
-                    return {
-                        "task_id": row[0],
-                        "owner_id": row[1],
-                        "status": row[2],
-                        "structured_state": row[3] if isinstance(row[3], dict) else (json.loads(row[3]) if row[3] else {}),
-                        "evidence_references": row[4] if isinstance(row[4], list) else (json.loads(row[4]) if row[4] else []),
-                        "conflict_logs": row[5] if isinstance(row[5], list) else (json.loads(row[5]) if row[5] else []),
-                        "execution_history": row[6] if isinstance(row[6], list) else (json.loads(row[6]) if row[6] else []),
-                        "created_at": row[7],
-                        "updated_at": row[8]
-                    }
+                    return _row_to_task_dict(row)
     except Exception as e:
         logger.error(f"Failed to query agent state {task_id} from PostgreSQL: {e}")
+        raise
+    
+    return None
+
+
+def get_task_any_owner(task_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieves an agent state item by task_id without owner filtering, used for cross-officer approval."""
+    if not is_postgres_configured():
+        logger.error("Cannot get agent state: PostgreSQL is not configured.")
+        return None
+
+    init_agent_schema()
+    try:
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT task_id, owner_id, status, structured_state, evidence_references, conflict_logs, execution_history, created_at, updated_at,
+                           created_by, submitted_for_review_at, reviewed_by, reviewed_at, rejection_reason, rejection_count
+                    FROM mineintel_agent_state WHERE task_id = %s;
+                """, (task_id,))
+                row = cur.fetchone()
+                if row:
+                    return _row_to_task_dict(row)
+    except Exception as e:
+        logger.error(f"Failed to query agent state {task_id} across owners from PostgreSQL: {e}")
         raise
     
     return None
@@ -197,26 +259,49 @@ def list_tasks(owner_id: str) -> list:
         with _get_pg_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT task_id, owner_id, status, structured_state, evidence_references, conflict_logs, execution_history, created_at, updated_at
+                    SELECT task_id, owner_id, status, structured_state, evidence_references, conflict_logs, execution_history, created_at, updated_at,
+                           created_by, submitted_for_review_at, reviewed_by, reviewed_at, rejection_reason, rejection_count
                     FROM mineintel_agent_state WHERE owner_id = %s ORDER BY created_at DESC;
                 """, (owner_id,))
                 rows = cur.fetchall()
                 for row in rows:
-                    tasks.append({
-                        "task_id": row[0],
-                        "owner_id": row[1],
-                        "status": row[2],
-                        "structured_state": row[3] if isinstance(row[3], dict) else (json.loads(row[3]) if row[3] else {}),
-                        "evidence_references": row[4] if isinstance(row[4], list) else (json.loads(row[4]) if row[4] else []),
-                        "conflict_logs": row[5] if isinstance(row[5], list) else (json.loads(row[5]) if row[5] else []),
-                        "execution_history": row[6] if isinstance(row[6], list) else (json.loads(row[6]) if row[6] else []),
-                        "created_at": row[7],
-                        "updated_at": row[8]
-                    })
+                    tasks.append(_row_to_task_dict(row))
     except Exception as e:
         logger.error(f"Failed to query agent states for owner {owner_id} from PostgreSQL: {e}")
         raise
     
+    return tasks
+
+
+def list_pending_reviews(reviewer_id: str) -> list:
+    """
+    Lists tasks in PENDING_REVIEW that were NOT created by the reviewer.
+    Enforces two-step cross-officer review boundary.
+    """
+    if not is_postgres_configured():
+        logger.error("Cannot list pending reviews: PostgreSQL is not configured.")
+        return []
+
+    init_agent_schema()
+    tasks = []
+    try:
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT task_id, owner_id, status, structured_state, evidence_references, conflict_logs, execution_history, created_at, updated_at,
+                           created_by, submitted_for_review_at, reviewed_by, reviewed_at, rejection_reason, rejection_count
+                    FROM mineintel_agent_state 
+                    WHERE status = 'PENDING_REVIEW' 
+                      AND COALESCE(NULLIF(created_by, ''), owner_id) != %s
+                    ORDER BY created_at DESC;
+                """, (reviewer_id,))
+                rows = cur.fetchall()
+                for row in rows:
+                    tasks.append(_row_to_task_dict(row))
+    except Exception as e:
+        logger.error(f"Failed to query pending reviews for reviewer {reviewer_id} from PostgreSQL: {e}")
+        raise
+
     return tasks
 
 
@@ -233,7 +318,8 @@ def get_active_task_for_job(owner_id: str, job_id: str) -> Optional[Dict[str, An
         with _get_pg_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT task_id, owner_id, status, structured_state, evidence_references, conflict_logs, execution_history, created_at, updated_at
+                    SELECT task_id, owner_id, status, structured_state, evidence_references, conflict_logs, execution_history, created_at, updated_at,
+                           created_by, submitted_for_review_at, reviewed_by, reviewed_at, rejection_reason, rejection_count
                     FROM mineintel_agent_state 
                     WHERE owner_id = %s 
                       AND (task_id = %s OR structured_state->>'job_id' = %s)
@@ -243,17 +329,7 @@ def get_active_task_for_job(owner_id: str, job_id: str) -> Optional[Dict[str, An
                 """, (owner_id, job_id, job_id))
                 row = cur.fetchone()
                 if row:
-                    return {
-                        "task_id": row[0],
-                        "owner_id": row[1],
-                        "status": row[2],
-                        "structured_state": row[3] if isinstance(row[3], dict) else (json.loads(row[3]) if row[3] else {}),
-                        "evidence_references": row[4] if isinstance(row[4], list) else (json.loads(row[4]) if row[4] else []),
-                        "conflict_logs": row[5] if isinstance(row[5], list) else (json.loads(row[5]) if row[5] else []),
-                        "execution_history": row[6] if isinstance(row[6], list) else (json.loads(row[6]) if row[6] else []),
-                        "created_at": row[7],
-                        "updated_at": row[8]
-                    }
+                    return _row_to_task_dict(row)
     except Exception as e:
         logger.warning(f"Error querying active task for job {job_id}: {e}")
 

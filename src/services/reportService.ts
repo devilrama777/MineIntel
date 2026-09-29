@@ -308,34 +308,14 @@ class LocalDesktopService {
 
     if (activeJobId) {
       try {
-        // Step A: Generate plan
-        const planRes = await fetch(`${API_BASE}/api/planner/generate`, {
-          method: 'POST',
-          headers: this.getAuthHeaders(),
-          body: JSON.stringify({
-            job_id: activeJobId,
-            title: params.name,
-            use_ai: true,
-          }),
-        });
-        const planData = planRes.ok ? await planRes.json() : null;
-        const planId = planData?.plan_id || planData?.plan?.plan_id;
-
-        // Step B: Generate Long Report
-        const genRes = await fetch(`${API_BASE}/api/reports/generate-long`, {
-          method: 'POST',
-          headers: this.getAuthHeaders(),
-          body: JSON.stringify({
-            job_id: activeJobId,
-            plan_id: planId,
-            title: params.name,
-            formats: ['pdf', 'docx', 'md'],
-          }),
+        const genData = await this.generateReport({
+          file_ids: params.selectedSources,
+          fileIds: params.selectedSources,
+          customFocus: params.description,
+          fileName: params.name,
         });
 
-        if (genRes.ok) {
-          const genData = await genRes.json();
-          const reportId = genData.report_id || `rep-${Date.now().toString().slice(-4)}`;
+        const reportId = genData.report_id || genData.job_id || `rep-${Date.now().toString().slice(-4)}`;
           const created: ReportItem = {
             id: reportId,
             name: params.name,
@@ -362,7 +342,7 @@ class LocalDesktopService {
               title: params.name,
               template: 'formal_audit',
               template_name: 'Formal Statutory Audit',
-              theme: 'coal_sovereign',
+              theme: 'mineintel_navy',
               summary_snippet: params.description.slice(0, 200),
               job_id: activeJobId,
             }),
@@ -370,7 +350,6 @@ class LocalDesktopService {
 
           this.reports.unshift(created);
           return created;
-        }
       } catch (err) {
         console.warn('Real backend report generation pipeline failed, registering draft:', err);
       }
@@ -549,16 +528,22 @@ class LocalDesktopService {
   async generateReport(payload: {
     file_ids?: string[];
     fileIds?: string[];
+    selectedSources?: string[];
     reportType?: string;
     depth?: string;
     tone?: string;
     customFocus?: string;
     fileName?: string;
-    files?: Array<{ name: string; type?: string; fileBase64?: string; rawText?: string }>;
+    rawText?: string;
+    fileBase64?: string;
+    content?: string;
+    files?: Array<{ name: string; type?: string; fileBase64?: string; rawText?: string; content?: string }>;
   }): Promise<{
     success?: boolean;
     report_id: string;
     job_id?: string;
+    status?: string;
+    page_count?: number;
     reportMarkdown?: string;
     content?: string;
     final_report?: string;
@@ -566,7 +551,7 @@ class LocalDesktopService {
     docx_path?: string;
     metadata?: any;
   }> {
-    const file_ids = payload.file_ids || payload.fileIds || [];
+    const file_ids = payload.file_ids || payload.fileIds || payload.selectedSources || [];
     const resp = await fetch(`${API_BASE}/api/generate-report`, {
       method: 'POST',
       headers: {
@@ -576,11 +561,15 @@ class LocalDesktopService {
       body: JSON.stringify({
         file_ids,
         fileIds: file_ids,
+        selectedSources: file_ids,
         reportType: payload.reportType || 'executive',
         depth: payload.depth || 'standard',
         tone: payload.tone || 'analytical',
         customFocus: payload.customFocus || '',
         fileName: payload.fileName || 'Executive Audit Report',
+        rawText: payload.rawText,
+        fileBase64: payload.fileBase64,
+        content: payload.content,
         files: payload.files,
       }),
     });
@@ -855,7 +844,7 @@ class LocalDesktopService {
       title: reportTitle,
       template: 'formal_audit',
       template_name: 'Formal Statutory Audit',
-      theme: 'coal_sovereign',
+      theme: 'mineintel_navy',
       records_count: files.length,
       summary_snippet: `Evidence dossier analyzed from ${files.map((f) => f.name).join(', ')}.`,
       job_id: jobId,

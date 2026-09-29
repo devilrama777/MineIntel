@@ -64,7 +64,7 @@ class TestAgentLifecycle(unittest.TestCase):
             mock_get.return_value = state1.model_dump()
             
             final_res = coordinator1.process_task("job_001", "Synthesize report")
-            self.assertEqual(final_res.status, AgentTaskStatus.COMPLETED)
+            self.assertEqual(final_res.status, AgentTaskStatus.PENDING_REVIEW)
             self.assertEqual(final_res.structured_state["current_stage"], "COMPLETED")
 
 if __name__ == "__main__":

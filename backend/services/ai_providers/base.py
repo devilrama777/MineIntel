@@ -110,7 +110,7 @@ class BaseAIProvider(ABC):
     @property
     @abstractmethod
     def provider_name(self) -> str:
-        """Unique provider identifier (e.g. 'local_ollama', 'openrouter')."""
+        """Unique provider identifier (e.g. 'local_ollama')."""
         pass
 
     @abstractmethod

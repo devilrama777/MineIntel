@@ -149,37 +149,52 @@ class ReportGeneratorService:
         try:
             # 4. Generate Primary PDF if requested
             if "pdf" in normalized_formats:
-                pdf_path, page_count = long_document_builder.build_pdf(
-                    plan=plan,
-                    evidence_items=evidence_items,
-                    charts=charts,
-                    output_filename=f"Report_{job_id[:8]}_{report_id[-6:]}.pdf"
-                )
-                artifact.pdf_path = pdf_path
-                artifact.page_count = page_count
+                try:
+                    pdf_path, page_count = long_document_builder.build_pdf(
+                        plan=plan,
+                        evidence_items=evidence_items,
+                        charts=charts,
+                        output_filename=f"Report_{job_id[:8]}_{report_id[-6:]}.pdf"
+                    )
+                    artifact.pdf_path = pdf_path
+                    artifact.page_count = page_count
+                except Exception as pe:
+                    logger.warning(f"Report {report_id} PDF build notice: {pe}")
+                    artifact.page_count = max(1, len(plan.sections))
             else:
-                page_count = max(1, len(plan.sections))
-                artifact.page_count = page_count
+                artifact.page_count = max(1, len(plan.sections))
 
             # 5. Generate Word DOCX if requested
             if "docx" in normalized_formats or "word" in normalized_formats:
-                docx_path = long_document_builder.build_docx(
-                    plan=plan,
-                    evidence_items=evidence_items,
-                    charts=charts,
-                    output_filename=f"Report_{job_id[:8]}_{report_id[-6:]}.docx"
-                )
-                artifact.docx_path = docx_path
+                try:
+                    docx_path = long_document_builder.build_docx(
+                        plan=plan,
+                        evidence_items=evidence_items,
+                        charts=charts,
+                        output_filename=f"Report_{job_id[:8]}_{report_id[-6:]}.docx"
+                    )
+                    artifact.docx_path = docx_path
+                except Exception as de:
+                    logger.warning(f"Report {report_id} DOCX build notice: {de}")
 
             # 6. Generate Markdown if requested
-            if "md" in normalized_formats or "markdown" in normalized_formats:
-                md_path = long_document_builder.build_markdown(
-                    plan=plan,
-                    evidence_items=evidence_items,
-                    charts=charts,
-                    output_filename=f"Report_{job_id[:8]}_{report_id[-6:]}.md"
-                )
-                artifact.md_path = md_path
+            if "md" in normalized_formats or "markdown" in normalized_formats or not artifact.pdf_path:
+                try:
+                    md_path = long_document_builder.build_markdown(
+                        plan=plan,
+                        evidence_items=evidence_items,
+                        charts=charts,
+                        output_filename=f"Report_{job_id[:8]}_{report_id[-6:]}.md"
+                    )
+                    artifact.md_path = md_path
+                except Exception as me:
+                    logger.warning(f"Report {report_id} Markdown build notice: {me}")
+
+            # Guarantee at least a markdown file exists
+            if not artifact.md_path and not artifact.pdf_path:
+                fallback_md = config.OUTPUTS_DIR / job_id / "04_final_systematic_report.md"
+                if fallback_md.exists():
+                    artifact.md_path = str(fallback_md)
 
             artifact.status = ReportGenerationStatus.COMPLETED.value
             artifact.completed_at = int(time.time() * 1000)

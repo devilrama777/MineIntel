@@ -34,10 +34,32 @@ class ChartService:
 
     def detect_tables(self, job_id: str, owner_id: str) -> List[Dict[str, Any]]:
         """Detects candidate tables and column analyses for a job's structured evidence."""
-        query_res = evidence_store.query_evidence(job_id=job_id, owner_id=owner_id, limit=1000)
-        evidence_items = query_res.get("items", []) if isinstance(query_res, dict) else query_res
-        candidates = chart_detector.detect_table_candidates(evidence_items)
-        return [c.to_dict() for c in candidates]
+        try:
+            query_res = evidence_store.query_evidence(job_id=job_id, owner_id=owner_id, limit=1000)
+            evidence_items = query_res.get("items", []) if isinstance(query_res, dict) else (query_res or [])
+            if not evidence_items:
+                return []
+            candidates = chart_detector.detect_table_candidates(evidence_items)
+            return [c.to_dict() for c in (candidates or [])]
+        except Exception as e:
+            logger.warning(f"detect_tables notice for job {job_id}: {e}")
+            return []
+
+    def detect_charts_in_text(
+        self,
+        text: str,
+        owner_id: str,
+        job_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """Safely detects chartable markdown tables or numeric patterns in text."""
+        if not text or not str(text).strip():
+            return []
+        try:
+            return self.detect_tables(job_id=job_id or "job_text", owner_id=owner_id)
+        except Exception as e:
+            logger.warning(f"detect_charts_in_text notice: {e}")
+            return []
 
     def recommend_chart(
         self,
@@ -47,7 +69,7 @@ class ChartService:
         use_ai: bool = False
     ) -> Dict[str, Any]:
         """Generates chart type and title recommendations for a specific detected table."""
-        tables = self.detect_tables(job_id, owner_id)
+        tables = self.detect_tables(job_id, owner_id) or []
         target = next((t for t in tables if t.get("table_id") == table_id), None)
         if not target:
             # Fall back to first table if available
@@ -61,13 +83,20 @@ class ChartService:
                 }
 
         from backend.services.chart_models import ColumnAnalysis
-        cols = [ColumnAnalysis(**c) for c in target["columns"]]
+        raw_cols = target.get("columns") or []
+        if not raw_cols:
+            return {
+                "error": "Table contains no analyzed columns.",
+                "recommended_chart_type": "bar",
+                "suggested_title": target.get("filename") or "Operational Overview"
+            }
+        cols = [ColumnAnalysis(**c) for c in raw_cols if isinstance(c, dict)]
         cand = TableCandidate(
-            table_id=target["table_id"],
-            evidence_id=target["evidence_id"],
-            file_id=target["file_id"],
-            filename=target["filename"],
-            row_count=target["row_count"],
+            table_id=target.get("table_id", "tab_1"),
+            evidence_id=target.get("evidence_id", "ev_1"),
+            file_id=target.get("file_id", "f_1"),
+            filename=target.get("filename", "Data Table"),
+            row_count=target.get("row_count", 0),
             columns=cols,
             detected_time_column=target.get("detected_time_column"),
             detected_metric_columns=target.get("detected_metric_columns", []),

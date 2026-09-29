@@ -35,7 +35,7 @@ TOPIC_TITLES = {
     TopicCategory.FINANCIAL_OPERATIONAL.value: "Financial Capital, Operating Expenditure & Revenue Audit",
     TopicCategory.EQUIPMENT_INFRASTRUCTURE.value: "Heavy Earth Moving Machinery (HEMM) & Infrastructure Fleet",
     TopicCategory.STATUTORY_COMPLIANCE.value: "Statutory Directives & DGMS Regulatory Audit",
-    TopicCategory.GENERAL.value: "General Operational Administration & Colliery Records"
+    TopicCategory.GENERAL.value: "Document Evidence & Operational Findings"
 }
 
 

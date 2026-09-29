@@ -7,8 +7,9 @@ import time
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from backend.services.agent import agent_store
 from backend.services.agent.agent_store import list_tasks, get_active_task_for_job
 from backend.services.agent.agent_coordinator import AgentCoordinator
 from backend.services.agent.agent_models import AgentTaskStatus, WorkflowStage
@@ -20,6 +21,14 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 class AgentTaskRequest(BaseModel):
     task_id: str
     instruction: Optional[str] = None
+
+
+class RejectTaskRequest(BaseModel):
+    reason: str = Field(..., min_length=10, description="Detailed explanation of reason for rejection (minimum 10 characters).")
+
+
+class ResubmitTaskRequest(BaseModel):
+    feedback_acknowledged: Optional[str] = None
 
 
 @router.post("/tasks", status_code=201)
@@ -71,6 +80,25 @@ def get_agent_tasks(
     }
 
 
+@router.get("/tasks/pending-review")
+def get_pending_review_tasks(
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """Lists all tasks awaiting review that were not created by this senior officer."""
+    if auth.get("role") != "Senior Officer":
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: Senior Officer role required to view pending reviews."
+        )
+    reviewer_id = auth["officer_id"]
+    tasks = agent_store.list_pending_reviews(reviewer_id=reviewer_id)
+    return {
+        "success": True,
+        "tasks": tasks,
+        "count": len(tasks)
+    }
+
+
 @router.get("/tasks/{task_id}")
 def get_agent_task_status(
     task_id: str,
@@ -109,3 +137,101 @@ def get_agent_task_status(
         "completed_sections": completed_sections,
         "task": state.model_dump()
     }
+
+
+@router.post("/tasks/{task_id}/approve")
+def approve_agent_task(
+    task_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """Approves an agent task in PENDING_REVIEW state (Senior Officer only, creator cannot approve)."""
+    if auth.get("role") != "Senior Officer":
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: Senior Officer role required to approve tasks."
+        )
+    reviewer_id = auth["officer_id"]
+    coordinator = AgentCoordinator(owner_id=reviewer_id)
+    try:
+        updated_state = coordinator.approve_task(task_id=task_id, reviewer_id=reviewer_id)
+        return {
+            "success": True,
+            "task_id": updated_state.task_id,
+            "status": updated_state.status.value,
+            "reviewed_by": updated_state.reviewed_by,
+            "reviewed_at": updated_state.reviewed_at
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to approve task: {e}")
+
+
+@router.post("/tasks/{task_id}/reject")
+def reject_agent_task(
+    task_id: str,
+    req: RejectTaskRequest,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """Rejects an agent task in PENDING_REVIEW state with a reason (Senior Officer only)."""
+    if auth.get("role") != "Senior Officer":
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: Senior Officer role required to reject tasks."
+        )
+    reviewer_id = auth["officer_id"]
+    coordinator = AgentCoordinator(owner_id=reviewer_id)
+    try:
+        updated_state = coordinator.reject_task(
+            task_id=task_id,
+            reviewer_id=reviewer_id,
+            reason=req.reason
+        )
+        return {
+            "success": True,
+            "task_id": updated_state.task_id,
+            "status": updated_state.status.value,
+            "rejection_reason": updated_state.rejection_reason
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reject task: {e}")
+
+
+@router.post("/tasks/{task_id}/resubmit")
+def resubmit_agent_task(
+    task_id: str,
+    background_tasks: BackgroundTasks,
+    req: Optional[ResubmitTaskRequest] = None,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """Resubmits a rejected task for re-synthesis at the WRITING stage."""
+    officer_id = auth["officer_id"]
+    task_data = agent_store.get_task_any_owner(task_id)
+    if not task_data:
+        raise HTTPException(status_code=404, detail="Task not found.")
+
+    creator = task_data.get("created_by") or task_data.get("owner_id")
+    if auth.get("role") != "Senior Officer" and creator != officer_id:
+        raise HTTPException(status_code=403, detail="Only the task creator or a Senior Officer may resubmit.")
+
+    coordinator = AgentCoordinator(owner_id=task_data["owner_id"])
+    try:
+        feedback = req.feedback_acknowledged if req else None
+        resubmitted_state = coordinator.resubmit_rejected_task(task_id=task_id, reviewer_feedback=feedback)
+        background_tasks.add_task(
+            coordinator.process_task,
+            resubmitted_state.task_id,
+            "Re-synthesizing report based on feedback."
+        )
+        return {
+            "success": True,
+            "task_id": resubmitted_state.task_id,
+            "status": resubmitted_state.status.value,
+            "message": "Task resubmitted for re-synthesis"
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to resubmit task: {e}")

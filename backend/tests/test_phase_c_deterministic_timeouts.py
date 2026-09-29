@@ -275,7 +275,7 @@ class TestDeterministicToolTimeouts(unittest.TestCase):
 
             final_state = coord.process_task(task_id=task_id, prompt="Healthy test prompt")
 
-            self.assertEqual(final_state.status, AgentTaskStatus.COMPLETED)
+            self.assertEqual(final_state.status, AgentTaskStatus.PENDING_REVIEW)
             self.assertEqual(final_state.structured_state.get("current_stage"), WorkflowStage.COMPLETED.value)
             self.assertEqual(final_state.structured_state.get("report_id"), "rep_ok_123")
 

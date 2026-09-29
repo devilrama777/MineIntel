@@ -54,7 +54,7 @@ class AIInferenceService:
         """
         Executes structured evidence reasoning:
         1. Assembles locked facts, calculated values, and narratives into an evidence-aware prompt.
-        2. Dispatches to selected AI provider (Local qwen2.5:7b or OpenRouter).
+        2. Dispatches to sovereign AI provider (Local qwen2.5:7b).
         3. Persists AI output as an AI ANALYSIS derived evidence item.
         """
         prompt_text, system_inst, parent_ids = prompt_builder.build_reasoning_prompt(

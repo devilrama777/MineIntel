@@ -13,7 +13,7 @@ import {
   Plus
 } from 'lucide-react';
 import { UploadZone } from './UploadZone';
-import { SampleDocument, UploadedDataSourceFile } from './types';
+import { UploadedDataSourceFile } from './types';
 import { reportService } from '../../services/reportService';
 
 interface DataSourceViewProps {
@@ -28,7 +28,6 @@ interface DataSourceViewProps {
   onFilesSelected?: (files: File[]) => void;
   onRemoveStagedFile?: (fileId: string) => void;
   onClearStagedFiles?: () => void;
-  onSelectSample?: (sample: SampleDocument) => void;
   onGenerate: () => void;
   canGenerate: boolean;
   isProcessing: boolean;
@@ -50,7 +49,6 @@ export const DataSourceView: React.FC<DataSourceViewProps> = ({
   onFilesSelected,
   onRemoveStagedFile,
   onClearStagedFiles,
-  onSelectSample,
   onGenerate,
   canGenerate,
   isProcessing,
@@ -191,7 +189,6 @@ export const DataSourceView: React.FC<DataSourceViewProps> = ({
           onFilesSelected={onFilesSelected}
           onRemoveStagedFile={onRemoveStagedFile}
           onClearStagedFiles={onClearStagedFiles}
-          onSelectSample={onSelectSample}
           onGenerate={onGenerate}
           canGenerate={canGenerate}
           isProcessing={isProcessing}

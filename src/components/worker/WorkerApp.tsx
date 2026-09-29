@@ -42,15 +42,11 @@ import {
   SettingsView 
 } from '../views/SettingsView';
 import { 
-  SAMPLE_DOCUMENTS 
-} from './sampleDocuments';
-import { 
   GeneratedReport, 
   ReportType, 
   ReportDepth, 
   ReportTone, 
-  SampleDocument,
-  ActiveView,
+  ActiveView, 
   UploadedDataSourceFile
 } from './types';
 import { 
@@ -66,6 +62,7 @@ import {
 import { authService } from '../../services/authService';
 import { useAuth } from '../../context/AuthContext';
 import { desktopService, reportService } from '../../services/reportService';
+import { agentService } from '../../services/agentService';
 
 function ensureFileObject(item: { name: string; type?: string; file?: File; fileBase64?: string; rawText?: string }): File {
   if (item.file instanceof File) {
@@ -516,38 +513,6 @@ export function WorkerApp() {
     setErrorMessage(null);
   };
 
-  const handleSelectSample = (sample: SampleDocument) => {
-    setFileName(sample.fileName);
-    setFileType('application/pdf');
-    setFileSize(sample.content.length * 2);
-    setRawText(sample.content);
-    setFileBase64('');
-    setErrorMessage(null);
-
-    const sampleDoc: UploadedDataSourceFile = {
-      id: `sample-${sample.id}`,
-      name: sample.fileName,
-      type: 'application/pdf',
-      size: sample.content.length * 2,
-      uploadedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', Today',
-      rawText: sample.content,
-    };
-    setUploadedFiles((prev) => [sampleDoc, ...prev.filter((f) => f.name !== sample.fileName)]);
-    setActiveFileId(sampleDoc.id);
-
-    // Auto-prime tailored executive prompt into the AI prompt generator
-    if (sample.category.toLowerCase().includes('finan')) {
-      setCustomFocus('Extract an exhaustive financial audit analyzing quarterly revenue growth, EBITDA margin trends, OpEx variances, and cash flow projections.');
-    } else if (sample.category.toLowerCase().includes('tech') || sample.category.toLowerCase().includes('eng')) {
-      setCustomFocus('Execute a deep technical synthesis evaluating architectural bottlenecks, multi-system interoperability, failover safeguards, and latency SLAs.');
-    } else if (sample.category.toLowerCase().includes('bio') || sample.category.toLowerCase().includes('health')) {
-      setCustomFocus('Synthesize clinical efficacy endpoints, adverse event safety profiles, placebo variance, and regulatory approval pathways.');
-    } else {
-      setCustomFocus('Perform a thorough risk and compliance assessment detailing high-impact vulnerability vectors, regulatory checkpoints, and rapid remediation protocols.');
-    }
-    showToast(`Sample document "${sample.fileName}" ingested and added to repository!`);
-  };
-
   // Manage uploaded files in repository
   const handleSelectUploadedFile = (fileItem: UploadedDataSourceFile) => {
     setFileName(fileItem.name);
@@ -655,19 +620,53 @@ export function WorkerApp() {
         targetFileIds.push(uploadedFiles[0].id);
       }
 
-      // 2. Task 2: Trigger POST /api/generate-report with selected file IDs
+      // 2. Read file contents into filePayloads so backend receives real text/base64
+      const filePayloads = await Promise.all(
+        filesToProcess.map(async (f) => {
+          let text = '';
+          let b64 = '';
+          try {
+            if (
+              f.type.startsWith('text/') ||
+              f.name.endsWith('.txt') ||
+              f.name.endsWith('.md') ||
+              f.name.endsWith('.csv') ||
+              f.name.endsWith('.json')
+            ) {
+              text = await f.text();
+            } else {
+              b64 = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve((reader.result as string) || '');
+                reader.onerror = () => resolve('');
+                reader.readAsDataURL(f);
+              });
+            }
+          } catch (readErr) {
+            console.warn('Error reading file:', f.name, readErr);
+          }
+          return {
+            name: f.name,
+            type: f.type || 'text/plain',
+            rawText: text || undefined,
+            fileBase64: b64 || undefined,
+          };
+        })
+      );
+
+      // 3. Trigger POST /api/generate-report with real file contents & IDs
       const result = await reportService.generateReport({
         file_ids: targetFileIds,
         fileIds: targetFileIds,
+        selectedSources: targetFileIds,
         reportType,
         depth,
         tone,
         customFocus,
         fileName: reportTitle,
-        files: filesToProcess.map((f) => ({
-          name: f.name,
-          type: f.type,
-        })),
+        files: filePayloads,
+        rawText: filePayloads.length === 1 ? filePayloads[0].rawText : undefined,
+        fileBase64: filePayloads.length === 1 ? filePayloads[0].fileBase64 : undefined,
       });
 
       // 3. Response: Verify backend returns a report_id
@@ -676,7 +675,60 @@ export function WorkerApp() {
         throw new Error('Backend generation did not return a valid report_id.');
       }
 
-      const reportMarkdown = result.reportMarkdown || result.content || result.final_report || '';
+      let reportMarkdown = result.reportMarkdown || result.content || result.final_report || '';
+
+      // Autonomous Background Polling Loop:
+      // If the backend returned an asynchronous job (status === 'RUNNING' or empty markdown),
+      // poll the AgentCoordinator via agentService.getAgentTaskStatus until COMPLETED.
+      if (!reportMarkdown || result.status === 'RUNNING' || result.status === 'PENDING') {
+        const POLL_INTERVAL = 1500;
+        const MAX_POLL_TIME = 600000; // 10 minutes max for deep AI synthesis
+        const startTime = Date.now();
+        let isDone = false;
+
+        while (!isDone) {
+          if (Date.now() - startTime > MAX_POLL_TIME) {
+            throw new Error('Autonomous report generation timed out after 10 minutes.');
+          }
+
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+
+          try {
+            const taskData = await agentService.getAgentTaskStatus(reportId);
+            if (!taskData) continue;
+
+            const st = (taskData.status || '').toUpperCase();
+            const structured = taskData.task?.structured_state || {};
+
+            setTaskStatus(st as any);
+            if (structured.current_stage) setCurrentStage(structured.current_stage);
+            if (structured.current_tool) setCurrentTool(structured.current_tool);
+            if (structured.progress_reason) setProgressReason(structured.progress_reason);
+            if (taskData.sections_completed !== undefined) setSectionsCompleted(taskData.sections_completed);
+            if (taskData.total_sections !== undefined) setTotalSections(taskData.total_sections);
+            if (taskData.active_sections) setActiveSections(taskData.active_sections);
+            if (taskData.completed_sections) setCompletedSections(taskData.completed_sections);
+
+            if (st === 'COMPLETED') {
+              isDone = true;
+              break;
+            } else if (st === 'FAILED' || st === 'CANCELLED') {
+              const errMsg = taskData.task?.error?.message || `Autonomous agent task failed with status: ${st}`;
+              throw new Error(errMsg);
+            }
+          } catch (pollErr: any) {
+            if (pollErr?.message && (pollErr.message.includes('failed with status') || pollErr.message.includes('timed out'))) {
+              throw pollErr;
+            }
+            // Transient network glitches during polling can be retried until timeout
+          }
+        }
+
+        // Fetch completed report content and metadata from the backend
+        const fetched = await reportService.getReportContent(reportId);
+        reportMarkdown = fetched.reportMarkdown || '';
+      }
+
       const newReport: GeneratedReport = {
         id: reportId,
         jobId: result.job_id || reportId,
@@ -702,16 +754,13 @@ export function WorkerApp() {
       // 4. Redirect: In frontend, use window.history.pushState to move to /preview?report_id={report_id}
       window.history.pushState({ report_id: reportId }, '', `/preview?report_id=${reportId}`);
       setActiveView('preview');
+      setTaskStatus('IDLE');
       showToast('Executive report synthesized successfully! Viewing in Preview.');
       scrollToTop();
     } catch (err: any) {
       console.error('Report synthesis failed:', err);
       setErrorMessage(err.message || 'Failed to synthesize document into report. Please check API credentials.');
       setTaskStatus('FAILED');
-    } finally {
-      if (taskStatus !== 'FAILED') {
-        setTaskStatus('IDLE');
-      }
     }
   };
 
@@ -1068,7 +1117,6 @@ export function WorkerApp() {
               onFilesSelected={handleFilesSelected}
               onRemoveStagedFile={handleRemoveStagedFile}
               onClearStagedFiles={handleClearStagedFiles}
-              onSelectSample={handleSelectSample}
               onGenerate={handleGenerateReport}
               canGenerate={canGenerate}
               isProcessing={isProcessing}

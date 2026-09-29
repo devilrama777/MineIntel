@@ -8,7 +8,6 @@ import {
   AlertCircle,
   FileSpreadsheet,
   Search,
-  Wand2,
   ArrowRight,
   Zap,
   CheckCircle2,
@@ -18,7 +17,7 @@ import {
   Clock,
   Eye
 } from 'lucide-react';
-import { SampleDocument, UploadedDataSourceFile } from './types';
+import { UploadedDataSourceFile } from './types';
 import { MineIntelLogo } from './MineIntelLogo';
 
 interface UploadZoneProps {
@@ -33,7 +32,6 @@ interface UploadZoneProps {
   onCustomPromptChange: (prompt: string) => void;
   onFileSelected: (file: File) => void;
   onClearFile: () => void;
-  onSelectSample?: (sample: SampleDocument) => void;
   onGenerate: () => void;
   onPreviewFile?: () => void;
   canGenerate: boolean;
@@ -88,7 +86,6 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
   onCustomPromptChange,
   onFileSelected,
   onClearFile,
-  onSelectSample,
   onGenerate,
   onPreviewFile,
   canGenerate,
@@ -98,8 +95,6 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [dragError, setDragError] = useState<string | null>(null);
-  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
-  const [promptGeneratedSuccess, setPromptGeneratedSuccess] = useState(false);
   const [currentDateTime] = useState(() => new Date());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -159,36 +154,6 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
     } else if (validFiles.length > 0) {
       onFileSelected(validFiles[0]);
     }
-  };
-
-  // AI Auto Prompt Generator function
-  const handleAutoGeneratePrompt = () => {
-    setIsGeneratingPrompt(true);
-    setPromptGeneratedSuccess(false);
-
-    setTimeout(() => {
-      // Pick dynamic context-aware prompt based on filename or cycle through advanced presets
-      const lowerName = fileName.toLowerCase();
-      let selectedPrompt = '';
-
-      if (lowerName.includes('financ') || lowerName.includes('kpi') || lowerName.includes('q3') || lowerName.includes('audit')) {
-        selectedPrompt = 'Extract an exhaustive financial audit analyzing quarterly revenue growth, EBITDA margin trends, OpEx variances, and cash flow projections.';
-      } else if (lowerName.includes('risk') || lowerName.includes('secur') || lowerName.includes('incident') || lowerName.includes('hazard')) {
-        selectedPrompt = 'Perform a thorough risk and compliance assessment detailing high-impact vulnerability vectors, regulatory checkpoints, and rapid remediation protocols.';
-      } else if (lowerName.includes('tech') || lowerName.includes('architect') || lowerName.includes('system') || lowerName.includes('spec')) {
-        selectedPrompt = 'Execute a deep technical synthesis evaluating architectural bottlenecks, multi-system interoperability, failover safeguards, and long-term scalability.';
-      } else {
-        // Pick an alternating high-power executive prompt
-        const randomIndex = Math.floor(Math.random() * PROMPT_TEMPLATES.length);
-        selectedPrompt = PROMPT_TEMPLATES[randomIndex].prompt;
-      }
-
-      onCustomPromptChange(selectedPrompt);
-      setIsGeneratingPrompt(false);
-      setPromptGeneratedSuccess(true);
-
-      setTimeout(() => setPromptGeneratedSuccess(false), 2400);
-    }, 450);
   };
 
   const isPdf = fileType.includes('pdf') || fileName.toLowerCase().endsWith('.pdf');
@@ -462,29 +427,17 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-outfit text-base sm:text-lg font-extrabold text-neutral-900 dark:text-white tracking-tight">
-                    AI Auto Prompt Generator &amp; Search Engine
+                    Analytical Directives &amp; Search Engine
                   </span>
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
                     MineIntel Neural
                   </span>
                 </div>
                 <p className="text-xs text-neutral-500 dark:text-blue-200/70 mt-0.5">
-                  Type your custom objective, or click Auto-Generate for high-precision executive instructions
+                  Type your custom objective for high-precision autonomous executive synthesis
                 </p>
               </div>
             </div>
-
-            {/* Quick Auto Prompt Generator Button */}
-            <button
-              id="btn-auto-generate-prompt"
-              type="button"
-              onClick={handleAutoGeneratePrompt}
-              disabled={isProcessing || isGeneratingPrompt}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all disabled:opacity-50 cursor-pointer active:scale-95 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md shadow-blue-500/20 border border-blue-400/30"
-            >
-              <Wand2 className={`w-4 h-4 ${isGeneratingPrompt ? 'animate-spin text-white' : 'text-amber-300'}`} />
-              <span>{isGeneratingPrompt ? 'Synthesizing...' : '✨ Auto-Generate Prompt'}</span>
-            </button>
           </div>
 
           {/* The Search Bar Engine Container */}
@@ -520,13 +473,6 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
                 </button>
               )}
             </div>
-
-            {promptGeneratedSuccess && (
-              <div className="absolute right-3 -bottom-6 flex items-center gap-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 animate-fadeIn">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Executive prompt synthesized &amp; applied!</span>
-              </div>
-            )}
           </div>
 
           {/* Quick-Select Smart Prompt Tags */}

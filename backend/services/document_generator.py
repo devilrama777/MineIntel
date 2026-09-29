@@ -125,14 +125,7 @@ def _safe_truncate_xml(text: str, max_chars: int = 1200) -> str:
     return truncated
 
 
-# Zero-Mock Policy: Empty registry defaults; all operational data is calculated dynamically from ingested files
-COLLIERIES_DATA = []
-TOTAL_PRODUCTION = 0.0
-TOTAL_DISPATCH = 0.0
-TOTAL_TARGET = 0.0
-ACHIEVEMENT_PCT = 0.0
-OFFTAKE_RATIO = 0.0
-CIL_ANNUAL_REPORT_SUMMARY = "Operational analysis derived from verified ingested documentation."
+# Zero-Mock Policy: All operational metrics are derived dynamically from SQLite Document and Evidence databases.
 
 
 
@@ -551,10 +544,16 @@ class DocumentGenerator:
             if not desc:
                 desc = "Chart Visualization"
 
+        if not file_path_str or not file_path_str.strip():
+            return ""
+
         desc_clean = re.sub(r'[\[\]]', '', str(desc)).strip() or "Chart Visualization"
 
         p = Path(file_path_str)
         fname = p.name
+        if not fname:
+            return ""
+
         normalized = file_path_str.replace("\\", "/")
 
         if "static/charts" in normalized:
@@ -567,6 +566,24 @@ class DocumentGenerator:
             static_url = f"/static/charts/{fname}"
 
         return f"![{desc_clean}]({static_url})"
+
+    def compile_dossier_pdf(
+        self,
+        report_markdown: Optional[str] = None,
+        job_id: Optional[str] = None,
+        document_title: Optional[str] = None
+    ) -> Optional[Path]:
+        """Compiles corporate dossier PDF from report markdown and metadata gracefully."""
+        try:
+            return self.generate_pdf_report(
+                template_name="corporate_dossier",
+                summary_text=report_markdown or "",
+                document_title=document_title or "Executive Operational Report",
+                job_id=job_id
+            )
+        except Exception as e:
+            logger.warning(f"compile_dossier_pdf degraded gracefully: {e}")
+            return None
 
     def _get_table_rows(self, metrics: Dict[str, Any]) -> List[List[str]]:
         """Extracts table rows matching user dataset columns."""
@@ -665,7 +682,7 @@ class DocumentGenerator:
                         pass
 
         if not summary_text or not summary_text.strip():
-            summary_text = "Executive operational briefing compiled from verified ingested documentation."
+            summary_text = "ERROR: No real data found in database. Ingestion failed."
 
         if SimpleDocTemplate is None:
             # ReportLab not installed; create placeholder text file
@@ -1386,7 +1403,7 @@ class DocumentGenerator:
         target_dir = (config.OUTPUTS_DIR / job_id) if job_id else self.output_dir
         target_dir.mkdir(parents=True, exist_ok=True)
         md_path = target_dir / f"{safe_title}_Report.md"
-        default_md = self.output_dir / "Ministry_of_Coal_Report_2026.md"
+        default_md = self.output_dir / "MineIntel_Executive_Report.md"
 
         # Fetch job charts if not provided
         if charts is None and job_id:
@@ -1402,7 +1419,7 @@ class DocumentGenerator:
             "---",
             "",
             "## 1. Executive Summary",
-            summary_text or "Operational briefing compiled from verified ingested documentation.",
+            summary_text or "ERROR: No real data found in database. Ingestion failed.",
             "",
             "## 2. Quantitative Performance & KPIs",
             f"- **Total Primary Volume / Sum:** {metrics['total_production']:,.2f}",
@@ -1460,10 +1477,46 @@ class DocumentGenerator:
     ) -> Dict[str, Any]:
         """Compiles PDF, DOCX, XLSX, and Markdown reports and returns metadata."""
         effective_title = custom_title or document_title
-        pdf_file = self.generate_pdf_report(template_name, report_id, summary_text, user_records, images=images, document_title=effective_title, job_id=job_id)
-        docx_file = self.generate_docx_report(template_name, report_id, summary_text, user_records, images=images, document_title=effective_title, job_id=job_id)
-        xlsx_file = self.generate_excel_workbook(template_name, report_id, summary_text=summary_text, user_records=user_records, document_title=effective_title, job_id=job_id)
-        md_file = self.generate_markdown_report(template_name, report_id, summary_text=summary_text, user_records=user_records, images=images, charts=charts, document_title=effective_title, job_id=job_id)
+        pdf_file = None
+        docx_file = None
+        xlsx_file = None
+        md_file = None
+
+        try:
+            pdf_file = self.generate_pdf_report(template_name, report_id, summary_text, user_records, images=images, document_title=effective_title, job_id=job_id)
+        except Exception as e:
+            logger.warning(f"generate_pdf_report notice: {e}")
+
+        try:
+            docx_file = self.generate_docx_report(template_name, report_id, summary_text, user_records, images=images, document_title=effective_title, job_id=job_id)
+        except Exception as e:
+            logger.warning(f"generate_docx_report notice: {e}")
+
+        try:
+            xlsx_file = self.generate_excel_workbook(template_name, report_id, summary_text=summary_text, user_records=user_records, document_title=effective_title, job_id=job_id)
+        except Exception as e:
+            logger.warning(f"generate_excel_workbook notice: {e}")
+
+        try:
+            md_file = self.generate_markdown_report(template_name, report_id, summary_text=summary_text, user_records=user_records, images=images, charts=charts, document_title=effective_title, job_id=job_id)
+        except Exception as e:
+            logger.warning(f"generate_markdown_report notice: {e}")
+
+        def _safe_file_meta(f: Optional[Path], default_name: str) -> Dict[str, Any]:
+            if f and Path(f).exists():
+                sz = Path(f).stat().st_size
+                return {
+                    "filename": Path(f).name,
+                    "path": str(f),
+                    "size_bytes": sz,
+                    "size_display": f"{sz / 1024:.1f} KB"
+                }
+            return {
+                "filename": Path(f).name if f else default_name,
+                "path": str(f) if f else "",
+                "size_bytes": 0,
+                "size_display": "0 KB"
+            }
 
         return {
             "success": True,
@@ -1471,30 +1524,10 @@ class DocumentGenerator:
             "template": template_name,
             "timestamp": datetime.datetime.now().isoformat(),
             "files": {
-                "pdf": {
-                    "filename": pdf_file.name,
-                    "path": str(pdf_file),
-                    "size_bytes": pdf_file.stat().st_size if pdf_file.exists() else 0,
-                    "size_display": f"{pdf_file.stat().st_size / 1024:.1f} KB" if pdf_file.exists() else "0 KB"
-                },
-                "docx": {
-                    "filename": docx_file.name,
-                    "path": str(docx_file),
-                    "size_bytes": docx_file.stat().st_size if docx_file.exists() else 0,
-                    "size_display": f"{docx_file.stat().st_size / 1024:.1f} KB" if docx_file.exists() else "0 KB"
-                },
-                "xlsx": {
-                    "filename": xlsx_file.name,
-                    "path": str(xlsx_file),
-                    "size_bytes": xlsx_file.stat().st_size if xlsx_file.exists() else 0,
-                    "size_display": f"{xlsx_file.stat().st_size / 1024:.1f} KB" if xlsx_file.exists() else "0 KB"
-                },
-                "md": {
-                    "filename": md_file.name,
-                    "path": str(md_file),
-                    "size_bytes": md_file.stat().st_size if md_file.exists() else 0,
-                    "size_display": f"{md_file.stat().st_size / 1024:.1f} KB" if md_file.exists() else "0 KB"
-                }
+                "pdf": _safe_file_meta(pdf_file, "report.pdf"),
+                "docx": _safe_file_meta(docx_file, "report.docx"),
+                "xlsx": _safe_file_meta(xlsx_file, "report.xlsx"),
+                "md": _safe_file_meta(md_file, "report.md")
             }
         }
 

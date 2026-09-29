@@ -219,7 +219,7 @@ class TestDeterministicWorkflowEngine(unittest.TestCase):
 
         final_state = self.coordinator.process_task(job_id, "Synthesize complete audit report")
 
-        self.assertEqual(final_state.status, AgentTaskStatus.COMPLETED)
+        self.assertEqual(final_state.status, AgentTaskStatus.PENDING_REVIEW)
         self.assertEqual(final_state.structured_state["current_stage"], WorkflowStage.COMPLETED.value)
         self.assertIsNone(final_state.structured_state["current_tool"])
         self.assertEqual(final_state.structured_state["report_id"], "rep_test_001")
