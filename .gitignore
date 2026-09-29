@@ -1,48 +1,27 @@
-# Environments & Secrets (All environment secret files & SQLite databases)
-.env*
-*.db
-*.sqlite
-*.sqlite3
-
-# Python Virtual Environments & Compiled Files
-venv/
-.venv/
-env/
-.env/
+# Secrets
+.env
+.env.local
+backend/data/mineintel.db
+backend/data/mineintel.db-journal
+backend/data/metrics.db
+backend/data/metrics.db-journal
+backend/data/*.json
+# User uploads
+uploads/
+outputs/
+processed_output/
+reported_data/
+backend/static/charts/
+# Test artefacts
+scratch/
+pytest_final.txt
+.pytest_cache/
 __pycache__/
-*.py[cod]
-*$py.class
-*.pyd
-
-# Dependencies & Compiled Production Builds
+*.pyc
+# Node
 node_modules/
 dist/
-build/
 .vercel/
-
-# Local Log & Temporary Files
-*.log
-*.tmp
-*.bak
-temp/
-
-# Dynamic Runtime State & Local Data
-backend/data/*.json
-!backend/data/cil_colliery_data.json
-!backend/data/trends_data.json
-
-# Runtime Outputs & Generated Artifacts
-outputs/*
-!outputs/.gitkeep
-backend/static/charts/*
-!backend/static/charts/.gitkeep
-uploads/*
-!uploads/.gitkeep
-reported_data/*
-!reported_data/.gitkeep
-.freebuff/
-scratch/
-
-# OS Metadata
-.DS_Store
+# OS
 Thumbs.db
+.DS_Store
