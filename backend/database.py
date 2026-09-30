@@ -88,40 +88,6 @@ def get_db():
 
 
 def init_db():
-    """Initializes tables and migrates existing files from JSON store if needed."""
+    """Initializes tables in SQLite database."""
     Base.metadata.create_all(bind=engine)
     logger.info("SQLite database tables initialized at %s", DB_FILE)
-
-    # Seed from existing ingestion_store.json if database is newly initialized
-    try:
-        store_file = config.DATA_DIR / "ingestion_store.json"
-        if store_file.exists():
-            data = json.loads(store_file.read_text(encoding="utf-8"))
-            files = data.get("files", {})
-            if files:
-                db = SessionLocal()
-                try:
-                    existing_count = db.query(Document).count()
-                    if existing_count == 0:
-                        logger.info("Seeding %d existing files from ingestion_store.json into SQLite Document table", len(files))
-                        for f_id, f_data in files.items():
-                            doc = Document(
-                                id=f_id,
-                                filename=f_data.get("filename") or "document.pdf",
-                                file_type=f_data.get("file_type") or "application/pdf",
-                                file_size=int(f_data.get("file_size") or 0),
-                                sha256_hash=f_data.get("sha256_hash"),
-                                raw_path=str(f_data.get("raw_path") or ""),
-                                normalized_path=str(f_data.get("normalized_path") or ""),
-                                status=f_data.get("status") or "completed",
-                                owner_id=f_data.get("owner_id") or "LOCAL_OFFICER",
-                                metadata_json=json.dumps(f_data.get("metadata") or {}),
-                                created_at=int(f_data.get("created_at") or time.time() * 1000),
-                            )
-                            db.merge(doc)
-                        db.commit()
-                        logger.info("Seeding completed successfully.")
-                finally:
-                    db.close()
-    except Exception as e:
-        logger.warning("Optional seeding from JSON store error: %s", e)

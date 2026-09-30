@@ -5,6 +5,7 @@ job progress monitoring, and access to raw and normalized evidence artifacts.
 """
 import hashlib
 import json
+import logging
 import secrets
 import time
 from pathlib import Path
@@ -20,6 +21,8 @@ from backend.database import Document, get_db, SessionLocal
 from backend.services import ingestion_store
 from backend.services.ingestion_service import ingestion_engine
 from backend.routers.auth import require_auth, get_current_user_or_default
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
@@ -55,6 +58,18 @@ async def upload_single_evidence_file(
         session_managed = True
     try:
         owner_id = auth.get("officer_id", "LOCAL_OFFICER") if isinstance(auth, dict) else "LOCAL_OFFICER"
+        existing = db.query(Document).filter(
+            Document.sha256_hash == sha256,
+            Document.owner_id == owner_id
+        ).first()
+        if existing:
+            return {
+                "success": True,
+                "duplicate": True,
+                "file_id": existing.id,
+                "message": f"File already ingested as '{existing.filename}'."
+            }
+
         doc = Document(
             id=file_id,
             filename=file.filename,
@@ -153,6 +168,14 @@ async def create_ingestion_job(
             f_id = f_dict.get("file_id")
             if not f_id:
                 continue
+            sha256 = f_dict.get("sha256_hash")
+            if sha256:
+                existing = db.query(Document).filter(
+                    Document.sha256_hash == sha256,
+                    Document.owner_id == owner_id
+                ).first()
+                if existing:
+                    continue
             doc = Document(
                 id=f_id,
                 filename=f_dict.get("filename") or "evidence.pdf",

@@ -82,6 +82,26 @@ STATIC_DIR = BACKEND_DIR / "static"
 STATIC_CHARTS_DIR = STATIC_DIR / "charts"
 STATIC_REPORTS_DIR = OUTPUTS_DIR / "reports" if IS_VERCEL else (BASE_DIR / "outputs" / "reports")
 
+IS_TEST_MODE = os.getenv("MINEINTEL_TEST_MODE") == "1"
+if IS_TEST_MODE:
+    import tempfile
+    _t = os.getenv("MINEINTEL_TEST_DATA_DIR") or tempfile.mkdtemp(prefix="mineintel_test_")
+    if _t:
+        _tpath = Path(_t)
+        DATA_DIR = _tpath
+        UPLOADS_DIR = _tpath / "uploads"
+        OUTPUTS_DIR = _tpath / "outputs"
+        REPORTS_DIR = _tpath / "reports"
+        REPORTED_DATA_DIR = _tpath / "reported_data"
+        PROCESSED_OUTPUT_DIR = _tpath / "processed_output"
+        STATIC_DIR = _tpath / "static"
+        STATIC_CHARTS_DIR = _tpath / "static" / "charts"
+        STATIC_REPORTS_DIR = REPORTS_DIR
+        for _d in (DATA_DIR, UPLOADS_DIR, OUTPUTS_DIR, REPORTS_DIR,
+                   REPORTED_DATA_DIR, PROCESSED_OUTPUT_DIR,
+                   STATIC_DIR, STATIC_CHARTS_DIR):
+            _d.mkdir(parents=True, exist_ok=True)
+
 for d in (UPLOADS_DIR, OUTPUTS_DIR, REPORTS_DIR, REPORTED_DATA_DIR, PROCESSED_OUTPUT_DIR, DATA_DIR, STATIC_DIR, STATIC_CHARTS_DIR):
     try:
         d.mkdir(parents=True, exist_ok=True)
@@ -187,6 +207,11 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 LOCAL_MODEL_QWEN25 = os.getenv("MINEINTEL_LOCAL_MODEL_QWEN25", "qwen2.5:7b")
 LOCAL_MODEL_QWEN2_VL = os.getenv("MINEINTEL_LOCAL_MODEL_QWEN2_VL", "qwen2.5vl:7b")
 LOCAL_AI_TIMEOUT = int(os.getenv("LOCAL_AI_TIMEOUT", "60"))
+
+# Groq Cloud Provider Skeleton
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+AI_PROVIDER_MODE = os.getenv("MINEINTEL_AI_PROVIDER", "local_ollama")
 
 # Request timeout (seconds)
 LLM_TIMEOUT = LOCAL_AI_TIMEOUT

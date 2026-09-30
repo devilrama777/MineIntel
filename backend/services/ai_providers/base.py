@@ -137,3 +137,37 @@ class BaseAIProvider(ABC):
     def get_status(self) -> Dict[str, Any]:
         """Returns diagnostic status and health details for this provider."""
         pass
+
+
+class BaseProvider(BaseAIProvider):
+    """Base class for AI providers with standard defaults."""
+    name: str = "base"
+
+    @property
+    def provider_name(self) -> str:
+        return getattr(self, "name", "base")
+
+    def is_available(self) -> bool:
+        return False
+
+    def list_models(self) -> List[str]:
+        return []
+
+    def generate(self, req: AIRequest) -> AIResponse:
+        raise NotImplementedError
+
+    def generate_multimodal(self, req: AIRequest) -> AIResponse:
+        return AIResponse(
+            success=False,
+            status="unsupported",
+            error=f"Multimodal inference not supported by {getattr(self, 'name', 'provider')}."
+        )
+
+    def get_status(self) -> Dict[str, Any]:
+        available = self.is_available()
+        return {
+            "provider": getattr(self, "name", self.provider_name),
+            "available": available,
+            "status": "ready" if available else "unavailable"
+        }
+

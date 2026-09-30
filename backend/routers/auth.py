@@ -4,6 +4,7 @@ Provides cryptographic session tokens, user provisioning, profile management, an
 """
 import hashlib
 import hmac
+import logging
 import secrets
 import time
 from typing import Any, Dict, Optional
@@ -13,6 +14,8 @@ from pydantic import BaseModel
 
 from backend import config, auth_store
 from backend.services.captcha import create_challenge, verify_challenge
+
+logger = logging.getLogger("mineintel.auth")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -196,7 +199,14 @@ def auth_captcha(response: Response):
 @router.post("/login")
 def auth_login(req: LoginRequest):
     """Authenticates executive master officers and registered members against secure credential store."""
-    if not req.captcha_challenge_id.strip() or not req.captcha_answer.strip() or not verify_challenge(req.captcha_challenge_id, req.captcha_answer):
+    _cid = bool(req.captcha_challenge_id and req.captcha_challenge_id.strip())
+    _ans = bool(req.captcha_answer and req.captcha_answer.strip())
+    _verified = verify_challenge(req.captcha_challenge_id, req.captcha_answer) if (_cid and _ans) else False
+    logger.warning(
+        f"LOGIN_ATTEMPT officer_id_set={bool(req.officer_id or req.username)} "
+        f"captcha_id_set={_cid} captcha_answer_set={_ans} captcha_verified={_verified}"
+    )
+    if not (_cid and _ans and _verified):
         raise HTTPException(status_code=400, detail="CAPTCHA is missing, incorrect, expired, or already used.")
     officer_id = (req.officer_id or req.username or "").strip().strip("\"'").strip()
     password = req.password.strip().strip("\"'").strip()

@@ -33,9 +33,6 @@ import {
   UploadedFilesList 
 } from './UploadedFilesList';
 import { 
-  AIGenerateEngine 
-} from './AIGenerateEngine';
-import { 
   AuthenticatedUserProfileView 
 } from './AuthenticatedUserProfileView';
 import { 
@@ -245,6 +242,7 @@ export function WorkerApp() {
   const [activeView, setActiveView] = useState<ActiveView>('editor');
   const [taskStatus, setTaskStatus] = useState<'IDLE' | 'PENDING' | 'RUNNING' | 'AWAITING_INPUT' | 'VALIDATING' | 'RETRYING' | 'COMPLETED' | 'FAILED'>('IDLE');
   const isProcessing = taskStatus !== 'IDLE' && taskStatus !== 'COMPLETED' && taskStatus !== 'FAILED';
+  const isGenerating = isProcessing;
   const [sectionsCompleted, setSectionsCompleted] = useState<number>(0);
   const [totalSections, setTotalSections] = useState<number>(0);
   const [activeSections, setActiveSections] = useState<string[]>([]);
@@ -300,8 +298,9 @@ export function WorkerApp() {
     setSelectedFileIds([]);
   };
 
-  const handleGenerateSelectedReports = async () => {
-    const selected = uploadedFiles.filter((f) => selectedFileIds.includes(f.id));
+  const handleGenerateSelectedReports = async (fileIds?: string[]) => {
+    const targetIds = fileIds && fileIds.length > 0 ? fileIds : selectedFileIds;
+    const selected = uploadedFiles.filter((f) => targetIds.includes(f.id));
     if (selected.length === 0) {
       setErrorMessage('Please select at least one document to generate a report.');
       return;
@@ -670,25 +669,47 @@ export function WorkerApp() {
       });
 
       // 3. Response: Verify backend returns a report_id
-      const reportId = result.report_id || result.job_id;
+      let reportId = result.report_id || result.job_id;
       if (!reportId) {
         throw new Error('Backend generation did not return a valid report_id.');
       }
 
       let reportMarkdown = result.reportMarkdown || result.content || result.final_report || '';
 
+      // Task 2: Propagate report_id immediately to currentReport so Preview can track it
+      const stagedReport: GeneratedReport = {
+        id: reportId,
+        jobId: result.job_id || reportId,
+        reportId: reportId,
+        report_id: reportId,
+        fileName: result.metadata?.title || reportTitle || `Executive Report: ${reportId}`,
+        fileType: 'application/pdf',
+        reportMarkdown: reportMarkdown || '',
+        metadata: result.metadata || {
+          title: reportTitle,
+          reportType,
+          depth,
+          tone,
+          wordCount: reportMarkdown ? reportMarkdown.split(/\s+/).length : 0,
+          readingTimeMinutes: reportMarkdown ? Math.max(1, Math.round(reportMarkdown.split(/\s+/).length / 200)) : 1,
+          generatedAt: new Date().toISOString(),
+        },
+        customFocus,
+      };
+      setCurrentReport(stagedReport);
+
       // Autonomous Background Polling Loop:
       // If the backend returned an asynchronous job (status === 'RUNNING' or empty markdown),
-      // poll the AgentCoordinator via agentService.getAgentTaskStatus until COMPLETED.
+      // poll the AgentCoordinator via agentService.getAgentTaskStatus until COMPLETED or PENDING_REVIEW.
       if (!reportMarkdown || result.status === 'RUNNING' || result.status === 'PENDING') {
         const POLL_INTERVAL = 1500;
-        const MAX_POLL_TIME = 600000; // 10 minutes max for deep AI synthesis
+        const MAX_POLL_TIME = 1200000; // 20 minutes max for deep AI synthesis (Task 1)
         const startTime = Date.now();
         let isDone = false;
 
         while (!isDone) {
           if (Date.now() - startTime > MAX_POLL_TIME) {
-            throw new Error('Autonomous report generation timed out after 10 minutes.');
+            throw new Error('Autonomous report generation timed out after 20 minutes.');
           }
 
           await new Promise((r) => setTimeout(r, POLL_INTERVAL));
@@ -700,6 +721,18 @@ export function WorkerApp() {
             const st = (taskData.status || '').toUpperCase();
             const structured = taskData.task?.structured_state || {};
 
+            // Task 2: Capture response.report_id OR response.structured_state.report_id and setState
+            const polledReportId =
+              (taskData as any).report_id ||
+              taskData.task?.structured_state?.report_id ||
+              structured.report_id;
+            if (polledReportId && polledReportId !== reportId) {
+              reportId = polledReportId;
+              setCurrentReport((prev) =>
+                prev ? { ...prev, id: polledReportId, reportId: polledReportId, report_id: polledReportId } : null
+              );
+            }
+
             setTaskStatus(st as any);
             if (structured.current_stage) setCurrentStage(structured.current_stage);
             if (structured.current_tool) setCurrentTool(structured.current_tool);
@@ -709,7 +742,36 @@ export function WorkerApp() {
             if (taskData.active_sections) setActiveSections(taskData.active_sections);
             if (taskData.completed_sections) setCompletedSections(taskData.completed_sections);
 
-            if (st === 'COMPLETED') {
+            // Terminal status check: COMPLETED, APPROVED, or PENDING_REVIEW
+            const terminalStatuses = ['COMPLETED', 'APPROVED', 'PENDING_REVIEW'];
+            if (terminalStatuses.includes(st)) {
+              const reportIdFound =
+                (taskData as any).report_id ||
+                (taskData as any).structured_state?.report_id ||
+                taskData.task?.structured_state?.report_id;
+
+              if (reportIdFound) {
+                reportId = reportIdFound;
+                setCurrentReport((prev) => ({
+                  id: reportIdFound,
+                  report_id: reportIdFound,
+                  reportId: reportIdFound,
+                  fileName: prev?.fileName || `Executive Report: ${reportIdFound}`,
+                  fileType: prev?.fileType || 'application/pdf',
+                  reportMarkdown: prev?.reportMarkdown || '',
+                  jobId: prev?.jobId || reportIdFound,
+                  customFocus: prev?.customFocus || customFocus,
+                  metadata: {
+                    title: prev?.metadata?.title || prev?.fileName || `Executive Report: ${reportIdFound}`,
+                    depth: prev?.metadata?.depth || depth || 'standard',
+                    readingTimeMinutes: prev?.metadata?.readingTimeMinutes || 1,
+                    wordCount: 0,
+                    generatedAt: new Date().toISOString(),
+                    reportType: (prev?.metadata?.reportType || reportType || 'executive') as ReportType,
+                    tone: (prev?.metadata?.tone || tone || 'analytical') as ReportTone,
+                  },
+                }));
+              }
               isDone = true;
               break;
             } else if (st === 'FAILED' || st === 'CANCELLED') {
@@ -724,15 +786,23 @@ export function WorkerApp() {
           }
         }
 
-        // Fetch completed report content and metadata from the backend
-        const fetched = await reportService.getReportContent(reportId);
-        reportMarkdown = fetched.reportMarkdown || '';
+        // Fetch completed / pending review report content from GET /api/reports/{report_id}
+        try {
+          const fetched = await reportService.getReportContent(reportId);
+          if (fetched?.reportMarkdown) {
+            reportMarkdown = fetched.reportMarkdown;
+            setCurrentReport((prev) => (prev ? { ...prev, reportMarkdown: fetched.reportMarkdown } : null));
+          }
+        } catch (fetchErr) {
+          console.warn(`Could not fetch report markdown for report_id '${reportId}':`, fetchErr);
+        }
       }
 
       const newReport: GeneratedReport = {
         id: reportId,
         jobId: result.job_id || reportId,
         reportId: reportId,
+        report_id: reportId,
         fileName: result.metadata?.title || reportTitle || `Executive Report: ${reportId}`,
         fileType: 'application/pdf',
         reportMarkdown: reportMarkdown,
@@ -741,8 +811,8 @@ export function WorkerApp() {
           reportType,
           depth,
           tone,
-          wordCount: reportMarkdown.split(/\s+/).length,
-          readingTimeMinutes: Math.max(1, Math.round(reportMarkdown.split(/\s+/).length / 200)),
+          wordCount: reportMarkdown ? reportMarkdown.split(/\s+/).length : 0,
+          readingTimeMinutes: reportMarkdown ? Math.max(1, Math.round(reportMarkdown.split(/\s+/).length / 200)) : 1,
           generatedAt: new Date().toISOString(),
         },
         customFocus,
@@ -1070,13 +1140,14 @@ export function WorkerApp() {
               <SettingsView healthComponents={[]} />
             </div>
           ) : activeView === 'preview' ? (
-            /* VIEW 2: PREVIEW PAGE VIEW (Shows generated report artifact) */
+            /* VIEW 2: PREVIEW PAGE VIEW (Shows generated report artifact for report_id) */
             <PdfSlidePreviewView
               fileName={currentReport?.fileName || fileName || ''}
               fileType={currentReport?.fileType || fileType || 'application/pdf'}
               fileSize={fileSize}
               rawText={currentReport?.reportMarkdown || ''}
               currentReport={currentReport}
+              key={currentReport?.report_id || currentReport?.reportId || currentReport?.id || 'preview-pane'}
               onJumpToExport={() => {
                 setActiveView('export');
                 scrollToTop();
@@ -1313,28 +1384,18 @@ export function WorkerApp() {
                 />
               </div>
 
-              {/* AI Auto Prompt Generator & Search Engine */}
-              <div className="w-full">
-                <AIGenerateEngine
-                  fileName={activeTargetName}
-                  customPrompt={customFocus}
-                  onCustomPromptChange={setCustomFocus}
-                  onGenerate={handleGenerateReport}
-                  canGenerate={canGenerate}
-                  isProcessing={isProcessing}
-                  onFocusFileSelection={() => {
-                    if (uploadedFiles.length > 0) {
-                      showToast('Please select one or more documents from the repository above.');
-                      const repoEl = document.getElementById('uploaded-repository-container');
-                      if (repoEl) {
-                        repoEl.scrollIntoView({ behavior: 'smooth' });
-                      }
-                    } else {
-                      handleSelectDataSource();
-                    }
-                  }}
-                />
-              </div>
+              {selectedFileIds && selectedFileIds.length > 0 && (
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => handleGenerateSelectedReports(selectedFileIds)}
+                    disabled={isGenerating}
+                    className="px-6 py-3 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white font-semibold rounded-lg shadow-lg cursor-pointer transition-all"
+                  >
+                    {isGenerating ? 'Generating...' : `Generate Report (${selectedFileIds.length})`}
+                  </button>
+                </div>
+              )}
+
             </div>
           )}
           </div>

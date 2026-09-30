@@ -26,6 +26,7 @@ export interface GeneratedReport {
   id: string;
   jobId?: string;
   reportId?: string;
+  report_id?: string;
   fileName: string;
   fileType?: string;
   reportMarkdown: string;

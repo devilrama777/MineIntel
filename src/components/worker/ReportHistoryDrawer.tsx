@@ -106,7 +106,7 @@ export const ReportHistoryDrawer: React.FC<ReportHistoryDrawerProps> = ({
                       <Clock className="w-3.5 h-3.5 text-blue-500" />
                       <span>{new Date(rpt.metadata.generatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} • {new Date(rpt.metadata.generatedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
                     </span>
-                    <span>{rpt.metadata.wordCount.toLocaleString()} words</span>
+                    <span>{(rpt.metadata?.wordCount ?? 0).toLocaleString()} words</span>
                   </div>
                 </div>
 

@@ -67,7 +67,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ report, onReset, onO
     window.print();
   };
 
-  const formattedDate = new Date(report.metadata.generatedAt).toLocaleDateString('en-US', {
+  const formattedDate = new Date(report.metadata?.generatedAt || Date.now()).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -193,7 +193,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ report, onReset, onO
             <span>Reading Time</span>
           </div>
           <div className="text-base sm:text-lg font-bold text-neutral-900 dark:text-white">
-            ~{report.metadata.readingTimeMinutes} min
+            ~{report.metadata?.readingTimeMinutes ?? 1} min
           </div>
         </div>
 
@@ -203,7 +203,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ report, onReset, onO
             <span>Synthesis Volume</span>
           </div>
           <div className="text-base sm:text-lg font-bold text-neutral-900 dark:text-white">
-            {report.metadata.wordCount.toLocaleString()} words
+            {(report.metadata?.wordCount ?? 0).toLocaleString()} words
           </div>
         </div>
 
@@ -213,7 +213,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ report, onReset, onO
             <span>Format & Tone</span>
           </div>
           <div className="text-xs sm:text-sm font-bold text-neutral-900 dark:text-white capitalize truncate">
-            {report.metadata.reportType} ({report.metadata.tone})
+            {report.metadata?.reportType ?? 'executive'} ({report.metadata?.tone ?? 'analytical'})
           </div>
         </div>
 
@@ -222,7 +222,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ report, onReset, onO
             <Calendar className="w-4 h-4 text-amber-500" />
             <span>Date & Time</span>
           </div>
-          <div className="text-xs sm:text-sm font-semibold text-neutral-800 dark:text-neutral-200 truncate" title={new Date(report.metadata.generatedAt).toLocaleString()}>
+          <div className="text-xs sm:text-sm font-semibold text-neutral-800 dark:text-neutral-200 truncate" title={(report.metadata?.generatedAt ? new Date(report.metadata.generatedAt) : new Date()).toLocaleString()}>
             {formattedDate}
           </div>
         </div>
@@ -375,7 +375,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ report, onReset, onO
           </div>
           <div className="font-mono text-xs text-neutral-600 dark:text-neutral-300 font-semibold flex items-center gap-1.5">
             <Clock className="w-3.5 h-3.5 text-blue-500" />
-            <span>Generated: {new Date(report.metadata.generatedAt).toLocaleString()}</span>
+            <span>Generated: {(report.metadata?.generatedAt ? new Date(report.metadata.generatedAt) : new Date()).toLocaleString()}</span>
           </div>
         </div>
       </div>

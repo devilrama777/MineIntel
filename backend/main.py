@@ -88,6 +88,8 @@ from backend.routers.agent import (
     AgentTaskRequest,
 )
 from backend.routers.metrics import router as metrics_router
+from backend.routers.admin import router as admin_router
+from backend.routers.settings import router as settings_router
 
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
@@ -115,6 +117,19 @@ app.include_router(auth_router)
 app.include_router(ingest_router)
 app.include_router(agent_router)
 app.include_router(metrics_router)
+app.include_router(admin_router)
+app.include_router(settings_router)
+
+# Compatibility for FastAPI >= 0.115 where _IncludedRouter does not expose .path
+try:
+    from fastapi.routing import _IncludedRouter
+    if not hasattr(_IncludedRouter, "path"):
+        _IncludedRouter.path = ""
+    for _r in admin_router.routes:
+        if _r not in app.routes:
+            app.routes.append(_r)
+except Exception:
+    pass
 
 pipeline_service = DocumentPipeline()
 converter_service = MarkdownConverter()
