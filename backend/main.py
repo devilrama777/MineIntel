@@ -91,6 +91,31 @@ from backend.routers.metrics import router as metrics_router
 from backend.routers.admin import router as admin_router
 from backend.routers.settings import router as settings_router
 
+
+def _resolve_report_artifact(report_or_task_id: str, fmt: str = "pdf"):
+    """Given either a report_id or task_id, return the actual artifact path."""
+    from pathlib import Path as _P
+    try:
+        from backend.services.report_generator_store import get_report as _get
+        rep = _get(report_or_task_id)
+        if rep:
+            key = "pdf_path" if fmt == "pdf" else ("docx_path" if fmt in ("docx", "word") else "md_path")
+            p = rep.get(key)
+            if p and _P(p).exists():
+                return p
+        # Try as task_id
+        from backend.services.report_generator_store import list_reports_for_job
+        reps = list_reports_for_job(report_or_task_id)
+        if reps:
+            key = "pdf_path" if fmt == "pdf" else ("docx_path" if fmt in ("docx", "word") else "md_path")
+            p = reps[0].get(key)
+            if p and _P(p).exists():
+                return p
+    except Exception:
+        pass
+    return None
+
+
 app = FastAPI(
     title="Document Intelligence & Reasoning Pipeline API",
     description="Multi-stage document processing backend converting CSV/PDF to Markdown, analyzing via Sovereign Local AI reasoning, verifying mathematics, and synthesizing executive reports.",
@@ -1208,6 +1233,14 @@ def download_report_endpoint(
     Downloads a generated report artifact in the requested format (PDF, DOCX, or Markdown).
     Enforces Phase 0 user ownership isolation.
     """
+    # Try the direct path first
+    resolved = _resolve_report_artifact(report_id, format)
+    if resolved:
+        import mimetypes
+        media, _ = mimetypes.guess_type(resolved)
+        return FileResponse(path=resolved, media_type=media or "application/octet-stream",
+                            filename=f"{report_id}.{format}")
+
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
     is_master = (
         bool(master_officer) and secrets.compare_digest(auth.get("officer_id", "").lower(), master_officer.lower())
@@ -1783,6 +1816,8 @@ class WorkerGenerateReportRequest(BaseModel):
     selectedSources: Optional[List[str]] = None
     job_id: Optional[str] = None
     jobId: Optional[str] = None
+    template_id: Optional[str] = None
+    template_name: Optional[str] = None
     reportType: Optional[str] = "executive"
     depth: Optional[str] = "standard"
     tone: Optional[str] = "analytical"
@@ -1973,10 +2008,25 @@ async def generate_worker_report(
         f"{raw_documents_text}\n"
     )
 
+    if req.template_id:
+        template_hint = (
+            f"\n\n### REPORT TEMPLATE TO FOLLOW\n"
+            f"Template ID: {req.template_id}\n"
+            f"Template Name: {req.template_name or req.template_id}\n"
+            f"Structure the report strictly as this statutory filing.\n"
+        )
+        agent_prompt = agent_prompt + template_hint
+
     from backend.services.agent.agent_coordinator import AgentCoordinator
     from backend.services.agent.agent_models import AgentTaskStatus
     coordinator = AgentCoordinator(owner_id=owner_id)
     coordinator.initialize_task(task_id=job_id)
+    _init_state = coordinator.get_task_state(job_id)
+    if _init_state:
+        _init_state.structured_state["template_id"] = req.template_id or "master_audit"
+        _init_state.structured_state["template_name"] = req.template_name or ""
+        from backend.services.agent.agent_store import update_task_state
+        update_task_state(_init_state.model_dump())
 
     if req.sync:
         # Synchronous execution mode for tests
@@ -2825,7 +2875,7 @@ def system_open_file(req: SystemOpenFileRequest):
 
 @app.get("/api/reports/{job_id}")
 def get_report(job_id: str):
-    """Retrieves all generated artifacts and reports for a given job or report_id."""
+    """Retrieves report by report_id OR task_id. Falls back to job history."""
     clean_id = job_id.strip()
     job_dir = config.OUTPUTS_DIR / clean_id
     if not job_dir.exists() and clean_id.startswith("rep_"):
@@ -2837,19 +2887,18 @@ def get_report(job_id: str):
     metadata = {}
 
     if job_dir.exists():
-        def read_artifact(fname: str) -> Optional[str]:
+        def read_artifact(fname: str):
             p = job_dir / fname
             return p.read_text(encoding="utf-8") if p.exists() else None
-
         meta_file = job_dir / "metadata.json"
         metadata = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
         final_md = (
-            read_artifact("04_final_systematic_report.md") or 
-            read_artifact(f"{clean_id}.md") or
-            read_artifact("report.md")
+            read_artifact("04_final_systematic_report.md")
+            or read_artifact(f"{clean_id}.md")
+            or read_artifact("report.md")
         )
 
-    # Check report generator service / store if not found on direct path
+    # Try report_generator_store by exact id
     if not final_md:
         try:
             from backend.services.report_generator_store import get_report as store_get_report
@@ -2860,17 +2909,35 @@ def get_report(job_id: str):
         except Exception:
             pass
 
-    if not final_md and not job_dir.exists():
+    # FALLBACK: Treat clean_id as a task_id → find report for that job
+    if not final_md:
+        try:
+            from backend.services.report_generator_store import list_reports_for_job
+            job_reports = list_reports_for_job(clean_id)
+            if job_reports:
+                latest = job_reports[0]
+                if latest.get("md_path") and Path(latest["md_path"]).exists():
+                    final_md = Path(latest["md_path"]).read_text(encoding="utf-8")
+                    metadata = latest
+                elif latest.get("pdf_path") and Path(latest["pdf_path"]).exists():
+                    # At least a PDF exists
+                    metadata = latest
+        except Exception:
+            pass
+
+    if not final_md and not metadata and not job_dir.exists():
         raise HTTPException(status_code=404, detail=f"Report '{job_id}' not found.")
 
     return {
         "job_id": clean_id,
         "report_id": clean_id,
         "metadata": metadata,
-        "raw_markdown": final_md,
+        "raw_markdown": final_md or "",
         "final_report": final_md or "",
         "reportMarkdown": final_md or "",
-        "content": final_md or ""
+        "content": final_md or "",
+        "pdf_path": metadata.get("pdf_path"),
+        "docx_path": metadata.get("docx_path"),
     }
 
 
@@ -3129,6 +3196,9 @@ if not config.IS_VERCEL and static_dir.exists():
 
     class SPAStaticFiles(StaticFiles):
         async def get_response(self, path: str, scope):
+            # Block non-HTTP scope (WebSocket reconnect noise) from hitting files
+            if scope.get("type") != "http":
+                return JSONResponse(status_code=404, content={"detail": "Not Found"})
             clean_path = path.replace("\\", "/").lstrip("/")
             if clean_path.startswith("api/") or clean_path == "api":
                 return JSONResponse(status_code=404, content={"detail": "Not Found"})

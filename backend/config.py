@@ -199,8 +199,8 @@ def get_auth_secret_password() -> str:
 MAX_CHUNK_CHARS = int(os.getenv("MAX_CHUNK_CHARS", "8000"))
 CHUNK_OVERLAP_CHARS = int(os.getenv("CHUNK_OVERLAP_CHARS", "500"))
 
-# Sole AI Provider Configuration: Local Ollama Only
-AI_PROVIDER = os.getenv("MINEINTEL_AI_PROVIDER", "local_ollama")
+# AI Provider Configuration
+AI_PROVIDER = os.getenv("MINEINTEL_AI_PROVIDER", "groq")
 
 # Local Ollama AI Configuration
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
@@ -208,10 +208,10 @@ LOCAL_MODEL_QWEN25 = os.getenv("MINEINTEL_LOCAL_MODEL_QWEN25", "qwen2.5:7b")
 LOCAL_MODEL_QWEN2_VL = os.getenv("MINEINTEL_LOCAL_MODEL_QWEN2_VL", "qwen2.5vl:7b")
 LOCAL_AI_TIMEOUT = int(os.getenv("LOCAL_AI_TIMEOUT", "60"))
 
-# Groq Cloud Provider Skeleton
+# Groq Cloud Provider Configuration
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-AI_PROVIDER_MODE = os.getenv("MINEINTEL_AI_PROVIDER", "local_ollama")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+AI_PROVIDER_MODE = os.getenv("MINEINTEL_AI_PROVIDER", "groq")
 
 # Request timeout (seconds)
 LLM_TIMEOUT = LOCAL_AI_TIMEOUT

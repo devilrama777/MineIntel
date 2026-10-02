@@ -1,0 +1,6 @@
+{
+  "name": "MineIntel - Coal Mining Field Intelligence Portal",
+  "description": "Government-grade field intelligence and reporting dashboard for coal-mining officers at CIL/CMPDI, Ministry of Coal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -24,8 +24,14 @@ def get_ai_mode(auth: Dict[str, Any] = Depends(require_auth)):
 
 @router.post("/ai-mode")
 def set_ai_mode(req: AIModeRequest, auth: Dict[str, Any] = Depends(require_auth)):
-    if req.mode not in ("groq", "local_ollama"):
+    mode = req.mode.lower()
+    if mode == "online":
+        mode = "groq"
+    elif mode == "offline":
+        mode = "local_ollama"
+    if mode not in ("groq", "local_ollama"):
         raise HTTPException(status_code=400, detail="Invalid mode")
+    req.mode = mode
     os.environ["MINEINTEL_AI_PROVIDER"] = req.mode
     config.AI_PROVIDER_MODE = req.mode
     # Persist to .env file

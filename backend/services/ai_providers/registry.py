@@ -83,18 +83,13 @@ def register_provider(name: str, provider: BaseAIProvider):
 
 
 def detect_active_provider() -> str:
-    """Returns 'groq' if internet+key, else 'local_ollama'."""
     if config.AI_PROVIDER_MODE == "groq" and config.GROQ_API_KEY:
-        try:
-            r = requests.get(
-                "https://api.groq.com/openai/v1/models",
-                headers={"Authorization": f"Bearer {config.GROQ_API_KEY}"},
-                timeout=3
-            )
-            if r.status_code == 200:
-                return "groq"
-        except Exception:
-            pass
+        return "groq"
+    if config.AI_PROVIDER_MODE == "local_ollama":
+        return "local_ollama"
+    # Fallback: prefer groq if key present, else ollama
+    if config.GROQ_API_KEY:
+        return "groq"
     return "local_ollama"
 
 

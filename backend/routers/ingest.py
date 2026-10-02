@@ -398,3 +398,59 @@ def get_normalized_evidence_content(
         "normalized_markdown": content,
         "provenance": rec.get("provenance", [])
     }
+
+
+@router.delete("/files/{file_id}")
+def delete_evidence_file(
+    file_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """Delete an ingested file record (and raw bytes on disk)."""
+    rec = ingestion_store.get_evidence_file(file_id)
+    if not rec:
+        try:
+            _db = SessionLocal()
+            _doc = _db.query(Document).filter(Document.id == file_id).first()
+            if _doc:
+                rec = {"owner_id": _doc.owner_id, "raw_path": _doc.raw_path, "filename": _doc.filename}
+        except Exception:
+            pass
+        finally:
+            try: _db.close()
+            except Exception: pass
+
+    if not rec:
+        # Idempotent: return success even if not found
+        return {"success": True, "file_id": file_id, "deleted": False}
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (
+        bool(master_officer)
+        and secrets.compare_digest(auth.get("officer_id", "").lower(),
+                                   master_officer.lower())
+    )
+    if not is_master and rec.get("owner_id") != auth.get("officer_id"):
+        raise HTTPException(status_code=403, detail="Not your file.")
+    # Remove from Document table
+    try:
+        db = SessionLocal()
+        doc = db.query(Document).filter(Document.id == file_id).first()
+        if doc:
+            try:
+                if doc.raw_path and Path(doc.raw_path).exists():
+                    Path(doc.raw_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+            db.delete(doc)
+            db.commit()
+    except Exception:
+        pass
+    finally:
+        try: db.close()
+        except Exception: pass
+    # Remove from ingestion_store
+    try:
+        ingestion_store.delete_evidence_file(file_id)
+    except Exception:
+        pass
+    return {"success": True, "file_id": file_id, "deleted": True}
+

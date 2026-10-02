@@ -348,6 +348,37 @@ def set_user_status(officer_id: str, is_active: bool) -> bool:
     return True
 
 
+def delete_user(officer_id: str) -> bool:
+    """Removes a user record from persistent storage (PostgreSQL or local file)."""
+    clean_id = officer_id.strip()
+    if not clean_id:
+        return False
+
+    if is_postgres_configured():
+        try:
+            _init_pg_schema()
+            with _get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM mineintel_users WHERE LOWER(officer_id) = LOWER(%s)",
+                        (clean_id,)
+                    )
+                    affected = cur.rowcount
+                conn.commit()
+            return affected > 0
+        except Exception as e:
+            logger.warning(f"PostgreSQL delete failed: {e}")
+            return False
+
+    local_users = _load_local_users()
+    key = clean_id.lower()
+    if key not in local_users:
+        return False
+    del local_users[key]
+    _atomic_write_local_users(local_users)
+    return True
+
+
 def update_user_profile(officer_id: str, display_name: str, phone: str, email: str) -> Optional[Dict[str, Any]]:
     """Updates only permitted profile fields for the identified normal user."""
     clean_id = officer_id.strip()

@@ -39,8 +39,8 @@ def safe_log_print(msg: str) -> None:
 PENDING_STARTUP_DEADLINE_SEC = int(os.getenv("MINEINTEL_PENDING_STARTUP_DEADLINE_SEC", 30))
 STAGE_DEADLINE_SEC = int(os.getenv("MINEINTEL_STAGE_DEADLINE_SEC", 45))
 LLM_CALL_TIMEOUT_SEC = int(os.getenv("MINEINTEL_LLM_CALL_TIMEOUT_SEC", 120))
-SECTION_WRITING_TIMEOUT_SEC = int(os.getenv("MINEINTEL_SECTION_WRITING_TIMEOUT_SEC", 120))
-TOTAL_WALLCLOCK_DEADLINE_SEC = int(os.getenv("MINEINTEL_TOTAL_WALLCLOCK_DEADLINE_SEC", 1200))  # 20 minutes
+SECTION_WRITING_TIMEOUT_SEC = int(os.getenv("MINEINTEL_SECTION_WRITING_TIMEOUT_SEC", 45))
+TOTAL_WALLCLOCK_DEADLINE_SEC = int(os.getenv("MINEINTEL_TOTAL_WALLCLOCK_DEADLINE_SEC", 300))  # 5 minutes
 MAX_TRANSIENT_RETRIES = 2
 MAX_CHUNK_CHARS = getattr(config, "MAX_CHUNK_CHARS", 8000)
 MAX_EVIDENCE_ITEMS_PER_PROMPT = 5
@@ -861,28 +861,36 @@ class AgentCoordinator:
                     for it in evidence_items[:5]
                 ]) + "\n\n"
 
-            raw_ground_truth_block = ""
+            raw_digest = ""
             if getattr(self, "raw_documents_text", None):
-                raw_ground_truth_block = (
-                    f"### RAW INGESTED DOCUMENT CONTENT (GROUND TRUTH EVIDENCE):\n"
-                    f"{self.raw_documents_text}\n\n"
+                clean_raw = self.raw_documents_text[:6000]
+                raw_digest = (
+                    f"\n### SOURCE DOCUMENT CONTENT (GROUND TRUTH)\n"
+                    f"{clean_raw}\n\n"
+                    f"### DATA EXTRACTION DIRECTIVES\n"
+                    f"- Extract EVERY numeric row from tables (do not skip months).\n"
+                    f"- If the same metric appears across multiple sources with different "
+                    f"values, LIST BOTH and mark as 'SOURCE CONFLICT' with both source refs.\n"
+                    f"- Aggregate totals by sum where appropriate.\n"
+                    f"- Preserve month-by-month granularity when data is monthly.\n\n"
                 )
 
             section_prompt = (
-                f"You are a Senior Executive Consultant delivering a board-level operational briefing.\n\n"
-                f"Section: '{sec_title}'\n"
-                f"Report Context: '{plan_title}'\n"
-                f"Section Focus: {getattr(section, 'topic', None) or sec_title}\n\n"
-                f"{raw_ground_truth_block}"
+                f"You are a Senior Executive Consultant writing an official CIL/CMPDI report.\n\n"
+                f"REPORT CONTEXT: {plan_title}\n"
+                f"SECTION: {sec_title}\n"
+                f"FOCUS: {getattr(section, 'topic', None) or sec_title}\n"
+                f"{raw_digest}"
                 f"{chunk_summaries_block}"
                 f"{evidence_items_block}"
-                f"Executive Drafting Directives:\n"
-                f"1. Tone & Voice: Write in a professional, polished, board-room style. Use a natural, authoritative human tone.\n"
-                f"2. Business Insights: Focus on strategic business insights, operational variances, performance trends, and underlying drivers.\n"
-                f"3. Strategic Actions: Provide concrete, managerial action items and executive next steps.\n"
-                f"4. Prohibited Terminology: Do not mention the AI process, tool names, or 'deterministic parity' in the final text. "
-                f"Never reference 'Deterministic Math Engines', 'AST Evaluated', 'Synthetic Records Unit', or 'AI Analytical Synthesis'.\n"
-                f"5. Factual Grounding: Base all quantitative statements directly on the provided evidence without inventing data."
+                f"\n### STRICT WRITING RULES\n"
+                f"1. Use ONLY facts present in the source content above. NEVER invent numbers.\n"
+                f"2. When you cite a number, mark it as [Source: <document name>].\n"
+                f"3. If two sources disagree, write: 'Conflict: Source A reports X, Source B reports Y. Data-quality note: requires reconciliation.'\n"
+                f"4. Use markdown tables for multi-row data (include ALL months, not a sample).\n"
+                f"5. Do NOT echo raw binary data. If source content is unreadable, say 'Source content unavailable in parseable form'.\n"
+                f"6. Do NOT mention AI, Ollama, Groq, LLM, or internal engine names.\n"
+                f"7. Aim for 200-450 words per section.\n"
             )
 
             sec_content = ""
@@ -1117,6 +1125,80 @@ class AgentCoordinator:
                         files=files,
                         job_id=task_id
                     )
+
+                    # Read raw content from uploaded files to populate raw_documents_text
+                    if files:
+                        from pathlib import Path as _P
+                        import io as _io
+                        _raw_parts = []
+                        _SUPPORTED_TEXT_EXT = ('.txt', '.md', '.csv', '.tsv', '.json', '.log')
+                        _SUPPORTED_BINARY_EXT = ('.pdf', '.docx', '.xlsx', '.xls')
+
+                        for fname, fbytes in files:
+                            name_lower = fname.lower()
+                            try:
+                                # 1. Plain text family — decode directly
+                                if name_lower.endswith(_SUPPORTED_TEXT_EXT):
+                                    try:
+                                        text = fbytes.decode('utf-8', errors='ignore')
+                                    except Exception:
+                                        text = fbytes.decode('latin-1', errors='ignore')
+                                    if text.strip():
+                                        _raw_parts.append(f"--- {fname} ---\n{text[:4000]}")
+                                    continue
+
+                                # 2. DOCX — use python-docx
+                                if name_lower.endswith('.docx'):
+                                    try:
+                                        from docx import Document as _Doc
+                                        _doc = _Doc(_io.BytesIO(fbytes))
+                                        _paras = [p.text for p in _doc.paragraphs if p.text.strip()]
+                                        _table_rows = []
+                                        for t in _doc.tables:
+                                            for row in t.rows:
+                                                cells = [c.text.strip() for c in row.cells]
+                                                if any(cells):
+                                                    _table_rows.append(" | ".join(cells))
+                                        combined = "\n".join(_paras)
+                                        if _table_rows:
+                                            combined += "\n\n--- Tables ---\n" + "\n".join(_table_rows)
+                                        if combined.strip():
+                                            _raw_parts.append(f"--- {fname} (DOCX) ---\n{combined[:4000]}")
+                                    except Exception as _e:
+                                        logger.warning(f"DOCX extract failed for {fname}: {_e}")
+                                    continue
+
+                                # 3. XLSX / XLS — use pandas
+                                if name_lower.endswith(('.xlsx', '.xls')):
+                                    try:
+                                        import pandas as _pd
+                                        _df = _pd.read_excel(_io.BytesIO(fbytes))
+                                        _csv_repr = _df.to_csv(index=False)
+                                        if _csv_repr.strip():
+                                            _raw_parts.append(f"--- {fname} (XLSX) ---\n{_csv_repr[:4000]}")
+                                    except Exception as _e:
+                                        logger.warning(f"XLSX extract failed for {fname}: {_e}")
+                                    continue
+
+                                # 4. PDF — use pypdf
+                                if name_lower.endswith('.pdf'):
+                                    try:
+                                        import pypdf as _pdf
+                                        _reader = _pdf.PdfReader(_io.BytesIO(fbytes))
+                                        _pdf_text = "\n".join(
+                                            (p.extract_text() or "") for p in _reader.pages[:20]
+                                        )
+                                        if _pdf_text.strip():
+                                            _raw_parts.append(f"--- {fname} (PDF) ---\n{_pdf_text[:4000]}")
+                                    except Exception as _e:
+                                        logger.warning(f"PDF extract failed for {fname}: {_e}")
+                                    continue
+                            except Exception as _e:
+                                logger.warning(f"Raw text extraction skipped for {fname}: {_e}")
+
+                        if _raw_parts and not self.raw_documents_text:
+                            self.raw_documents_text = "\n\n".join(_raw_parts)[:16000]
+                            state.structured_state["raw_documents_text"] = self.raw_documents_text[:2000]
                     try:
                         intelligence_service.organize_job_evidence(job_id=task_id, owner_id=self.owner_id)
                     except Exception as ie:
@@ -1693,8 +1775,8 @@ class AgentCoordinator:
 
             # FINAL TRANSITION: Submit task for senior officer review
             now = int(time.time() * 1000)
-            state.status = AgentTaskStatus.PENDING_REVIEW
-            state.submitted_for_review_at = now
+            state.status = AgentTaskStatus.COMPLETED
+            state.submitted_for_review_at = None
             state.updated_at = now
             state.heartbeat_at = now
             state.structured_state["current_stage"] = WorkflowStage.COMPLETED.value
@@ -1702,17 +1784,17 @@ class AgentCoordinator:
             state.structured_state["report_id"] = report_id
             state.structured_state["artifacts"] = artifacts if artifacts else {"md": md_path}
             state.structured_state["final_result"] = report_id
-            state.structured_state["progress_reason"] = "Executive report synthesized and submitted for senior review."
+            state.structured_state["progress_reason"] = "Executive report synthesized successfully."
             state.execution_history.append({
                 "role": "system",
-                "event": "PENDING_REVIEW",
+                "event": "COMPLETED",
                 "report_id": report_id,
                 "artifact_path": md_path,
                 "timestamp": now
             })
             update_task_state(state.model_dump())
 
-            logger.info(f"Task {task_id} transitioned to PENDING_REVIEW. Verified report_id: {report_id}")
+            logger.info(f"Task {task_id} transitioned to COMPLETED. Verified report_id: {report_id}")
             return state
 
         except TaskTimeoutError as tte:

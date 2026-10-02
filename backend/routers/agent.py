@@ -235,3 +235,38 @@ def resubmit_agent_task(
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to resubmit task: {e}")
+
+
+from backend.services.agent.agent_store import get_task_any_owner, update_task_state
+from backend.services.agent.agent_models import AgentTaskState, AgentTaskStatus
+
+@router.post("/tasks/{task_id}/submit-for-review")
+def submit_task_for_review(
+    task_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """Worker explicitly submits a completed task for master review.
+    Only the task creator can submit their own task."""
+    raw = get_task_any_owner(task_id)
+    if not raw:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    state = AgentTaskState(**raw)
+    if state.owner_id != auth["officer_id"]:
+        raise HTTPException(status_code=403, detail="Not your task.")
+    if state.status != AgentTaskStatus.COMPLETED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only COMPLETED tasks can be submitted. Current: {state.status.value}"
+        )
+    import time as _t
+    now = int(_t.time() * 1000)
+    state.status = AgentTaskStatus.PENDING_REVIEW
+    state.submitted_for_review_at = now
+    state.updated_at = now
+    state.execution_history.append({
+        "role": "system", "event": "SUBMITTED_FOR_REVIEW",
+        "by": auth["officer_id"], "timestamp": now
+    })
+    update_task_state(state.model_dump())
+    return {"success": True, "task_id": task_id, "status": "PENDING_REVIEW"}
+

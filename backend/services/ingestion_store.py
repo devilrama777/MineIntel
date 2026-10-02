@@ -425,3 +425,35 @@ def list_files_for_job(job_id: str) -> List[Dict[str, Any]]:
     files = [f for f in local_data.get("files", {}).values() if f.get("job_id") == job_id]
     files.sort(key=lambda x: x.get("created_at", 0))
     return files
+
+
+def delete_evidence_file(file_id: str) -> bool:
+    """Deletes an EvidenceFile record by file_id from PostgreSQL, local store, and disk."""
+    rec = get_evidence_file(file_id)
+    if is_postgres_configured():
+        init_ingestion_schema()
+        try:
+            with _get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM mineintel_evidence_files WHERE file_id = %s;", (file_id,))
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Failed to delete evidence file {file_id} from PostgreSQL: {e}")
+
+    local_data = _load_local_store()
+    if "files" in local_data and file_id in local_data["files"]:
+        local_data["files"].pop(file_id, None)
+        _atomic_write_local_store(local_data)
+
+    if rec:
+        for p_key in ("raw_path", "normalized_path"):
+            p_val = rec.get(p_key)
+            if p_val:
+                try:
+                    p = Path(p_val)
+                    if p.exists():
+                        p.unlink(missing_ok=True)
+                except Exception:
+                    pass
+    return True
+

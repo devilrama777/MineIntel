@@ -47,8 +47,8 @@ class CreateUserRequest(BaseModel):
 
 
 class MasterUserActionRequest(BaseModel):
-    master_officer_id: str
-    master_password: str
+    master_officer_id: Optional[str] = ""
+    master_password: Optional[str] = ""
     target_officer_id: str
     is_active: bool
 
@@ -338,25 +338,36 @@ def auth_create_user(req: CreateUserRequest):
 
 
 @router.patch("/users/status")
-def auth_update_user_status(req: MasterUserActionRequest):
+def auth_update_user_status(
+    req: MasterUserActionRequest,
+    authorization: Optional[str] = Header(None)
+):
     """
     Enables or disables/revokes a user account.
-    Requires Master Officer authentication.
+    Requires Master Officer authentication (credentials in body or active master Bearer session).
     """
     master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
     master_secret = config.get_auth_secret_password().strip().strip("\"'").strip()
 
-    if not master_officer or not master_secret:
-        raise HTTPException(status_code=503, detail="Master authentication is unconfigured.")
+    is_authed = False
+    if authorization:
+        token = authorization.split("Bearer ", 1)[1].strip() if authorization.startswith("Bearer ") else authorization.strip()
+        sess = verify_session_token(token)
+        if sess and master_officer and secrets.compare_digest(sess.get("officer_id", "").lower(), master_officer.lower()):
+            is_authed = True
 
-    req_master_id = req.master_officer_id.strip().strip("\"'").strip()
-    req_master_pw = req.master_password.strip().strip("\"'").strip()
+    if not is_authed:
+        if not master_officer or not master_secret:
+            raise HTTPException(status_code=503, detail="Master authentication is unconfigured.")
 
-    valid_master_id = secrets.compare_digest(req_master_id.lower(), master_officer.lower())
-    valid_master_pw = secrets.compare_digest(req_master_pw, master_secret)
+        req_master_id = (req.master_officer_id or "").strip().strip("\"'").strip()
+        req_master_pw = (req.master_password or "").strip().strip("\"'").strip()
 
-    if not (valid_master_id and valid_master_pw):
-        raise HTTPException(status_code=401, detail="Master authentication failed.")
+        valid_master_id = secrets.compare_digest(req_master_id.lower(), master_officer.lower())
+        valid_master_pw = secrets.compare_digest(req_master_pw, master_secret)
+
+        if not (valid_master_id and valid_master_pw):
+            raise HTTPException(status_code=401, detail="Master authentication failed.")
 
     success = auth_store.set_user_status(req.target_officer_id.strip().strip("\"'").strip(), req.is_active)
     if not success:
@@ -367,6 +378,39 @@ def auth_update_user_status(req: MasterUserActionRequest):
         "success": True,
         "message": f"User '{req.target_officer_id}' has been {status_str}."
     }
+
+
+@router.delete("/users/{officer_id}")
+def delete_user(
+    officer_id: str,
+    auth: Dict[str, Any] = Depends(require_auth)
+):
+    """Deletes a normal user (Worker or Senior Officer, not master)."""
+    master_officer = config.get_auth_officer_id().strip().strip("\"'").strip()
+    is_master = (
+        bool(master_officer)
+        and secrets.compare_digest(auth.get("officer_id", "").lower(),
+                                   master_officer.lower())
+    )
+    if not is_master:
+        raise HTTPException(status_code=403, detail="Master Officer role required.")
+    clean_id = officer_id.strip().strip("\"'").strip()
+    if not clean_id:
+        raise HTTPException(status_code=400, detail="Officer ID required.")
+    # Prevent deleting the master
+    if master_officer and secrets.compare_digest(clean_id.lower(), master_officer.lower()):
+        raise HTTPException(status_code=400, detail="Cannot delete master officer.")
+    success = auth_store.delete_user(clean_id) if hasattr(auth_store, 'delete_user') else False
+    if not success:
+        # Fallback: set status inactive
+        try:
+            auth_store.set_user_status(clean_id, False)
+            success = True
+        except Exception:
+            pass
+    if not success:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"success": True, "officer_id": clean_id, "deleted": True}
 
 
 @router.get("/verify")
@@ -445,11 +489,17 @@ def auth_change_password(req: PasswordChangeRequest, auth: Dict[str, Any] = Depe
 
 
 @router.get("/users")
-def auth_list_users(auth: Dict[str, Any] = Depends(require_auth)):
+def auth_list_users(
+    role: Optional[str] = Query(None),
+    auth: Dict[str, Any] = Depends(require_auth)
+):
     """Lists registered users for authorized inspectors."""
+    users = auth_store.get_all_users_safe()
+    if role:
+        users = [u for u in users if u.get("role") == role]
     return {
         "success": True,
-        "users": auth_store.get_all_users_safe()
+        "users": users
     }
 
 
