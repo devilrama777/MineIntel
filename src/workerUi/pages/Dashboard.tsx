@@ -122,6 +122,10 @@ export const Dashboard: React.FC = () => {
 
   const firstName = user.name.split(' ')[0] || 'Jordan';
 
+  const reportsThisMonth = reports.length;
+  const pendingCount = reports.filter((r) => r.status === 'Pending').length;
+  const approvedCount = reports.filter((r) => r.status === 'Approved').length;
+
   // Last 5 reports
   const recentReports = reports.slice(0, 5);
 
@@ -173,14 +177,14 @@ export const Dashboard: React.FC = () => {
             <span className="text-[10px] sm:text-[11px] font-mono font-bold tracking-widest text-slate-400 uppercase">
               REPORTS THIS MONTH
             </span>
-            <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-              ▲ 12%
+            <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center gap-1">
+              Lifetime
             </span>
           </div>
 
           <div className="mt-3 sm:mt-4 mb-1">
             <div className="font-mono text-3xl sm:text-[40px] font-semibold tracking-tight text-white leading-none">
-              <AnimatedCounter value={24} padZero={false} />
+              <AnimatedCounter value={reportsThisMonth} padZero={false} />
             </div>
             <div className="text-xs text-slate-400 mt-1.5 flex items-center gap-1">
               <span>Operational dossiers filed</span>
@@ -197,14 +201,16 @@ export const Dashboard: React.FC = () => {
               PENDING APPROVAL
             </span>
             <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#FFA726]/10 border border-[#FFA726]/20">
-              <span className="w-2 h-2 rounded-full bg-[#FFA726] animate-pulse" />
-              <span className="font-mono text-xs font-semibold text-[#FFA726]">Action Req</span>
+              {pendingCount > 0 && <span className="w-2 h-2 rounded-full bg-[#FFA726] animate-pulse" />}
+              <span className="font-mono text-xs font-semibold text-[#FFA726]">
+                {pendingCount > 0 ? 'Action Req' : '—'}
+              </span>
             </div>
           </div>
 
           <div className="mt-3 sm:mt-4 mb-1">
             <div className="font-mono text-3xl sm:text-[40px] font-semibold tracking-tight text-[#FFA726] leading-none">
-              <AnimatedCounter value={6} padZero={true} />
+              <AnimatedCounter value={pendingCount} padZero={true} />
             </div>
             <div className="text-xs text-slate-400 mt-1.5">
               <span>Awaiting DGMS & Director review</span>
@@ -221,13 +227,13 @@ export const Dashboard: React.FC = () => {
               APPROVED
             </span>
             <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-              ▲ 8%
+              Cleared
             </span>
           </div>
 
           <div className="mt-3 sm:mt-4 mb-1">
             <div className="font-mono text-3xl sm:text-[40px] font-semibold tracking-tight text-white leading-none">
-              <AnimatedCounter value={18} padZero={false} />
+              <AnimatedCounter value={approvedCount} padZero={false} />
             </div>
             <div className="text-xs text-slate-400 mt-1.5">
               <span>Officially cleared & sealed</span>
@@ -252,27 +258,31 @@ export const Dashboard: React.FC = () => {
 
         {/* Ticker cycling track */}
         <div className="flex-1 overflow-hidden relative">
-          <div className="flex items-center gap-8 whitespace-nowrap animate-marquee">
-            {tickerItems.map((item, idx) => (
-              <div key={item.id} className="flex items-center gap-2 text-[11px] font-mono text-slate-300">
-                {item.iconType === 'check' && (
-                  <span className="text-emerald-400 font-bold">✓</span>
-                )}
-                {item.iconType === 'bolt' && (
-                  <span className="text-[#FFA726] font-bold">⚡</span>
-                )}
-                {item.iconType === 'bell' && (
-                  <span className="text-[#00D9FF] font-bold">🔔</span>
-                )}
-                <span className="text-slate-200">{item.text}</span>
-                <span className="text-slate-500">·</span>
-                <span className="text-cyan-300 font-semibold">{item.timeAgo}</span>
-                {idx < tickerItems.length - 1 && (
-                  <span className="text-slate-700 ml-6">|</span>
-                )}
-              </div>
-            ))}
-          </div>
+          {tickerItems.length === 0 ? (
+            <span className="text-slate-500 text-xs">No live activity yet</span>
+          ) : (
+            <div className="flex items-center gap-8 whitespace-nowrap animate-marquee">
+              {tickerItems.map((item, idx) => (
+                <div key={item.id} className="flex items-center gap-2 text-[11px] font-mono text-slate-300">
+                  {item.iconType === 'check' && (
+                    <span className="text-emerald-400 font-bold">✓</span>
+                  )}
+                  {item.iconType === 'bolt' && (
+                    <span className="text-[#FFA726] font-bold">⚡</span>
+                  )}
+                  {item.iconType === 'bell' && (
+                    <span className="text-[#00D9FF] font-bold">🔔</span>
+                  )}
+                  <span className="text-slate-200">{item.text}</span>
+                  <span className="text-slate-500">·</span>
+                  <span className="text-cyan-300 font-semibold">{item.timeAgo}</span>
+                  {idx < tickerItems.length - 1 && (
+                    <span className="text-slate-700 ml-6">|</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -301,65 +311,81 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        <div className="h-[220px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={telemetryTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorCompliance" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#00D9FF" stopOpacity={0.35} />
-                  <stop offset="95%" stopColor="#00D9FF" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="colorStability" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#FFA726" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#FFA726" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <XAxis
-                dataKey="day"
-                stroke="#64748B"
-                fontSize={11}
-                tickLine={false}
-                axisLine={{ stroke: 'rgba(0,217,255,0.1)' }}
-              />
-              <YAxis
-                domain={[85, 100]}
-                stroke="#64748B"
-                fontSize={11}
-                tickLine={false}
-                axisLine={{ stroke: 'rgba(0,217,255,0.1)' }}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: 'rgba(15,23,42,0.92)',
-                  borderColor: 'rgba(0,217,255,0.3)',
-                  borderRadius: '12px',
-                  color: '#fff',
-                  fontSize: '12px',
-                  fontFamily: 'JetBrains Mono',
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="compliance"
-                stroke="#00D9FF"
-                strokeWidth={2}
-                fillOpacity={1}
-                fill="url(#colorCompliance)"
-                animationDuration={1500}
-                animationEasing="ease-out"
-              />
-              <Area
-                type="monotone"
-                dataKey="stability"
-                stroke="#FFA726"
-                strokeWidth={2}
-                fillOpacity={1}
-                fill="url(#colorStability)"
-                animationDuration={1500}
-                animationEasing="ease-out"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+        <div className="min-h-[220px] w-full">
+          {reports.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-700 p-12 text-center">
+              <p className="text-sm text-slate-400">
+                Telemetry trends will appear once you generate reports.
+              </p>
+              <button
+                onClick={() => navigate('/worker/new-report')}
+                className="mt-4 px-4 py-2 rounded-xl bg-[#00D9FF]/15 border border-[#00D9FF]/40 text-[#00D9FF] text-xs font-semibold"
+              >
+                + Create First Report
+              </button>
+            </div>
+          ) : (
+            <div className="h-[220px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={telemetryTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorCompliance" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#00D9FF" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="#00D9FF" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="colorStability" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#FFA726" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#FFA726" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis
+                    dataKey="day"
+                    stroke="#64748B"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={{ stroke: 'rgba(0,217,255,0.1)' }}
+                  />
+                  <YAxis
+                    domain={[85, 100]}
+                    stroke="#64748B"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={{ stroke: 'rgba(0,217,255,0.1)' }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'rgba(15,23,42,0.92)',
+                      borderColor: 'rgba(0,217,255,0.3)',
+                      borderRadius: '12px',
+                      color: '#fff',
+                      fontSize: '12px',
+                      fontFamily: 'JetBrains Mono',
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="compliance"
+                    stroke="#00D9FF"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#colorCompliance)"
+                    animationDuration={1500}
+                    animationEasing="ease-out"
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="stability"
+                    stroke="#FFA726"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#colorStability)"
+                    animationDuration={1500}
+                    animationEasing="ease-out"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
       </div>
 
@@ -386,182 +412,200 @@ export const Dashboard: React.FC = () => {
           </button>
         </div>
 
-        {/* Mobile View (<640px) */}
-        <div className="sm:hidden divide-y divide-[#00D9FF]/[0.08]">
-          {recentReports.map((report) => (
-            <div
-              key={report.id}
-              onClick={() => handleRowClick(report.id)}
-              className="p-3.5 space-y-2.5 hover:bg-[rgba(0,217,255,0.04)] cursor-pointer transition-colors"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0">
-                    <FileText className="w-4 h-4 text-cyan-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold text-white truncate max-w-[200px]">
-                      {report.title}
-                    </div>
-                    <div className="font-mono text-[10px] text-cyan-400/90">{report.id}</div>
-                  </div>
-                </div>
-                <div className="shrink-0">
-                  {report.status === 'Approved' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                      <CheckCircle2 className="w-3 h-3" /> Approved
-                    </span>
-                  )}
-                  {report.status === 'Pending' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400">
-                      <Clock className="w-3 h-3" /> Pending
-                    </span>
-                  )}
-                  {report.status === 'Rejected' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/10 border border-red-500/30 text-red-400">
-                      <XCircle className="w-3 h-3" /> Rejected
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 pt-1">
-                <span>{report.category}</span>
-                <span>{report.createdAt}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Desktop/Tablet Table content */}
-        <div className="hidden sm:block overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[640px]">
-            <thead>
-              <tr className="bg-[rgba(0,217,255,0.05)] border-b border-[#00D9FF]/10 text-[11px] font-mono font-bold tracking-wider text-slate-400 uppercase">
-                <th className="py-3 px-6">REPORT TITLE & ID</th>
-                <th className="py-3 px-6">CREATED DATE</th>
-                <th className="py-3 px-6">CATEGORY</th>
-                <th className="py-3 px-6">STATUS</th>
-                <th className="py-3 px-6 text-right">ACTION</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#00D9FF]/[0.07]">
-              {recentReports.map((report, idx) => (
-                <motion.tr
+        {recentReports.length === 0 ? (
+          <div className="p-8 text-center text-slate-400 text-sm">
+            No reports yet.
+          </div>
+        ) : (
+          <>
+            {/* Mobile View (<640px) */}
+            <div className="sm:hidden divide-y divide-[#00D9FF]/[0.08]">
+              {recentReports.map((report) => (
+                <div
                   key={report.id}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.05, duration: 0.3 }}
                   onClick={() => handleRowClick(report.id)}
-                  className="h-[72px] hover:bg-[rgba(0,217,255,0.04)] cursor-pointer transition-colors group"
+                  className="p-3.5 space-y-2.5 hover:bg-[rgba(0,217,255,0.04)] cursor-pointer transition-colors"
                 >
-                  {/* Column 1: icon + title + ID */}
-                  <td className="py-3 px-6">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-700/80 group-hover:border-[#00D9FF]/40 flex items-center justify-center shrink-0 transition-colors">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0">
                         <FileText className="w-4 h-4 text-cyan-400" />
                       </div>
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-white group-hover:text-[#00D9FF] transition-colors truncate max-w-[280px] lg:max-w-md">
+                        <div className="text-xs font-semibold text-white truncate max-w-[200px]">
                           {report.title}
                         </div>
-                        <div className="font-mono text-xs text-slate-400 mt-0.5">
-                          {report.id}
-                        </div>
+                        <div className="font-mono text-[10px] text-cyan-400/90">{report.id}</div>
                       </div>
                     </div>
-                  </td>
+                    <div className="shrink-0">
+                      {report.status === 'Approved' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                          <CheckCircle2 className="w-3 h-3" /> Approved
+                        </span>
+                      )}
+                      {report.status === 'Pending' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                          <Clock className="w-3 h-3" /> Pending
+                        </span>
+                      )}
+                      {report.status === 'Rejected' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/10 border border-red-500/30 text-red-400">
+                          <XCircle className="w-3 h-3" /> Rejected
+                        </span>
+                      )}
+                      {(report.status === 'Draft' || report.status === 'Ready') && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-500/10 border border-slate-500/30 text-slate-400">
+                          Draft
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
-                  {/* Column 2: Created Date */}
-                  <td className="py-3 px-6">
-                    <span className="font-mono text-xs text-slate-300">
-                      {report.createdAt}
-                    </span>
-                  </td>
-
-                  {/* Column 3: Category */}
-                  <td className="py-3 px-6">
-                    <span className="text-xs text-slate-300 font-medium">
-                      {report.category}
-                    </span>
-                  </td>
-
-                  {/* Column 4: Status Pill */}
-                  <td className="py-3 px-6">
-                    {report.status === 'Approved' && (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                        <CheckCircle2 className="w-3.5 h-3.5 animate-pulse" />
-                        Approved
-                      </span>
-                    )}
-                    {report.status === 'Pending' && (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400">
-                        <Clock className="w-3.5 h-3.5 animate-pulse" />
-                        Pending
-                      </span>
-                    )}
-                    {report.status === 'Rejected' && (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-500/10 border border-red-500/30 text-red-400">
-                        <XCircle className="w-3.5 h-3.5" />
-                        Rejected
-                      </span>
-                    )}
-                  </td>
-
-                  {/* Column 5: Kebab Menu */}
-                  <td className="py-3 px-6 text-right relative" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      onClick={() =>
-                        setActiveKebabId((prev) => (prev === report.id ? null : report.id))
-                      }
-                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                      title="Options"
-                    >
-                      <MoreVertical className="w-4 h-4" />
-                    </button>
-
-                    {/* Popover options */}
-                    {activeKebabId === report.id && (
-                      <div className="absolute right-6 top-14 w-44 rounded-xl bg-slate-900 border border-[#00D9FF]/20 shadow-xl z-30 p-1.5 text-left animate-in fade-in duration-150">
-                        <button
-                          onClick={() => {
-                            setActiveKebabId(null);
-                            navigate(`/worker/preview/${report.id}`);
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyan-950/40 rounded-lg transition-colors"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-cyan-400" />
-                          <span>View Dossier</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            setActiveKebabId(null);
-                            navigate(`/worker/export/${report.id}`);
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyan-950/40 rounded-lg transition-colors"
-                        >
-                          <Download className="w-3.5 h-3.5 text-[#FFA726]" />
-                          <span>Official Export</span>
-                        </button>
-                        <div className="my-1 border-t border-slate-800" />
-                        <button
-                          onClick={() => {
-                            setActiveKebabId(null);
-                            deleteReport(report.id);
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Delete Report</span>
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </motion.tr>
+                  <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 pt-1">
+                    <span>{report.category}</span>
+                    <span>{report.createdAt}</span>
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </div>
+
+            {/* Desktop/Tablet Table content */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[640px]">
+                <thead>
+                  <tr className="bg-[rgba(0,217,255,0.05)] border-b border-[#00D9FF]/10 text-[11px] font-mono font-bold tracking-wider text-slate-400 uppercase">
+                    <th className="py-3 px-6">REPORT TITLE & ID</th>
+                    <th className="py-3 px-6">CREATED DATE</th>
+                    <th className="py-3 px-6">CATEGORY</th>
+                    <th className="py-3 px-6">STATUS</th>
+                    <th className="py-3 px-6 text-right">ACTION</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#00D9FF]/[0.07]">
+                  {recentReports.map((report, idx) => (
+                    <motion.tr
+                      key={report.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.05, duration: 0.3 }}
+                      onClick={() => handleRowClick(report.id)}
+                      className="h-[72px] hover:bg-[rgba(0,217,255,0.04)] cursor-pointer transition-colors group"
+                    >
+                      {/* Column 1: icon + title + ID */}
+                      <td className="py-3 px-6">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-700/80 group-hover:border-[#00D9FF]/40 flex items-center justify-center shrink-0 transition-colors">
+                            <FileText className="w-4 h-4 text-cyan-400" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-white group-hover:text-[#00D9FF] transition-colors truncate max-w-[280px] lg:max-w-md">
+                              {report.title}
+                            </div>
+                            <div className="font-mono text-xs text-slate-400 mt-0.5">
+                              {report.id}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Column 2: Created Date */}
+                      <td className="py-3 px-6">
+                        <span className="font-mono text-xs text-slate-300">
+                          {report.createdAt}
+                        </span>
+                      </td>
+
+                      {/* Column 3: Category */}
+                      <td className="py-3 px-6">
+                        <span className="text-xs text-slate-300 font-medium">
+                          {report.category}
+                        </span>
+                      </td>
+
+                      {/* Column 4: Status Pill */}
+                      <td className="py-3 px-6">
+                        {report.status === 'Approved' && (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                            <CheckCircle2 className="w-3.5 h-3.5 animate-pulse" />
+                            Approved
+                          </span>
+                        )}
+                        {report.status === 'Pending' && (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                            <Clock className="w-3.5 h-3.5 animate-pulse" />
+                            Pending
+                          </span>
+                        )}
+                        {report.status === 'Rejected' && (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-500/10 border border-red-500/30 text-red-400">
+                            <XCircle className="w-3.5 h-3.5" />
+                            Rejected
+                          </span>
+                        )}
+                        {(report.status === 'Draft' || report.status === 'Ready') && (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-500/10 border border-slate-500/30 text-slate-400">
+                            Draft
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Column 5: Kebab Menu */}
+                      <td className="py-3 px-6 text-right relative" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() =>
+                            setActiveKebabId((prev) => (prev === report.id ? null : report.id))
+                          }
+                          className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                          title="Options"
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
+
+                        {/* Popover options */}
+                        {activeKebabId === report.id && (
+                          <div className="absolute right-6 top-14 w-44 rounded-xl bg-slate-900 border border-[#00D9FF]/20 shadow-xl z-30 p-1.5 text-left animate-in fade-in duration-150">
+                            <button
+                              onClick={() => {
+                                setActiveKebabId(null);
+                                navigate(`/worker/preview/${report.id}`);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyan-950/40 rounded-lg transition-colors"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                              <span>View Dossier</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setActiveKebabId(null);
+                                navigate(`/worker/export/${report.id}`);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyan-950/40 rounded-lg transition-colors"
+                            >
+                              <Download className="w-3.5 h-3.5 text-[#FFA726]" />
+                              <span>Official Export</span>
+                            </button>
+                            <div className="my-1 border-t border-slate-800" />
+                            <button
+                              onClick={() => {
+                                setActiveKebabId(null);
+                                deleteReport(report.id);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Delete Report</span>
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </motion.tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

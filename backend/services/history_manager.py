@@ -31,13 +31,17 @@ def _atomic_write_json(file_path: Path, data: Any) -> None:
 
 
 def get_history(search: Optional[str] = None, auditor_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Retrieves all generated reports with optional keyword search filtering."""
+    """Retrieves all generated reports (Draft, Pending, Approved, Rejected) with optional keyword search filtering."""
     if not HISTORY_FILE.exists():
         return []
     try:
         items = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
     except Exception:
         items = []
+
+    for item in items:
+        if "status" not in item:
+            item["status"] = "Draft"
 
     if auditor_id:
         items = [i for i in items if i.get("auditor_id", "").lower() == auditor_id.lower()]
@@ -46,12 +50,32 @@ def get_history(search: Optional[str] = None, auditor_id: Optional[str] = None) 
         q = search.strip().lower()
         filtered = []
         for i in items:
-            searchable_text = f"{i.get('title', '')} {i.get('template_name', '')} {i.get('template', '')} {i.get('id', '')} {i.get('job_id', '')} {i.get('summary_snippet', '')}".lower()
+            searchable_text = f"{i.get('title', '')} {i.get('template_name', '')} {i.get('template', '')} {i.get('id', '')} {i.get('job_id', '')} {i.get('summary_snippet', '')} {i.get('status', '')}".lower()
             if q in searchable_text:
                 filtered.append(i)
         return filtered
 
     return items
+
+
+def update_report_status(report_id_or_job_id: str, new_status: str) -> bool:
+    """Updates the status of a report in the persistent history log."""
+    if not HISTORY_FILE.exists():
+        return False
+    try:
+        history = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        updated = False
+        target = str(report_id_or_job_id).lower()
+        for item in history:
+            if str(item.get("id", "")).lower() == target or str(item.get("job_id", "")).lower() == target:
+                item["status"] = new_status
+                updated = True
+        if updated:
+            _atomic_write_json(HISTORY_FILE, history)
+        return updated
+    except Exception as e:
+        logger.warning(f"Failed to update report status in history: {e}")
+        return False
 
 
 def record_report(
@@ -63,13 +87,14 @@ def record_report(
     auditor_id: str = "MOC-7890",
     records_count: int = 18,
     summary_snippet: str = "",
-    job_id: Optional[str] = None
+    job_id: Optional[str] = None,
+    status: str = "Draft"
 ) -> Dict[str, Any]:
     """Records a newly generated report in the persistent history log."""
     history = get_history()
 
     # Deduplicate existing report_id if re-recording
-    history = [h for h in history if h.get("id") != report_id]
+    history = [h for h in history if h.get("id") != report_id and h.get("job_id") != (job_id or report_id)]
 
     effective_job_id = job_id or report_id
 
@@ -81,6 +106,7 @@ def record_report(
         "template_name": template_name,
         "theme": theme,
         "auditor_id": auditor_id,
+        "status": status,
         "timestamp": datetime.now().strftime("%d %b %Y, %I:%M %p"),
         "records_count": records_count,
         "summary_snippet": summary_snippet[:180] + ("..." if len(summary_snippet) > 180 else ""),

@@ -495,16 +495,18 @@ class AgentCoordinator:
             from backend.services.history_manager import record_report
             record_report(
                 report_id=report_id,
-                title=plan.title,
-                template_id="corporate_dossier",
-                template_name="Corporate Dossier",
-                theme="mineintel_navy",
+                title=plan.title or 'Executive Report',
+                template_id='master_audit',
+                template_name='Master Field Audit',
+                theme='mineintel_navy',
+                auditor_id=self.owner_id,
                 records_count=len(state.evidence_references or []),
-                summary_snippet=(plan.sections[0].content_text or "")[:200],
-                job_id=task_id
+                summary_snippet='',
+                job_id=task_id,
+                status='Draft',
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f'History record failed: {e}')
 
         try:
             from backend.services.report_generator_store import save_report as store_save_report
@@ -1742,16 +1744,18 @@ class AgentCoordinator:
                 first_content = plan.sections[0].content_text if (plan.sections and plan.sections[0].content_text) else ""
                 record_report(
                     report_id=report_id,
-                    title=plan.title,
-                    template_id="corporate_dossier",
-                    template_name="Corporate Dossier",
-                    theme="mineintel_navy",
+                    title=plan.title or 'Executive Report',
+                    template_id='master_audit',
+                    template_name='Master Field Audit',
+                    theme='mineintel_navy',
+                    auditor_id=self.owner_id,
                     records_count=len(evidence_items),
                     summary_snippet=first_content[:200],
-                    job_id=task_id
+                    job_id=task_id,
+                    status='Draft',
                 )
-            except Exception as hist_err:
-                logger.warning(f"History registration notice: {hist_err}")
+            except Exception as e:
+                logger.warning(f'History record failed: {e}')
 
             # Register completed report in report_generator_store for /api/reports/{id} retrieval
             try:
@@ -1872,6 +1876,11 @@ class AgentCoordinator:
             "timestamp": now
         })
         update_task_state(state.model_dump())
+        try:
+            from backend.services.history_manager import update_report_status
+            update_report_status(task_id, "Approved")
+        except Exception:
+            pass
         logger.info(f"Task {task_id} APPROVED by reviewer {reviewer_id}")
         return state
 
@@ -1904,6 +1913,11 @@ class AgentCoordinator:
             "timestamp": now
         })
         update_task_state(state.model_dump())
+        try:
+            from backend.services.history_manager import update_report_status
+            update_report_status(task_id, "Rejected")
+        except Exception:
+            pass
         logger.info(f"Task {task_id} REJECTED by reviewer {reviewer_id} (count={state.rejection_count})")
         return state
 

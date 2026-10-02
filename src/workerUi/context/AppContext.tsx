@@ -77,7 +77,7 @@ interface AppContextType {
   startGeneratingReport: () => Promise<void>;
   cancelProcessing: () => void;
   deleteReport: (id: string) => void;
-  submitForReview: (reportId: string) => Promise<void>;
+  submitForReview: (reportId: string) => Promise<boolean>;
   refreshReportsFromServer: () => Promise<void>;
   refreshFilesFromServer: () => Promise<void>;
   updateReportMarkdown: (id: string, newMarkdown: string) => void;
@@ -324,9 +324,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const refreshReportsFromServer = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/reports/history`, {
-        headers: getAuthHeaders(),
-      });
+      const token = authService.getToken();
+      const url = `${API_BASE}/api/reports/history${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+      const res = await fetch(url, { headers: getAuthHeaders() });
       if (!res.ok) {
         console.warn('Report history fetch failed:', res.status);
         return;
@@ -353,6 +353,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           markdownContent: r.markdown_content || r.md_content || '',
         };
       });
+      console.debug(
+        '[refreshReportsFromServer] fetched',
+        history.length,
+        'records for user',
+        authService.getCurrentUser()?.id
+      );
       setReports(mapped);
     } catch (err) {
       console.warn('refreshReportsFromServer error:', err);
@@ -524,22 +530,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const submitForReview = async (reportId: string) => {
+  const submitForReview = async (reportId: string): Promise<boolean> => {
     try {
-      const res = await fetch(`${API_BASE}/api/agent/tasks/${reportId}/submit-for-review`, {
+      const res = await fetch(`${API_BASE}/api/agent/tasks/${encodeURIComponent(reportId)}/submit-for-review`, {
         method: 'POST',
         headers: getAuthHeaders(),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Submit failed');
+        throw new Error(err.detail || `Submit failed (${res.status})`);
       }
       setReports((prev) =>
         prev.map((r) => (r.id === reportId ? { ...r, status: 'Pending' } : r))
       );
-      showToast('Submitted for Review', 'Report sent to master console.', 'success');
+      showToast('Submitted for Approval', 'Master console will review shortly.', 'success');
+      return true;
     } catch (err: any) {
-      showToast('Submit Error', err.message, 'error');
+      showToast('Submit Failed', err.message, 'error');
+      return false;
     }
   };
 

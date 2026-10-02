@@ -249,11 +249,26 @@ def submit_task_for_review(
     Only the task creator can submit their own task."""
     raw = get_task_any_owner(task_id)
     if not raw:
+        from backend.services.agent.agent_store import _get_pg_connection, _row_to_task_dict
+        try:
+            with _get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT task_id, owner_id, status, structured_state, evidence_references, conflict_logs, execution_history, created_at, updated_at,
+                               created_by, submitted_for_review_at, reviewed_by, reviewed_at, rejection_reason, rejection_count
+                        FROM mineintel_agent_state WHERE structured_state->>'report_id' = %s LIMIT 1;
+                    """, (task_id,))
+                    row = cur.fetchone()
+                    if row:
+                        raw = _row_to_task_dict(row)
+        except Exception:
+            pass
+    if not raw:
         raise HTTPException(status_code=404, detail="Task not found.")
     state = AgentTaskState(**raw)
     if state.owner_id != auth["officer_id"]:
         raise HTTPException(status_code=403, detail="Not your task.")
-    if state.status != AgentTaskStatus.COMPLETED:
+    if state.status != AgentTaskStatus.COMPLETED and state.status != AgentTaskStatus.DRAFT:
         raise HTTPException(
             status_code=400,
             detail=f"Only COMPLETED tasks can be submitted. Current: {state.status.value}"
@@ -268,5 +283,13 @@ def submit_task_for_review(
         "by": auth["officer_id"], "timestamp": now
     })
     update_task_state(state.model_dump())
-    return {"success": True, "task_id": task_id, "status": "PENDING_REVIEW"}
+    try:
+        from backend.services.history_manager import update_report_status
+        update_report_status(task_id, "Pending")
+        if state.task_id != task_id:
+            update_report_status(state.task_id, "Pending")
+    except Exception:
+        pass
+    return {"success": True, "task_id": state.task_id, "status": "PENDING_REVIEW"}
+
 
