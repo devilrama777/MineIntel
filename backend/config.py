@@ -144,8 +144,27 @@ ALLOWED_EXTENSIONS: Set[str] = {".pdf", ".csv", ".tsv", ".txt", ".xlsx", ".xls",
 
 # Security & Authentication configurations
 # Production credentials are supplied ONLY through secure environment configuration
-_default_cors = "" if IS_VERCEL else "http://localhost:3000,http://127.0.0.1:3000"
-CORS_ORIGINS = [orig.strip() for orig in os.getenv("CORS_ORIGINS", _default_cors).split(",") if orig.strip()]
+_production_origins = (
+    "https://mine-intel-alpha.vercel.app,"
+    "https://mineintel.vercel.app,"
+    "https://mine-intel.vercel.app"
+)
+if IS_VERCEL:
+    _default_cors = _production_origins
+elif os.getenv("RENDER") or os.getenv("RENDER_EXTERNAL_URL"):
+    _default_cors = _production_origins + ",http://localhost:5173,http://127.0.0.1:5173"
+else:
+    _default_cors = _production_origins + ",http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173"
+
+_env_cors = os.getenv("CORS_ORIGINS", "").strip()
+if _env_cors:
+    # Merge env CORS with defaults (dedupe)
+    _env_list = [o.strip() for o in _env_cors.split(",") if o.strip()]
+    _default_list = [o.strip() for o in _default_cors.split(",") if o.strip()]
+    _merged = list(dict.fromkeys(_env_list + _default_list))
+    CORS_ORIGINS = _merged
+else:
+    CORS_ORIGINS = [o.strip() for o in _default_cors.split(",") if o.strip()]
 AUTH_OFFICER_ID = os.getenv("MINEINTEL_OFFICER_ID") or os.getenv("AUTH_OFFICER_ID", "")
 AUTH_SECRET_PASSWORD = os.getenv("MINEINTEL_AUTH_PASSWORD") or os.getenv("AUTH_SECRET_PASSWORD", "")
 JWT_SECRET = os.getenv("MINEINTEL_JWT_SECRET") or os.getenv("JWT_SECRET", "sih-mining-enclave-secret-key-2026-secure")

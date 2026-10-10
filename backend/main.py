@@ -135,6 +135,8 @@ app.add_middleware(
     allow_credentials=_allow_creds,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 # Register Modular Feature Routers
