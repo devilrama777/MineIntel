@@ -41,6 +41,9 @@ IS_VERCEL = bool(
     str(BASE_DIR).startswith("/var/task")
 )
 
+# Check for Render environment
+IS_RENDER = bool(os.getenv("RENDER") or os.getenv("RENDER_EXTERNAL_URL"))
+
 # --- Startup diagnostic (visible in Vercel function logs) ---
 import logging as _logging
 _startup_logger = _logging.getLogger("mineintel.config")
@@ -62,7 +65,7 @@ elif not (_officer_id_set and _auth_pw_set):
         "See .env.example for required variables."
     )
 
-if IS_VERCEL:
+if IS_VERCEL or IS_RENDER:
     WORK_DIR = Path("/tmp")
     DATA_DIR = WORK_DIR / "data"
     UPLOADS_DIR = WORK_DIR / "uploads"
