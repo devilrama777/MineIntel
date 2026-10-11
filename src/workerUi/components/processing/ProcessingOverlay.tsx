@@ -23,6 +23,7 @@ export const ProcessingOverlay: React.FC = () => {
   useEffect(() => {
     targetReportIdRef.current = targetReportId;
   }, [targetReportId]);
+
   const hasNavigatedRef = useRef(false);
   useEffect(() => {
     if (isProcessing) {
