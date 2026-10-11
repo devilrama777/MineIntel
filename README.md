@@ -1,177 +1,365 @@
-# 🏛️ MineIntel: Autonomous Enterprise Document Intelligence & Regulatory Dossier Engine
-### **Smart India Hackathon (SIH 2026) | Problem Statement: Automated Document Intelligence and Reporting**
+# 🏛️ MineIntel — AI-Powered Geological & Mining Report Intelligence
+### Ministry of Coal · Central Mine Planning & Design Institute (CMPDI) · Coal India Limited
 
-> **An enterprise-grade, deterministic document intelligence platform that transforms raw, uncurated operational telemetry into publication-grade, mathematically verified corporate dossiers with zero hallucinations and zero cloud data leakage.**
+> An autonomous, sovereign document intelligence platform that 
+> transforms raw operational documents into board-ready regulatory 
+> dossiers with cryptographic provenance and zero hallucination.
 
-[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![React](https://img.shields.io/badge/Frontend-React%2018%20%7C%20TypeScript-61DAFB.svg?logo=react&logoColor=black)](https://react.dev)
-[![Ollama](https://img.shields.io/badge/AI%20Inference-Local%20Ollama%20%28Qwen%202.5%207B%29-white.svg?logo=ollama&logoColor=black)](https://ollama.com)
-[![Security](https://img.shields.io/badge/Security-Local--First%20%7C%20Zero%20Data%20Egress-green.svg)](https://github.com)
-[![License](https://img.shields.io/badge/License-Proprietary%20%2F%20SIH%202026-blue.svg)](https://github.com)
-
----
-
-## ⚡ The Problem vs. The Solution
-
-### Why "Chat-Style AI" Fails for Regulatory Governance
-Conventional Large Language Model wrappers and conversational chat interfaces fail catastrophically in enterprise and governmental environments:
-- ❌ **Stochastic Hallucination:** Generative models invent numbers, colliery metrics, and operational dates when presented with dense tabular data.
-- ❌ **Arithmetic Incompetence:** Autoregressive language models cannot reliably calculate rolling averages, percentage shares, or compound growth rates.
-- ❌ **Context Window Thrashing & Amnesia:** Ingesting 200+ page technical manuals causes context degradation, omitting critical compliance violations.
-- ❌ **Sovereignty & Privacy Breaches:** Transmitting critical national infrastructure data, dispatch volumes, or financial ledgers to third-party public cloud APIs compromises data sovereignty.
-- ❌ **Non-Auditable Output:** Conversational assistants produce narrative prose without exact provenance, making post-audit verification impossible.
-
-### The MineIntel Solution: Deterministic Agent Architecture
-MineIntel completely replaces unpredictable conversational loops with a **10-Stage Code-Governed Deterministic State Machine**. In this architecture:
-- **Code governs workflow trajectory:** Execution flow, stage transitions, timeouts, and state persistence are strictly orchestrated by programmatic logic.
-- **AI provides bounded semantic reasoning:** Local, sovereign LLMs (`qwen2.5:7b`) are invoked strictly for semantic extraction and professional executive synthesis, constrained by immutable database evidence items.
-- **AST Mathematical Engine audits calculations:** All aggregations, fences, and totals are pre-calculated via Python Abstract Syntax Tree (AST) math engines prior to narrative generation.
-- **Universal Traceability:** Every factual statement cites an immutable evidence ID (`[EVD-FACT-...]`, `[EVD-CALC-...]`), establishing an unbreakable provenance chain back to the raw source file.
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI_0.115-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/Frontend-React_18_%7C_TypeScript-61DAFB.svg?logo=react&logoColor=black)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Bundler-Vite_6-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev)
+[![PostgreSQL](https://img.shields.io/badge/Database-Neon_PostgreSQL-4169E1.svg?logo=postgresql&logoColor=white)](https://neon.tech)
+[![Groq](https://img.shields.io/badge/AI_Cloud-Groq_Llama_3.3_70B-F55036.svg)](https://groq.com)
+[![Ollama](https://img.shields.io/badge/AI_Offline-Qwen_2.5_7B-white.svg?logo=ollama&logoColor=black)](https://ollama.com)
+[![License](https://img.shields.io/badge/License-SIH_2026_Enterprise-0A2540.svg)](https://github.com)
 
 ---
 
-## 🏛️ Core Technical Pillars
+**Live Deployments**
+| Service | URL | Platform |
+|---------|-----|----------|
+| Frontend | https://mine-intel-alpha.vercel.app | Vercel |
+| Backend API | https://mineintel-q0z7.onrender.com | Render |
+| Health Check | https://mineintel-q0z7.onrender.com/api/health | Render |
+
+**Demo Credentials**
+| Role | Username | Password |
+|------|----------|----------|
+| Worker (Field Officer) | `mine_analyst` | `<your-worker-password>` |
+| Master (Senior Officer) | `MASTER-001` | `<your-master-password>` |
+| Master Login (Alt) | `mine_analyst` | `<your-master-password>` |
+
+⚠️ These are demo credentials for the hackathon prototype only. Change 
+them in production via Render environment variables.
+
+---
+
+## 📸 Screenshots
+
+### Login
+![Login](assets/screenshots/login.png)
+
+### Worker Dashboard
+![Worker Dashboard](assets/screenshots/worker-dashboard.png)
+
+### New Report (Template Selection)
+![New Report](assets/screenshots/new-report.png)
+
+### AI Processing Pipeline
+![Processing](assets/screenshots/processing.png)
+
+### Report Preview (PDF)
+![Preview](assets/screenshots/preview.png)
+
+### Master Approval Console
+![Master Approvals](assets/screenshots/master-approvals.png)
+
+---
+
+## 🎯 What It Does
+
+MineIntel solves three problems for CIL/CMPDI:
+
+1. **Document Intelligence** — Extracts structured facts from PDFs, 
+   DOCX, XLSX, CSV, and scanned images with cryptographic provenance 
+   (SHA-256 + byte offsets + bounding boxes).
+2. **Regulatory Report Generation** — Uses a 10-stage deterministic 
+   agent + Groq cloud LLM (or local Qwen 2.5) to synthesize statutory 
+   dossiers grounded in extracted evidence.
+3. **Approval Workflow** — Workers generate → submit for review → 
+   Senior Officers approve/reject → status syncs both UIs in real time.
+
+---
+
+## 🏛️ Architecture
 
 ```
- ┌────────────────────────────────────────────────────────────────────────┐
- │                      MINEINTEL CORE ARCHITECTURE                       │
- └───────────────────────────────────┬────────────────────────────────────┘
-                                     │
-     ┌───────────────────────────────┼───────────────────────────────┐
-     │                               │                               │
-     ▼                               ▼                               ▼
-┌──────────────┐            ┌──────────────────┐            ┌─────────────────┐
-│ PERSISTENCE  │            │   PERFORMANCE    │            │    PRECISION    │
-│ SQLite / WAL │            │ Bounded Asyncio  │            │ Deterministic   │
-│ Evidence DB  │            │ Concurrency Loop │            │ Evidence Proof  │
-└──────────────┘            └──────────────────┘            └─────────────────┘
-                                     │
-                                     ▼
-                            ┌──────────────────┐
-                            │   PRESENTATION   │
-                            │ Corporate Dossier│
-                            │ 300-DPI PDF/DOCX │
-                            └──────────────────┘
+                                ┌──────────────────────────────────────────────┐
+                                │          MINEINTEL ARCHITECTURE              │
+                                └──────────────────────┬───────────────────────┘
+                                                       │
+                      ┌────────────────────────────────┴───────────────────────────────┐
+                      │                                                                │
+                      ▼                                                                ▼
+         ┌──────────────────────────┐                                     ┌──────────────────────────┐
+         │     WORKER WORKSTATION   │                                     │     MASTER CONSOLE       │
+         │  (Field Officers & Eng.) │                                     │  (Senior Officers / DG)  │
+         │   /worker/dashboard      │                                     │     /master/dashboard    │
+         └────────────┬─────────────┘                                     └────────────┬─────────────┘
+                      │                                                                │
+                      └───────────────────────────────┬────────────────────────────────┘
+                                                      │ HTTPS / JSON REST
+                                                      ▼
+                                       ┌─────────────────────────────┐
+                                       │   REACT FRONTEND (Vercel)   │
+                                       │ React 18, TypeScript, Vite, │
+                                       │ Motion, Recharts, Tailwind  │
+                                       └──────────────┬──────────────┘
+                                                      │ HTTPS API Requests
+                                                      │ HMAC Session Tokens + Nonces
+                                                      ▼
+                                       ┌─────────────────────────────┐
+                                       │   FASTAPI BACKEND (Render)  │
+                                       │ Python 3.11, Pydantic v2,   │
+                                       │ Uvicorn, SQLAlchemy ORM     │
+                                       └──────────────┬──────────────┘
+                                                      │
+         ┌────────────────────────────────────────────┼────────────────────────────────────────────┐
+         │                                            │                                            │
+         ▼                                            ▼                                            ▼
+┌──────────────────────────┐             ┌──────────────────────────┐             ┌──────────────────────────┐
+│   EVIDENCE INGESTION     │             │   DETERMINISTIC AGENT    │             │   DOSSIER SYNTHESIS      │
+│ • pdfplumber & pypdf     │             │ • 10-Stage State Machine │             │ • ReportLab (300-DPI PDF)│
+│ • python-docx & openpyxl │             │ • AST Math Engine        │             │ • python-docx (Word)     │
+│ • Tesseract OCR & Pillow │             │ • Structured Error Traps │             │ • Matplotlib Charts      │
+│ • SHA-256 Hash Auditing  │             │ • Section Semaphore Pool │             │ • Markdown Artifacts     │
+└────────────┬─────────────┘             └────────────┬─────────────┘             └────────────┬─────────────┘
+             │                                        │                                        │
+             └────────────────────────────────────────┼────────────────────────────────────────┘
+                                                      │
+                                                      ▼
+                       ┌──────────────────────────────────────────────────────────────┐
+                       │                   AI REASONING DISPATCHER                    │
+                       ├──────────────────────────────┬───────────────────────────────┤
+                       │  PRIMARY (Cloud Deployment)  │  SOVEREIGN FALLBACK (Offline) │
+                       │          Groq Cloud          │          Local Ollama         │
+                       │   llama-3.3-70b-versatile    │         qwen2.5:7b            │
+                       │     openai/gpt-oss-20b       │        qwen2.5vl:7b           │
+                       └──────────────────────────────┴───────────────────────────────┘
+                                                      │
+                                                      ▼
+                       ┌──────────────────────────────────────────────────────────────┐
+                       │                  PERSISTENCE & PROVENANCE                    │
+                       ├──────────────────────────────┬───────────────────────────────┤
+                       │      Neon PostgreSQL         │        SQLite WAL Mode        │
+                       │   (Serverless Production)    │       (Local Dev Fallback)    │
+                       │ • Evidence Store (SHA-256)   │ • atomic user store           │
+                       │ • Agent Task State & JSONB   │ • local documents table       │
+                       │ • User Sessions & RBAC       │ • metrics.db audit log        │
+                       └──────────────────────────────┴───────────────────────────────┘
 ```
 
-### 1. 🗄️ Persistence: SQLite-Backed Evidence Repository
-- **Atomic Evidence Storage:** Raw files (CSV, XLSX, PDF, TXT) are shredded into immutable atomic evidence records stored in a Write-Ahead Logging (WAL) SQLite repository (with optional enterprise Neon PostgreSQL support).
-- **Cryptographic Provenance:** Every evidence item records source filename, file SHA-256 hash, byte offsets, table coordinates, and extraction timestamps.
-- **UUID Directory Isolation:** Every workflow run is assigned a cryptographically random `uuid.uuid4()` identifier, isolating all intermediate markdown artifacts, chart renders, and final dossiers in dedicated sandboxed directories (`outputs/{job_id}/`).
+### The 10-Stage Deterministic Agent Pipeline
 
-### 2. ⚡ Performance: Asyncio Parallel Synthesis
-- **Non-Blocking Orchestration:** The synthesis engine wraps CPU-bound and synchronous Ollama inference in `asyncio.to_thread` workers, allowing high-throughput concurrent section drafting.
-- **Semaphore-Governed Queue Control:** Concurrency is bounded to prevent local GPU/CPU hardware thrashing while maintaining a strict 120-second per-section execution budget.
-- **Dynamic Heartbeat & Watchdogs:** Real-time state machine tracks active and completed sections with sub-second heartbeats, completely eliminating hung states or thread starvation.
+Rather than relying on unbounded conversational loops, MineIntel enforces strict code governance over workflow transitions. Every report compilation progresses through 10 deterministic gates:
 
-### 3. 🎯 Precision: Zero-Hallucination Grounding
-- **Mandatory Citation Anchoring:** Prompts dynamically inject verified database evidence items and chunk summaries into Qwen's attention context. The model is forbidden from introducing outside figures.
-- **Deterministic Math Engine:** Aggregations (sums, averages, IQR outlier fences, dispatch ratios) are computed programmatically and injected as verified facts.
-- **Stage 8 Data Integrity Gate:** Before report compilation, an automated validation gate inspects all planned sections. Any empty content or missing evidence citations halts progression immediately with deterministic error codes.
-
-### 4. 📊 Presentation: Publication-Grade Corporate Dossier
-- **Dual-Pass Canvas Compilation:** Leverages ReportLab's `NumberedReportCanvas` to pre-calculate total document pages, rendering authoritative `"Page X of Y"` footers, dynamic running headers, and security classifications.
-- **Executive Aesthetic Palette:** Styled with a bespoke Deep Navy (`#002147`), Slate Grey (`#708090`), and Accent Gold (`#D4AF37`) corporate design system.
-- **Multi-Format Parity:** Produces simultaneous pixel-perfect PDF dossiers, editable Microsoft Word (`.docx`) files, structured data tables, and GitHub-flavored Markdown.
+```
+[1. LOAD_MANIFEST]
+       │  Validates uploaded file manifest, mime types, file sizes, and access permissions.
+       ▼
+[2. VERIFY_INGESTION]
+       │  Confirms document extraction, coordinates, text offsets, and cell tables.
+       ▼
+[3. EVIDENCE_ANALYSIS]
+       │  Computes SHA-256 checksums, shreds facts, tags entities, and isolates colliery telemetry.
+       ▼
+[4. INTELLIGENCE_ANALYSIS]
+       │  Resolves chronological timelines, detects metric conflicts, and clusters mining topics.
+       ▼
+[5. CHART_ANALYSIS]
+       │  Identifies numerical trends, selects optimal chart templates, and renders vector figures.
+       ▼
+[6. PLANNING]
+       │  Builds statutory report outline, maps required sections to relevant evidence items.
+       ▼
+[7. VALIDATE_PLAN]
+       │  Verifies completeness of planned outline against mandatory CIL/CMPDI statutory standards.
+       ▼
+[8. WRITING]
+       │  Executes semaphore-bounded parallel drafting via Groq/Qwen with strict evidence anchoring.
+       ▼
+[9. VALIDATE_REPORT_DATA]
+       │  Integrity gate: Audits calculations via AST Math Engine and enforces evidence citations.
+       ▼
+[10. COMPILE_MARKDOWN_ARTIFACT]
+       │  Assembles unified markdown dossier, injects dynamic vector figures and data tables.
+       ▼
+[VERIFY_ARTIFACT]
+       │  Validates generated dossier against length, formatting, and mathematical consistency.
+       ▼
+  COMPLETED ──► Generated PDF (ReportLab) & Word (.docx) Dossiers Ready for Review
+```
 
 ---
 
 ## 💻 Tech Stack
 
 | Layer | Technologies | Purpose & Architecture Highlights |
-| :--- | :--- | :--- |
-| **Frontend** | React 18, TypeScript, Vite, TailwindCSS, Lucide Icons | Reactive single-page executive workstation; features 60 FPS live processing funnels, interactive document previewers, and split-pane report editor. |
-| **Backend** | Python 3.10+, FastAPI, Pydantic v2, SQLAlchemy, Uvicorn | Asynchronous high-performance REST API with dependency injection, strict schema validation, and structured error handling. |
-| **Deterministic AI** | Ollama, Qwen 2.5 7B (`qwen2.5:7b`) | 100% on-premises, local-first neural reasoning engine; zero telemetry transmission, zero external API keys required. |
-| **Data & Persistence** | SQLite 3 (WAL Mode), SQLAlchemy ORM | ACID-compliant transactional persistence for task states, user sessions, evidence records, and versioned report revisions. |
-| **Document Engine** | ReportLab 4.x, python-docx, openpyxl, Matplotlib | High-DPI Flowable PDF rendering engine with custom coordinate canvases, Word styling pipelines, and vector charts. |
-| **Security** | PyJWT, Passlib (Bcrypt), Cryptographic Nonces | Sovereign JWT authentication, cryptographically signed session cookies, dynamic SVG captcha verification, and role-based access control. |
+|:------|:-------------|:----------------------------------|
+| **Frontend** | React 18, TypeScript, Vite, TailwindCSS, Motion, Recharts, React Router, Lucide Icons | High-performance dual-role UI (Worker Workstation + Master Console), 60 FPS particle funnel processing visualizer, live status polling, interactive PDF/report preview, responsive dashboards. |
+| **Backend** | Python 3.11, FastAPI, SQLAlchemy, Pydantic v2, Uvicorn | High-throughput asynchronous REST API, dependency injection, strict schema validation, modular feature routers (`auth`, `ingest`, `agent`, `metrics`, `admin`, `settings`). |
+| **Database** | Neon PostgreSQL (serverless), SQLite (local fallback) | ACID-compliant persistent storage with JSONB state columns, connection pooling with SSL enforcement, atomic evidence records, and user session management. |
+| **AI Inference** | Groq Cloud (`llama-3.3-70b-versatile` / `openai/gpt-oss-20b`) · Local Ollama (`qwen2.5:7b` / `qwen2.5vl:7b`) | Sub-second ultra-fast cloud inference on Groq for live deployments; air-gapped sovereign fallback with local Ollama for zero-cloud data egress in secure mining colliery enclaves. |
+| **Document Processing** | pdfplumber, pypdf, python-docx, openpyxl, Pillow, Tesseract OCR | Comprehensive multi-format extraction engine handling scanned geological maps, dense Excel dispatch logs, Word templates, and technical reports with exact coordinate and byte offsets. |
+| **Report Generation** | ReportLab 4.x (PDF), python-docx (Word), Matplotlib | Dual-pass canvas PDF compiler with dynamic `"Page X of Y"` footers, corporate Gold & Deep Navy palette, confidential watermarks, editable Word documents, and publication-grade charts. |
+| **Auth & Security** | HMAC-signed session tokens, PBKDF2/bcrypt hashing, SVG CAPTCHA challenge | Cryptographic session tokens, per-user salted password hashing (100,000 rounds), procedural SVG CAPTCHA with bezier curves and noise interference to eliminate automated bot assaults. |
 
 ---
 
-## 🔄 The End-to-End Workflow
-
-```
-[ Upload ] ───► [ Ingest & Shred ] ───► [ Autonomous Coordinator ] ───► [ Executive Review ] ───► [ Export ]
-  Raw Files       • Schema Detect        • Chunk Summarization             • Version Diff           • 300 DPI PDF
-  (CSV/XLSX/PDF)  • AST Math Audit       • Chart Synthesis                 • Section Polish         • Word DOCX
-                  • SQLite Storage       • Parallel Qwen Drafting          • Audit Provenance       • Markdown
-```
-
-1. **Upload:** User uploads uncurated colliery spreadsheets, atmospheric safety logs, or operational PDFs through the drag-and-drop workspace.
-2. **Ingest & Shred:** The unified ingestion engine normalizes tabular structures, extracts cell-level coordinates, executes AST mathematical validation, and writes immutable records to the SQLite evidence store.
-3. **Autonomous Coordinator:** The `AgentCoordinator` advances through 10 deterministic stages:
-   - `LOAD_MANIFEST` $\rightarrow$ `VERIFY_INGESTION` $\rightarrow$ `EVIDENCE_ANALYSIS`
-   - `INTELLIGENCE_ANALYSIS` (Chronology, Conflicts, Topic Clustering)
-   - `CHART_ANALYSIS` (Statistical detection & Matplotlib rendering)
-   - `PLANNING` & `VALIDATE_PLAN` (Dynamic topic-driven outline generation)
-   - `WRITING` (Semaphore-bounded parallel synthesis via local Qwen 2.5)
-   - `VALIDATE_REPORT_DATA` (Integrity & factual citation audit gate)
-   - `COMPILE_MARKDOWN_ARTIFACT` & `VERIFY_ARTIFACT`
-4. **Executive Review:** Users inspect the generated dossier in the split-view Report Editor, modify section narratives, review evidence citations, or restore historical revisions.
-5. **Export:** Generates board-ready Corporate Dossier PDFs with dedicated cover pages, confidential watermarks, and synchronized DOCX documents.
-
----
-
-## 🚀 Quick Start Guide
+## 🚀 Local Development
 
 ### Prerequisites
-- Python 3.10+ (tested up to Python 3.14 on Linux/macOS/Windows)
-- Node.js 18+ and `npm`
-- [Ollama](https://ollama.com) installed and running locally
+- **Python 3.11+** installed
+- **Node.js 18+** & `npm`
+- **Tesseract OCR** (optional, for scanned images/OCR)
+- **Ollama** (optional, for local offline AI mode)
 
-### 1. AI Engine Setup (Local Ollama)
+---
+
+### Backend Setup
+
 ```bash
-# Start Ollama service
-ollama serve
-
-# In a separate terminal, pull the recommended 7B parameter reasoning model
-ollama pull qwen2.5:7b
-```
-
-### 2. Backend Setup (FastAPI)
-```bash
-# Navigate to project root
-cd SIH_ps_2_test_1
-
-# Create and activate virtual environment
+# 1. Create and activate a virtual environment
 python -m venv venv
-# On Windows:
-.\venv\Scripts\activate
-# On Linux/macOS:
-source venv/bin/activate
+venv\Scripts\activate  # Windows (or: source venv/bin/activate on Linux/macOS)
 
-# Install required production dependencies
+# 2. Install Python dependencies
 pip install -r requirements.txt
 
-# Start the FastAPI backend server
+# 3. Configure environment variables
+copy .env.example .env
+
+# Edit .env with your DATABASE_URL and GROQ_API_KEY
+# 4. Start the FastAPI development server
 uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### 3. Frontend Setup (React & Vite)
+The backend API will be live at `http://127.0.0.1:8000` with interactive Swagger docs at `http://127.0.0.1:8000/docs`.
+
+---
+
+### Frontend Setup
+
+In a separate terminal:
+
 ```bash
-# Open a new terminal in the project root
+# 1. Install frontend dependencies
 npm install
 
-# Start the local development server
+# 2. Start Vite development server
 npm run dev
 ```
 
-Open **[http://localhost:5173](http://localhost:5173)** in your browser to access the MineIntel Executive Workstation.
+Open `http://localhost:5173` in your browser to launch the MineIntel Portal.
 
 ---
 
-## 🔒 Security & Data Sovereignty
+### AI Configuration: Switching Between Groq and Ollama
 
-- 🛡️ **Zero Cloud Leakage:** In accordance with governmental compliance standards, all AI processing runs strictly inside your local execution environment via local Ollama. No data ever leaves the sovereign perimeter.
-- 🔑 **Cryptographic Authentication:** Full JWT-based bearer token authentication with secure HTTP-only cookies, password salted hashing via bcrypt, and strict officer session isolation.
-- 🧩 **Brute-Force & Bot Defense:** Built-in dynamic SVG captcha challenge engine with cryptographic noise, bezier curve interference, and timed nonce verification.
-- 🧹 **Air-Gapped Operation:** Designed to operate in completely isolated, air-gapped intranet deployments across regional colliery headquarters and ministerial data centers.
+MineIntel supports seamless switching between Cloud (Groq) and Local Sovereign (Ollama) inference via `.env`:
+
+#### Option A: Groq Cloud (Recommended for Speed & Vercel/Render Deployments)
+```env
+MINEINTEL_AI_PROVIDER=groq
+GROQ_API_KEY=your_groq_api_key_here
+GROQ_MODEL=llama-3.3-70b-versatile
+```
+
+#### Option B: Local Sovereign Ollama (100% Offline / Zero Data Egress)
+```env
+MINEINTEL_AI_PROVIDER=local_ollama
+OLLAMA_HOST=http://localhost:11434
+MINEINTEL_LOCAL_MODEL=qwen2.5:7b
+MINEINTEL_LOCAL_VL_MODEL=qwen2.5vl:7b
+```
+
+To pull the local models in Ollama:
+```bash
+ollama serve
+ollama pull qwen2.5:7b
+ollama pull qwen2.5vl:7b
+```
 
 ---
 
-## 👥 Authors & Recognition
-- **Team:** MineIntel Engineering Group
-- **Event:** Smart India Hackathon (SIH 2026)
-- **Ministry:** Ministry of Coal, Government of India
-- **Problem Statement:** AI Document Intelligence & Automated Systematic Reporting
+## 📁 Repository Structure
+
+```
+MineIntel/
+├── assets/
+│   └── screenshots/              # UI walkthrough screenshots
+├── backend/
+│   ├── main.py                   # FastAPI application root & API router registry
+│   ├── config.py                 # Central configuration & environment loader
+│   ├── database.py               # SQLAlchemy models (Document, Neon/SQLite)
+│   ├── auth_store.py             # Sovereign PBKDF2/bcrypt user store & RBAC
+│   ├── routers/
+│   │   ├── auth.py               # Authentication, CAPTCHA, sessions, profiles
+│   │   ├── ingest.py             # Multi-format document upload & shredding
+│   │   ├── agent.py              # 10-stage deterministic agent orchestration
+│   │   ├── metrics.py            # Operational telemetry & system analytics
+│   │   ├── admin.py              # Officer administration & system oversight
+│   │   └── settings.py           # Runtime preferences & provider toggles
+│   └── services/
+│       ├── agent/                # AgentCoordinator, models, validators, tools
+│       ├── ai_providers/         # Groq Cloud & Local Ollama provider adapters
+│       ├── ingestion_service.py  # Ingestion shredder (PDF, DOCX, XLSX, CSV, OCR)
+│       ├── evidence_store.py     # SHA-256 evidence indexing & search
+│       ├── math_engine.py        # Python AST mathematical verification engine
+│       ├── chart_service.py      # Statistical detection & Matplotlib rendering
+│       ├── document_generator.py # ReportLab 300-DPI PDF & Word (.docx) compiler
+│       └── report_editor_service.py # Revision tracking, diffs, & section editing
+├── src/
+│   ├── App.tsx                   # Top-level routing & role-based dispatch
+│   ├── index.css                 # TailwindCSS design system & animations
+│   ├── shared/                   # Shared authentication, context, & UI primitives
+│   │   ├── components/           # LoginView, CAPTCHA inputs, AnimatedCursor
+│   │   ├── context/              # AuthContext (JWT/HMAC session management)
+│   │   └── services/             # API client & auth communication
+│   ├── workerUi/                 # Field Officer Workstation
+│   │   ├── WorkerApp.tsx         # Worker layout & sub-routes
+│   │   ├── pages/                # Dashboard, DataSource, NewReport, MyReports,
+│   │   │                         # ReportPreview, ReportExport, Profile, Settings
+│   │   └── components/           # ProcessingOverlay, ReportTemplatesSection
+│   └── masterUi/                 # Senior Officer Master Console
+│       ├── MasterApp.tsx         # Master layout & sub-routes
+│       ├── pages/                # DashboardPage, ApprovalsPage, ReportsPage,
+│       │                         # AIInsightsPage, MineExplorerPage, WorkersPage,
+│       │                         # TopicIntelligencePage, SystemHealthPage
+│       └── components/           # Topbar, Sidebar, DocumentViewerModal
+├── Dockerfile                    # Container definition for on-premise backend
+├── docker-compose.yml            # Multi-service stack (Backend + Ollama)
+├── requirements.txt              # Production Python dependencies
+├── package.json                  # React & Vite frontend dependencies
+└── README.md                     # Platform documentation
+```
+
+---
+
+## 📡 Key API Endpoints
+
+| Category | Method & Path | Description |
+|:---------|:--------------|:------------|
+| **System** | `GET /api/health` | Overall platform health & database connectivity |
+| **System** | `GET /api/health/live` | Container liveness checkpoint |
+| **System** | `GET /api/health/ready` | Readiness verification (DB, AI Provider, Models) |
+| **Auth** | `GET /api/auth/captcha` | Procedural SVG CAPTCHA challenge generation |
+| **Auth** | `POST /api/auth/login` | Officer authentication & HMAC session issuance |
+| **Auth** | `GET /api/auth/verify` | Active session verification and role introspection |
+| **Ingest** | `POST /api/ingest/upload` | Multipart file upload (PDF/DOCX/XLSX/CSV/Images) |
+| **Ingest** | `GET /api/ingest/jobs` | Ingestion job manifests & extracted evidence facts |
+| **Agent** | `POST /api/agent/tasks` | Launch 10-stage autonomous report generation |
+| **Agent** | `GET /api/agent/tasks/{id}`| Poll real-time progress, stage name, & heartbeats |
+| **Reports** | `GET /api/reports/{id}/pdf` | Stream 300-DPI publication-grade PDF dossier |
+| **Reports** | `GET /api/reports/{id}/docx`| Download editable Word (.docx) document |
+| **Approvals** | `POST /api/agent/tasks/{id}/review` | Master Officer review action (Approve / Reject) |
+
+---
+
+## 🔒 Security & Sovereign Governance
+
+- **Zero Hallucination Guarantee:** The LLM is strictly constrained to synthesize narratives based on pre-extracted database evidence records (`[EVD-FACT-...]`, `[EVD-CALC-...]`).
+- **AST Mathematical Integrity:** All sums, moving averages, standard deviations, and ratio fences are computed programmatically via Python Abstract Syntax Tree (AST) math algorithms before writing begins.
+- **Cryptographic Provenance:** Every evidence record tracks source filename, SHA-256 digest, byte offset, cell coordinate, and extraction timestamp.
+- **Role-Based Access Control (RBAC):** Strict separation between Worker (generation & submission) and Master (regulatory review, approval, rejection, and officer user administration).
+- **Brute-Force & Bot Defense:** Procedural SVG CAPTCHA with bezier curve interference, dynamic cryptographic noise, and single-use challenge nonces.
+- **Air-Gapped Sovereign Readiness:** Built to execute 100% offline inside private colliery local area networks using local Ollama (`qwen2.5:7b`).
+
+---
+
+## 👥 Smart India Hackathon (SIH 2026)
+
+- **Organization:** Ministry of Coal, Government of India
+- **Partner Enterprise:** Coal India Limited (CIL) & Central Mine Planning & Design Institute (CMPDI)
+- **Problem Statement:** AI-Powered Automated Document Intelligence and Regulatory Reporting
+- **Engineering Team:** MineIntel Core Engineering Group
