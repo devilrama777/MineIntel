@@ -20,14 +20,12 @@
 |---------|-----|----------|
 | Frontend | https://mine-intel-alpha.vercel.app | Vercel |
 | Backend API | https://mineintel-q0z7.onrender.com | Render |
-| Health Check | https://mineintel-q0z7.onrender.com/api/health | Render |
 
 **Demo Credentials**
 | Role | Username | Password |
 |------|----------|----------|
-| Worker (Field Officer) | `mine_analyst` | `<your-worker-password>` |
-| Master (Senior Officer) | `MASTER-001` | `<your-master-password>` |
-| Master Login (Alt) | `mine_analyst` | `<your-master-password>` |
+| Worker (Field Officer) | `mine_analyst` | `123456` |
+| Master (Senior Officer) | `MOC-TEST-OFFICER-7890` | `Enclave@Auth#2026` |
 
 ⚠️ These are demo credentials for the hackathon prototype only. Change 
 them in production via Render environment variables.
