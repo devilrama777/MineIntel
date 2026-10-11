@@ -156,7 +156,16 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* Quick action buttons */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {reports.length > 0 && (
+            <button
+              onClick={() => navigate(`/worker/preview/${reports[0].id}`)}
+              className="btn-action flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-xl bg-slate-900 border border-[#00D9FF]/40 text-[#00D9FF] hover:bg-slate-800"
+            >
+              <Eye className="w-4 h-4" />
+              <span>Preview Latest</span>
+            </button>
+          )}
           <button
             onClick={() => navigate('/worker/new-report')}
             className="w-full sm:w-auto btn-action shine-sweep flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 text-xs sm:text-sm font-semibold rounded-xl bg-gradient-to-r from-[#00D9FF] to-blue-600 text-slate-950 hover:brightness-110 shadow-[0_0_20px_rgba(0,217,255,0.25)]"

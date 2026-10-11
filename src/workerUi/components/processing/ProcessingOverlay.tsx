@@ -30,7 +30,7 @@ export const ProcessingOverlay: React.FC = () => {
     }
   }, [isProcessing]);
 
-   // Navigate when 100% is reached (ONCE PER GENERATION)
+  // Navigate when 100% is reached (ONCE PER GENERATION)
   useEffect(() => {
     if (progress >= 100 && targetReportId && !hasNavigatedRef.current) {
       hasNavigatedRef.current = true;
