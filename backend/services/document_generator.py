@@ -519,6 +519,7 @@ class DocumentGenerator:
         Takes a returned chart file path or chart dict and converts it into a proper
         Markdown image tag: ![Chart Description](URL_TO_STATIC_FOLDER).
         E.g., ![Production Output](/static/charts/CHART-123.png)
+        Suppresses placeholders and fallback errors by returning an empty string.
         """
         if not chart_or_path:
             return ""
@@ -527,7 +528,11 @@ class DocumentGenerator:
         file_path_str = ""
 
         if isinstance(chart_or_path, dict):
+            if chart_or_path.get("is_fallback") or not chart_or_path.get("success", True):
+                return ""
             cfg = chart_or_path.get("config") or {}
+            if cfg.get("is_valid") is False:
+                return ""
             desc = desc or cfg.get("title") or chart_or_path.get("title") or "Chart Visualization"
             file_path_str = (
                 chart_or_path.get("url")
@@ -536,6 +541,8 @@ class DocumentGenerator:
                 or ""
             )
         elif isinstance(chart_or_path, str):
+            if "CHART VISUALIZATION PLACEHOLDER" in chart_or_path or "CHART-ERR-" in chart_or_path or "placeholder" in chart_or_path.lower():
+                return ""
             file_path_str = chart_or_path
             if not desc:
                 desc = "Chart Visualization"
@@ -548,10 +555,12 @@ class DocumentGenerator:
             return ""
 
         desc_clean = re.sub(r'[\[\]]', '', str(desc)).strip() or "Chart Visualization"
+        if "PLACEHOLDER" in desc_clean.upper():
+            return ""
 
         p = Path(file_path_str)
         fname = p.name
-        if not fname:
+        if not fname or fname.startswith("CHART-ERR-"):
             return ""
 
         normalized = file_path_str.replace("\\", "/")

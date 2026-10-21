@@ -293,88 +293,19 @@ class ChartRenderer:
 
     def render_placeholder(
         self,
-        chart_id: str,
-        title: str,
+        chart_id: str = "",
+        title: str = "",
         subtitle: Optional[str] = None,
         error_message: Optional[str] = None,
         theme_name: str = "mineintel_dark"
     ) -> Tuple[str, str]:
         """
-        Renders a clean, high-DPI visual placeholder when automatic chart rendering encounters
+        Suppresses the visual placeholder when automatic chart rendering encounters
         missing columns or requires fallback representation.
-        Guarantees that a physical, valid PNG and SVG file are created on disk in static/charts/.
+        Returns empty strings so that no placeholder box is generated or injected.
         """
-        for d in (STATIC_CHARTS_DIR, OUTPUTS_CHARTS_DIR):
-            try:
-                d.mkdir(parents=True, exist_ok=True)
-            except OSError:
-                pass
-
-        theme = THEME_COLORS.get(theme_name, THEME_COLORS["mineintel_dark"])
-        fig, ax = plt.subplots(figsize=(10, 5.5), dpi=120)
-
-        try:
-            self._apply_theme(fig, ax, theme_name)
-
-            full_title = f"{title}\n[CHART VISUALIZATION PLACEHOLDER]"
-            if subtitle:
-                full_title += f" • {subtitle}"
-            ax.set_title(full_title, fontsize=12, fontweight="bold", pad=14, color=theme["text"])
-
-            ax.set_xlim(0, 10)
-            ax.set_ylim(0, 10)
-            ax.set_xticks([])
-            ax.set_yticks([])
-
-            # Draw a styled card area
-            rect = plt.Rectangle((0.5, 0.5), 9.0, 9.0, fill=True, facecolor=theme["ax_bg"],
-                                 edgecolor=theme["spine"], linestyle="--", linewidth=1.8, alpha=0.95)
-            ax.add_patch(rect)
-
-            # Central placeholder icon and text
-            ax.text(5, 6.4, "📊", fontsize=36, ha="center", va="center")
-            ax.text(5, 5.0, "Operational Metrics Visual Enclave", fontsize=13, fontweight="bold",
-                    color=theme["text"], ha="center", va="center")
-
-            reason = error_message or "Deterministic chart calculation fallback placeholder."
-            ax.text(5, 3.8, f"Notice: {reason[:120]}", fontsize=9.5, fontstyle="italic",
-                    color="#94A3B8", ha="center", va="center", wrap=True)
-
-            # Draw decorative metric bars to simulate chart presence
-            sample_heights = [1.2, 2.0, 1.6, 2.4, 1.8]
-            for idx, h in enumerate(sample_heights):
-                x_pos = 3.2 + (idx * 0.8)
-                bar = plt.Rectangle((x_pos, 1.2), 0.5, h, fill=True, color=PALETTE[idx % len(PALETTE)], alpha=0.6)
-                ax.add_patch(bar)
-
-            ax.text(5, 0.9, "SYSTEM FALLBACK RENDERED • SOVEREIGN DATA AUDIT",
-                    fontsize=8, fontweight="bold", color="#10B981", ha="center", va="center")
-
-            fig.tight_layout()
-
-            png_filename = f"{chart_id}.png"
-            svg_filename = f"{chart_id}.svg"
-            png_static = STATIC_CHARTS_DIR / png_filename
-            svg_static = STATIC_CHARTS_DIR / svg_filename
-            png_output = OUTPUTS_CHARTS_DIR / png_filename
-            svg_output = OUTPUTS_CHARTS_DIR / svg_filename
-
-            fig.savefig(str(png_static), format="png", dpi=150, facecolor=fig.get_facecolor(), bbox_inches="tight")
-            fig.savefig(str(svg_static), format="svg", facecolor=fig.get_facecolor(), bbox_inches="tight")
-
-            try:
-                if png_output != png_static:
-                    import shutil
-                    shutil.copy2(png_static, png_output)
-                    shutil.copy2(svg_static, svg_output)
-            except Exception:
-                pass
-
-            logger.info(f"Rendered fallback placeholder chart {chart_id} to {png_static}")
-            return str(png_static), str(svg_static)
-
-        finally:
-            plt.close(fig)
+        logger.info(f"Suppressed placeholder chart rendering for {chart_id} ('{title}')")
+        return "", ""
 
 
 chart_renderer = ChartRenderer()

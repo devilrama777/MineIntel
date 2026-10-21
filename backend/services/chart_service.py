@@ -298,18 +298,24 @@ class ChartService:
         safe_title = title or "Operational Metrics Overview"
         err_msg = error_message or "Systematic fallback visualization placeholder."
 
-        png_path, svg_path = chart_renderer.render_placeholder(
+        res = chart_renderer.render_placeholder(
             chart_id=chart_id,
             title=safe_title,
             subtitle=subtitle,
             error_message=err_msg,
             theme_name=theme
         )
+        if isinstance(res, tuple) and len(res) == 2:
+            png_path, svg_path = res
+        elif isinstance(res, str) and res:
+            png_path, svg_path = res, res
+        else:
+            png_path, svg_path = "", ""
 
         from pathlib import Path
-        png_name = Path(png_path).name
-        rel_file_path = f"static/charts/{png_name}"
-        web_url = f"/static/charts/{png_name}"
+        png_name = Path(png_path).name if png_path else ""
+        rel_file_path = f"static/charts/{png_name}" if png_name else ""
+        web_url = f"/static/charts/{png_name}" if png_name else ""
 
         chart_config = ChartConfig(
             chart_id=chart_id,
@@ -344,8 +350,8 @@ class ChartService:
             owner_id=owner_id,
             config=chart_config,
             calculation=calc,
-            png_path=str(png_path),
-            svg_path=str(svg_path),
+            png_path=str(png_path) if png_path else "",
+            svg_path=str(svg_path) if svg_path else "",
             file_path=rel_file_path,
             url=web_url,
             is_fallback=True,
@@ -356,14 +362,14 @@ class ChartService:
         artifact_dict = artifact.to_dict()
         chart_store.save_chart(artifact_dict)
 
-        logger.info(f"Generated fallback placeholder chart {chart_id} for job {job_id} -> {rel_file_path}")
+        logger.info(f"Fallback placeholder chart {chart_id} suppressed for job {job_id}")
         return {
-            "success": True,
+            "success": False,
             "is_fallback": True,
             "chart_id": chart_id,
             "file_path": rel_file_path,
-            "png_path": str(png_path),
-            "svg_path": str(svg_path),
+            "png_path": str(png_path) if png_path else "",
+            "svg_path": str(svg_path) if svg_path else "",
             "url": web_url,
             "chart": artifact_dict,
             "warning": err_msg

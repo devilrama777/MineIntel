@@ -256,14 +256,23 @@ class AgentCoordinator:
 
             # Attached charts summaries
             if charts:
-                sec_charts = [c for c in charts if c.get("chart_id") in getattr(section, "chart_ids", [])]
+                sec_charts = [
+                    c for c in charts 
+                    if c and isinstance(c, dict) 
+                    and not c.get("is_fallback") 
+                    and (c.get("url") or c.get("file_path") or c.get("png_path"))
+                    and c.get("chart_id") in getattr(section, "chart_ids", [])
+                ]
                 for c in sec_charts[:2]:
-                    cfg = c.get("config", {})
-                    calc = c.get("calculation", {})
+                    cfg = c.get("config", {}) if isinstance(c.get("config"), dict) else {}
+                    calc = c.get("calculation", {}) if isinstance(c.get("calculation"), dict) else {}
                     c_title = cfg.get("title", "Operational Metric Chart")
                     formula = calc.get("aggregation_formula", "Summation")
-                    chart_snippet = f"[Chart {c.get('chart_id')}: {c_title} | Metric Formula: {formula}]"
-                    if total_chars + len(chart_snippet) <= MAX_CHUNK_CHARS:
+                    chart_id = c.get("chart_id")
+                    if not chart_id or not str(chart_id).strip() or not c_title or not str(c_title).strip():
+                        continue
+                    chart_snippet = f"[Chart {chart_id}: {c_title} | Metric Formula: {formula}]"
+                    if chart_snippet and total_chars + len(chart_snippet) <= MAX_CHUNK_CHARS:
                         snippets.append(chart_snippet)
                         total_chars += len(chart_snippet)
 
@@ -1300,7 +1309,7 @@ class AgentCoordinator:
                                 c_title = cand.get("title") or f"Operational Metrics ({cand.get('filename', 'Table')})"
                                 if x_c and y_cs:
                                     try:
-                                        self._execute_tool_with_state(
+                                        chart_res = self._execute_tool_with_state(
                                             state, stage, "render_chart",
                                             {
                                                 "chart_type": c_type,
@@ -1312,47 +1321,24 @@ class AgentCoordinator:
                                             timeout_sec=15.0,
                                             ev_count=len(evidence_items)
                                         )
+                                        if not chart_res or not isinstance(chart_res, dict) or not chart_res.get("success"):
+                                            logger.info(f"Chart render returned empty or unviable result for '{c_title}', skipping gracefully.")
                                     except Exception as ce:
-                                        logger.info(f"Rendering fallback placeholder for chart due to: {ce}")
-                                        try:
-                                            from backend.services.chart_service import chart_service
-                                            chart_service.generate_fallback_chart(
-                                                job_id=task_id,
-                                                owner_id=self.owner_id,
-                                                title=c_title,
-                                                error_message=f"Chart render fallback: {ce}"
-                                            )
-                                        except Exception as fbe:
-                                            logger.error(f"Fallback placeholder generation failed: {fbe}")
+                                        logger.info(f"Chart render skipped or failed for '{c_title}': {ce}")
                                 else:
-                                    try:
-                                        from backend.services.chart_service import chart_service
-                                        chart_service.generate_fallback_chart(
-                                            job_id=task_id,
-                                            owner_id=self.owner_id,
-                                            title=c_title,
-                                            error_message="Detected tabular structure required metric column resolution; rendered systematic fallback."
-                                        )
-                                    except Exception as fbe:
-                                        logger.error(f"Fallback generation failed: {fbe}")
+                                    logger.info(f"Skipping chart render for '{c_title}': missing dimensions.")
 
-                    charts = list_charts_for_job(job_id=task_id, owner_id=self.owner_id)
+                    raw_charts = list_charts_for_job(job_id=task_id, owner_id=self.owner_id)
+                    charts = [
+                        c for c in (raw_charts or [])
+                        if c and isinstance(c, dict)
+                        and not c.get("is_fallback")
+                        and (c.get("url") or c.get("file_path") or c.get("png_path"))
+                    ]
                 except Exception as e:
                     logger.warning(f"Chart analysis degraded gracefully: {e}")
                     safe_log_print(f"⚠️ [Chart Notice] {e}")
-
-                if not charts and evidence_items:
-                    try:
-                        from backend.services.chart_service import chart_service
-                        chart_service.generate_fallback_chart(
-                            job_id=task_id,
-                            owner_id=self.owner_id,
-                            title=f"Operational Performance Overview ({task_id[:8]})",
-                            error_message="Automatic chart synthesis completed with systematic baseline placeholder."
-                        )
-                        charts = list_charts_for_job(job_id=task_id, owner_id=self.owner_id)
-                    except Exception as fbe:
-                        logger.error(f"Baseline fallback chart generation failed: {fbe}")
+                    charts = []
 
                 # -------------------------------------------------------------
                 # STAGE 6: PLANNING & VALIDATE_PLAN
@@ -1439,7 +1425,13 @@ class AgentCoordinator:
                 except Exception:
                     evidence_items = []
                 try:
-                    charts = list_charts_for_job(job_id=task_id, owner_id=self.owner_id)
+                    raw_charts = list_charts_for_job(job_id=task_id, owner_id=self.owner_id)
+                    charts = [
+                        c for c in (raw_charts or [])
+                        if c and isinstance(c, dict)
+                        and not c.get("is_fallback")
+                        and (c.get("url") or c.get("file_path") or c.get("png_path"))
+                    ]
                 except Exception:
                     charts = []
                 plan_id = state.structured_state.get("plan_id") or f"plan_{task_id}"
