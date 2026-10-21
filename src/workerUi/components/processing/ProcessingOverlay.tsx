@@ -1,33 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X, Clock, Brain, Check } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { X, Clock } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-
-const STAGE_LABELS = [
-  'Ingesting',
-  'Verifying',
-  'Analyzing',
-  'Reasoning',
-  'Charts',
-  'Planning',
-  'Validating',
-  'Writing',
-  'Verifying',
-  'Compiling',
-];
-
-const RADIUS = 150;
-const CENTER_X = 200;
-const CENTER_Y = 200;
-
-// Precompute 10 circular stage coordinates around (200, 200)
-const STAGE_NODES = STAGE_LABELS.map((label, i) => {
-  const angle = -Math.PI / 2 + i * ((2 * Math.PI) / 10);
-  const x = Math.round(CENTER_X + RADIUS * Math.cos(angle));
-  const y = Math.round(CENTER_Y + RADIUS * Math.sin(angle));
-  return { label, index: i, x, y };
-});
 
 export const ProcessingOverlay: React.FC = () => {
   const {
@@ -41,8 +16,8 @@ export const ProcessingOverlay: React.FC = () => {
   } = useApp();
 
   const navigate = useNavigate();
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isFadingOut, setIsFadingOut] = useState(false);
-  const [displayedSubStatus, setDisplayedSubStatus] = useState('');
 
   const targetReportIdRef = useRef(targetReportId);
   useEffect(() => {
@@ -70,32 +45,140 @@ export const ProcessingOverlay: React.FC = () => {
     }
   }, [progress, targetReportId, navigate]);
 
-  // Typewriter effect for subStatus
+  // Canvas 2D Particle Funnel
   useEffect(() => {
-    if (!subStatus) {
-      setDisplayedSubStatus('');
-      return;
-    }
-    setDisplayedSubStatus('');
-    let idx = 0;
-    const target = subStatus;
-    const timer = setInterval(() => {
-      idx++;
-      setDisplayedSubStatus(target.slice(0, idx));
-      if (idx >= target.length) {
-        clearInterval(timer);
-      }
-    }, 22);
+    if (!isProcessing) return;
 
-    return () => clearInterval(timer);
-  }, [subStatus]);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animationFrameId: number;
+    let width = (canvas.width = window.innerWidth);
+    let height = (canvas.height = window.innerHeight);
+
+    const handleResize = () => {
+      if (!canvas) return;
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+    };
+    window.addEventListener('resize', handleResize);
+
+    interface Particle {
+      x: number;
+      y: number;
+      speedY: number;
+      radius: number;
+      color: string;
+      alpha: number;
+      originalX: number;
+      swayOffset: number;
+      swaySpeed: number;
+    }
+
+    const particleCount = 250;
+    const particles: Particle[] = [];
+    const colors = ['#00D9FF', '#FFA726', '#38BDF8', '#FBBF24', '#00F0FF'];
+
+    // Target funnel vortex point (bottom center)
+    const targetY = height * 0.78;
+    const targetX = width / 2;
+
+    for (let i = 0; i < particleCount; i++) {
+      const startX = Math.random() * width;
+      particles.push({
+        x: startX,
+        y: Math.random() * -height,
+        speedY: 1.8 + Math.random() * 2.8,
+        radius: 1.2 + Math.random() * 2.4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        alpha: 0.3 + Math.random() * 0.7,
+        originalX: startX,
+        swayOffset: Math.random() * Math.PI * 2,
+        swaySpeed: 0.02 + Math.random() * 0.03,
+      });
+    }
+
+    const render = () => {
+      ctx.clearRect(0, 0, width, height);
+
+      // Draw Cone Glow at bottom center
+      const coneRadius = Math.min(width * 0.28, 220);
+      const gradientCone = ctx.createRadialGradient(
+        targetX,
+        targetY,
+        10,
+        targetX,
+        targetY,
+        coneRadius
+      );
+      gradientCone.addColorStop(0, 'rgba(0, 217, 255, 0.28)');
+      gradientCone.addColorStop(0.4, 'rgba(255, 167, 38, 0.12)');
+      gradientCone.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+      ctx.fillStyle = gradientCone;
+      ctx.beginPath();
+      ctx.arc(targetX, targetY, coneRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Funnel guidelines (faint luminous cone)
+      ctx.strokeStyle = 'rgba(0, 217, 255, 0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(targetX - width * 0.45, 0);
+      ctx.lineTo(targetX, targetY);
+      ctx.lineTo(targetX + width * 0.45, 0);
+      ctx.stroke();
+
+      // Render each particle converging toward cone point
+      for (let i = 0; i < particleCount; i++) {
+        const p = particles[i];
+        p.y += p.speedY;
+        p.swayOffset += p.swaySpeed;
+
+        // Progress factor from top (0) to funnel target (1)
+        const progressT = Math.max(0, Math.min(1, p.y / targetY));
+
+        // Lateral convergence: interpolate from originalX to targetX
+        const currentLateralTarget = p.originalX + (targetX - p.originalX) * Math.pow(progressT, 1.8);
+        p.x = currentLateralTarget + Math.sin(p.swayOffset) * (1 - progressT) * 12;
+
+        // Draw particle
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = p.color;
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = p.color;
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius * (1 - progressT * 0.4), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Reset particle when reaching cone convergence
+        if (p.y >= targetY || p.y > height) {
+          p.y = -20 - Math.random() * 50;
+          p.originalX = Math.random() * width;
+          p.x = p.originalX;
+          p.speedY = 1.8 + Math.random() * 2.8;
+        }
+      }
+
+      animationFrameId = requestAnimationFrame(render);
+    };
+
+    render();
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [isProcessing]);
 
   if (!isProcessing) return null;
 
-  // Active stage index (0 to 9)
-  const stageIndex = Math.min(9, Math.floor((progress / 100) * 10));
-
-  // Format elapsed time (00:MM:SS) in JetBrains Mono
+  // Format elapsed time (00:MM:SS)
   const formatTimer = (sec: number) => {
     const hours = Math.floor(sec / 3600);
     const minutes = Math.floor((sec % 3600) / 60);
@@ -103,289 +186,126 @@ export const ProcessingOverlay: React.FC = () => {
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   };
 
+  // SVG Ring calculation: 200px diameter -> radius 86px
+  const radius = 86;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (circumference * progress) / 100;
+
   return (
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.3 }}
+        animate={{ opacity: 1, scale: isFadingOut ? 1.05 : 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.4 }}
         className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-xl overflow-hidden select-none"
       >
-        {/* Ambient radial lighting glow */}
-        <div className="absolute w-[600px] h-[600px] rounded-full bg-radial from-[#00D9FF]/12 via-[#FFA726]/6 to-transparent blur-3xl pointer-events-none" />
+        {/* Particle Canvas Background */}
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 pointer-events-none w-full h-full"
+        />
 
-        {/* CENTER CONTAINER: Gamma-style Glass Card */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{
-            opacity: isFadingOut ? 0 : 1,
-            scale: isFadingOut ? 0.95 : 1,
-          }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          transition={{ duration: 0.4 }}
-          className="relative z-10 w-full max-w-[520px] rounded-[24px] p-[40px] flex flex-col items-center backdrop-blur-xl"
-          style={{
-            backgroundColor: 'rgba(10, 14, 23, 0.85)',
-            border: '1px solid rgba(0, 217, 255, 0.15)',
-            boxShadow: '0 0 80px rgba(0, 217, 255, 0.15)',
-          }}
-        >
-          {/* TOP: Percentage + Stage Label + Progress Bar */}
-          <div className="w-full flex flex-col items-center">
-            <span className="font-mono text-[64px] font-bold tracking-tight leading-none bg-gradient-to-r from-[#00D9FF] via-[#38BDF8] to-[#FFA726] bg-clip-text text-transparent drop-shadow-[0_0_25px_rgba(0,217,255,0.4)]">
-              {Math.round(progress)}%
-            </span>
-            <span className="text-[11px] uppercase tracking-widest text-gray-400 font-mono font-medium mt-2">
-              {stageName || 'Processing Report'}
-            </span>
-            <div className="w-full bg-slate-800/80 rounded-full h-[2px] mt-4 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-[#00D9FF] to-[#FFA726] transition-all duration-300 ease-out"
-                style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+        {/* Pulsing ambient glow */}
+        <div className="absolute w-[500px] h-[500px] rounded-full bg-radial from-[#00D9FF]/15 via-[#FFA726]/8 to-transparent blur-3xl pointer-events-none" />
+
+        {/* Center Circular Progress Ring & Info */}
+        <div className="relative z-10 flex flex-col items-center justify-center text-center px-4 max-w-lg">
+          {/* Ring */}
+          <div className="relative w-[220px] h-[220px] flex items-center justify-center">
+            <svg className="w-full h-full -rotate-90 transform" viewBox="0 0 200 200">
+              <defs>
+                <linearGradient id="cyanAmberGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#00D9FF" />
+                  <stop offset="60%" stopColor="#38BDF8" />
+                  <stop offset="100%" stopColor="#FFA726" />
+                </linearGradient>
+                <filter id="glowFilter" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="4" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+
+              {/* Track */}
+              <circle
+                cx="100"
+                cy="100"
+                r={radius}
+                stroke="rgba(255, 255, 255, 0.1)"
+                strokeWidth="8"
+                fill="none"
               />
+
+              {/* Progress */}
+              <circle
+                cx="100"
+                cy="100"
+                r={radius}
+                stroke="url(#cyanAmberGradient)"
+                strokeWidth="8"
+                strokeLinecap="round"
+                fill="none"
+                filter="url(#glowFilter)"
+                style={{
+                  strokeDasharray: circumference,
+                  strokeDashoffset: strokeDashoffset,
+                  transition: 'stroke-dashoffset 0.15s ease-out',
+                }}
+              />
+            </svg>
+
+            {/* Center Percentage */}
+            <div className="absolute flex flex-col items-center justify-center">
+              <span className="font-mono text-5xl font-semibold tracking-tight text-white drop-shadow-[0_0_15px_rgba(0,217,255,0.6)]">
+                {Math.round(progress)}%
+              </span>
+              <span className="text-[10px] uppercase font-mono tracking-widest text-[#00D9FF] mt-1">
+                SYNTHESIS
+              </span>
             </div>
           </div>
 
-          {/* CENTER: Neural Web SVG (400x400 viewBox) */}
-          <div className="relative w-[380px] h-[380px] my-2 flex items-center justify-center">
-            <svg
-              className="w-full h-full"
-              viewBox="0 0 400 400"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
+          {/* Below Ring: Stage Label */}
+          <div className="mt-8 flex flex-col items-center gap-2">
+            <div className="text-[11px] font-mono tracking-widest text-slate-300 font-semibold uppercase px-3 py-1 bg-slate-900/80 border border-[#00D9FF]/20 rounded-full shadow-inner">
+              {stageName}
+            </div>
+
+            {/* Sub-status with subtle pulse */}
+            <motion.p
+              key={subStatus}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+              className="text-sm text-cyan-300 font-medium tracking-wide flex items-center gap-2"
             >
-              <defs>
-                <filter id="cyanGlow" x="-30%" y="-30%" width="160%" height="160%">
-                  <feGaussianBlur stdDeviation="3" result="blur" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-                <filter id="amberGlow" x="-30%" y="-30%" width="160%" height="160%">
-                  <feGaussianBlur stdDeviation="3.5" result="blur" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-                <radialGradient id="centralCoreGradient" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor="#00D9FF" stopOpacity="0.45" />
-                  <stop offset="70%" stopColor="#00D9FF" stopOpacity="0.12" />
-                  <stop offset="100%" stopColor="#00D9FF" stopOpacity="0" />
-                </radialGradient>
-              </defs>
-
-              {/* Connecting Lines (Center -> Each Stage Node) */}
-              {STAGE_NODES.map((node) => {
-                const isComplete = progress >= 100 || node.index < stageIndex;
-                const isActive = progress < 100 && node.index === stageIndex;
-
-                if (isComplete) {
-                  return (
-                    <line
-                      key={`conn-complete-${node.index}`}
-                      x1={CENTER_X}
-                      y1={CENTER_Y}
-                      x2={node.x}
-                      y2={node.y}
-                      stroke="rgba(0, 217, 255, 0.6)"
-                      strokeWidth={1.5}
-                      filter="url(#cyanGlow)"
-                    />
-                  );
-                }
-
-                if (isActive) {
-                  return (
-                    <motion.line
-                      key={`conn-active-${node.index}`}
-                      x1={CENTER_X}
-                      y1={CENTER_Y}
-                      x2={node.x}
-                      y2={node.y}
-                      stroke="#FFA726"
-                      strokeWidth={1.5}
-                      strokeDasharray="150"
-                      initial={{ strokeDashoffset: 150 }}
-                      animate={{ strokeDashoffset: 0 }}
-                      transition={{ duration: 0.5, ease: 'easeOut' }}
-                      filter="url(#amberGlow)"
-                    />
-                  );
-                }
-
-                return (
-                  <line
-                    key={`conn-pending-${node.index}`}
-                    x1={CENTER_X}
-                    y1={CENTER_Y}
-                    x2={node.x}
-                    y2={node.y}
-                    stroke="rgba(148, 163, 184, 0.15)"
-                    strokeWidth={1}
-                  />
-                );
-              })}
-
-              {/* Central Node Expanding Ring on 100% completion */}
-              {progress >= 100 && (
-                <motion.circle
-                  cx={CENTER_X}
-                  cy={CENTER_Y}
-                  initial={{ r: 32, opacity: 0.9 }}
-                  animate={{ r: 75, opacity: 0 }}
-                  transition={{ duration: 0.6, repeat: Infinity, ease: 'easeOut' }}
-                  fill="none"
-                  stroke="#00D9FF"
-                  strokeWidth={2}
-                />
-              )}
-
-              {/* Central Node Pulse (r=32, 2s loop) */}
-              <motion.g
-                animate={{ scale: [1, 1.08, 1] }}
-                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-                style={{ transformOrigin: `${CENTER_X}px ${CENTER_Y}px` }}
-              >
-                <circle
-                  cx={CENTER_X}
-                  cy={CENTER_Y}
-                  r={32}
-                  fill="url(#centralCoreGradient)"
-                  stroke="#00D9FF"
-                  strokeWidth={2}
-                  filter="url(#cyanGlow)"
-                />
-                <foreignObject
-                  x={CENTER_X - 16}
-                  y={CENTER_Y - 16}
-                  width={32}
-                  height={32}
-                  className="pointer-events-none"
-                >
-                  <div className="w-full h-full flex items-center justify-center">
-                    <Brain className="w-6 h-6 text-white drop-shadow-[0_0_8px_rgba(0,217,255,0.85)]" />
-                  </div>
-                </foreignObject>
-              </motion.g>
-
-              {/* 10 Outer Stage Nodes */}
-              {STAGE_NODES.map((node) => {
-                const isComplete = progress >= 100 || node.index < stageIndex;
-                const isActive = progress < 100 && node.index === stageIndex;
-
-                return (
-                  <g key={`stage-node-${node.index}`}>
-                    {/* Circle r=12 */}
-                    {isComplete ? (
-                      <motion.g
-                        initial={false}
-                        animate={
-                          progress >= 100
-                            ? { scale: [1, 1.15, 1] }
-                            : undefined
-                        }
-                        transition={{
-                          duration: 0.6,
-                          repeat: progress >= 100 ? Infinity : 0,
-                          ease: 'easeInOut',
-                        }}
-                        style={{ transformOrigin: `${node.x}px ${node.y}px` }}
-                      >
-                        <motion.circle
-                          cx={node.x}
-                          cy={node.y}
-                          r={12}
-                          initial={false}
-                          animate={{ fill: '#00D9FF', stroke: '#00D9FF' }}
-                          transition={{ duration: 0.3 }}
-                          strokeWidth={1.5}
-                          filter="url(#cyanGlow)"
-                        />
-                        <foreignObject
-                          x={node.x - 6}
-                          y={node.y - 6}
-                          width={12}
-                          height={12}
-                          className="pointer-events-none"
-                        >
-                          <div className="w-full h-full flex items-center justify-center">
-                            <Check className="w-3 h-3 text-slate-950 stroke-[3]" />
-                          </div>
-                        </foreignObject>
-                      </motion.g>
-                    ) : isActive ? (
-                      <motion.circle
-                        cx={node.x}
-                        cy={node.y}
-                        r={12}
-                        fill="#FFA726"
-                        stroke="#FFA726"
-                        strokeWidth={2}
-                        filter="url(#amberGlow)"
-                        animate={{ scale: [1, 1.2, 1] }}
-                        transition={{
-                          duration: 1.5,
-                          repeat: Infinity,
-                          ease: 'easeInOut',
-                        }}
-                        style={{ transformOrigin: `${node.x}px ${node.y}px` }}
-                      />
-                    ) : (
-                      <circle
-                        cx={node.x}
-                        cy={node.y}
-                        r={12}
-                        fill="#1e293b"
-                        stroke="#334155"
-                        strokeWidth={1.5}
-                      />
-                    )}
-
-                    {/* Label below node (9px uppercase) */}
-                    <text
-                      x={node.x}
-                      y={node.y + 19}
-                      textAnchor="middle"
-                      className="text-[9px] uppercase font-mono tracking-wider font-semibold select-none pointer-events-none"
-                      fill={isComplete ? '#67e8f9' : isActive ? '#fcd34d' : '#6b7280'}
-                    >
-                      {node.label}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
+              <span className="w-1.5 h-1.5 rounded-full bg-[#00D9FF] animate-ping" />
+              {subStatus}
+            </motion.p>
           </div>
+        </div>
 
-          {/* BOTTOM: Typewriter Sub-Status Text */}
-          <div className="min-h-[42px] flex items-center justify-center text-center px-2 mt-1">
-            <p className="text-[13px] italic text-gray-300 max-w-[420px] line-clamp-2 leading-relaxed">
-              {displayedSubStatus}
-              {displayedSubStatus && (
-                <span className="inline-block w-1.5 h-3.5 ml-1 bg-[#00D9FF] animate-pulse align-middle" />
-              )}
-            </p>
-          </div>
-        </motion.div>
-
-        {/* BOTTOM BAR (outside card) */}
+        {/* Bottom Bar Controls */}
         <div className="absolute bottom-8 left-8 right-8 flex items-center justify-between pointer-events-auto">
-          {/* Left: Elapsed timer "00:02:14" JetBrains Mono gray-500 */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-950/60 border border-slate-800/80 text-gray-500 font-mono text-sm">
-            <Clock className="w-4 h-4 text-gray-500" />
-            <span>{formatTimer(elapsedSeconds)}</span>
+          {/* Bottom-left: Elapsed timer */}
+          <div className="flex items-center gap-2.5 px-4 py-2 rounded-xl bg-slate-950/70 border border-slate-800 text-slate-300">
+            <Clock className="w-4 h-4 text-cyan-400" />
+            <span className="text-xs text-slate-400">ELAPSED</span>
+            <span className="font-mono text-sm font-semibold text-white tracking-wider">
+              {formatTimer(elapsedSeconds)}
+            </span>
           </div>
 
-          {/* Right: Cancel ghost button (red on hover) */}
+          {/* Bottom-right: Cancel ghost button */}
           <button
             onClick={cancelProcessing}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-700/60 bg-slate-900/40 text-slate-300 hover:text-red-400 hover:border-red-500/50 hover:bg-red-500/10 transition-all text-sm font-medium"
+            className="btn-action flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-700/80 bg-slate-900/60 text-slate-300 hover:text-red-400 hover:border-red-500/50 hover:bg-red-500/10 transition-all text-sm font-medium"
           >
             <X className="w-4 h-4" />
-            Cancel
+            Cancel Operation
           </button>
         </div>
       </motion.div>
