@@ -850,49 +850,16 @@ class AgentCoordinator:
                 charts=charts
             )
 
-            chunk_summaries_block = ""
-            if chunk_summaries:
-                chunk_summaries_block = "Verified Chunk Summaries (from database evidence batches):\n" + "\n".join([f"- {s.strip()}" for s in chunk_summaries if s.strip()]) + "\n\n"
+            from backend.services.section_prompt_builder import build_section_prompt
 
-            evidence_items_block = ""
-            if bounded_text:
-                evidence_items_block = f"Direct Source Evidence Records:\n{bounded_text}\n\n"
-            elif evidence_items:
-                evidence_items_block = "Direct Source Evidence Records:\n" + "\n".join([
-                    f"- [Evidence {it.get('evidence_id')} | {it.get('provenance', {}).get('filename', 'Source')}]: {(it.get('content_text') or '')[:400]}"
-                    for it in evidence_items[:5]
-                ]) + "\n\n"
-
-            raw_digest = ""
-            if getattr(self, "raw_documents_text", None):
-                clean_raw = self.raw_documents_text[:6000]
-                raw_digest = (
-                    f"\n### SOURCE DOCUMENT CONTENT (GROUND TRUTH)\n"
-                    f"{clean_raw}\n\n"
-                    f"### DATA EXTRACTION DIRECTIVES\n"
-                    f"- Extract EVERY numeric row from tables (do not skip months).\n"
-                    f"- If the same metric appears across multiple sources with different "
-                    f"values, LIST BOTH and mark as 'SOURCE CONFLICT' with both source refs.\n"
-                    f"- Aggregate totals by sum where appropriate.\n"
-                    f"- Preserve month-by-month granularity when data is monthly.\n\n"
-                )
-
-            section_prompt = (
-                f"You are a Senior Executive Consultant writing an official CIL/CMPDI report.\n\n"
-                f"REPORT CONTEXT: {plan_title}\n"
-                f"SECTION: {sec_title}\n"
-                f"FOCUS: {getattr(section, 'topic', None) or sec_title}\n"
-                f"{raw_digest}"
-                f"{chunk_summaries_block}"
-                f"{evidence_items_block}"
-                f"\n### STRICT WRITING RULES\n"
-                f"1. Use ONLY facts present in the source content above. NEVER invent numbers.\n"
-                f"2. When you cite a number, mark it as [Source: <document name>].\n"
-                f"3. If two sources disagree, write: 'Conflict: Source A reports X, Source B reports Y. Data-quality note: requires reconciliation.'\n"
-                f"4. Use markdown tables for multi-row data (include ALL months, not a sample).\n"
-                f"5. Do NOT echo raw binary data. If source content is unreadable, say 'Source content unavailable in parseable form'.\n"
-                f"6. Do NOT mention AI, Ollama, Groq, LLM, or internal engine names.\n"
-                f"7. Aim for 200-450 words per section.\n"
+            section_prompt = build_section_prompt(
+                plan_title=plan_title,
+                section_title=sec_title,
+                section_topic=getattr(section, "topic", None) or sec_title,
+                raw_evidence=self.raw_documents_text,
+                chunk_summaries=chunk_summaries,
+                evidence_items=evidence_items,
+                bounded_text=bounded_text,
             )
 
             sec_content = ""
@@ -1130,73 +1097,15 @@ class AgentCoordinator:
 
                     # Read raw content from uploaded files to populate raw_documents_text
                     if files:
-                        from pathlib import Path as _P
-                        import io as _io
+                        from backend.services.document_extractor import build_evidence_block
                         _raw_parts = []
-                        _SUPPORTED_TEXT_EXT = ('.txt', '.md', '.csv', '.tsv', '.json', '.log')
-                        _SUPPORTED_BINARY_EXT = ('.pdf', '.docx', '.xlsx', '.xls')
-
                         for fname, fbytes in files:
-                            name_lower = fname.lower()
                             try:
-                                # 1. Plain text family — decode directly
-                                if name_lower.endswith(_SUPPORTED_TEXT_EXT):
-                                    try:
-                                        text = fbytes.decode('utf-8', errors='ignore')
-                                    except Exception:
-                                        text = fbytes.decode('latin-1', errors='ignore')
-                                    if text.strip():
-                                        _raw_parts.append(f"--- {fname} ---\n{text[:4000]}")
-                                    continue
-
-                                # 2. DOCX — use python-docx
-                                if name_lower.endswith('.docx'):
-                                    try:
-                                        from docx import Document as _Doc
-                                        _doc = _Doc(_io.BytesIO(fbytes))
-                                        _paras = [p.text for p in _doc.paragraphs if p.text.strip()]
-                                        _table_rows = []
-                                        for t in _doc.tables:
-                                            for row in t.rows:
-                                                cells = [c.text.strip() for c in row.cells]
-                                                if any(cells):
-                                                    _table_rows.append(" | ".join(cells))
-                                        combined = "\n".join(_paras)
-                                        if _table_rows:
-                                            combined += "\n\n--- Tables ---\n" + "\n".join(_table_rows)
-                                        if combined.strip():
-                                            _raw_parts.append(f"--- {fname} (DOCX) ---\n{combined[:4000]}")
-                                    except Exception as _e:
-                                        logger.warning(f"DOCX extract failed for {fname}: {_e}")
-                                    continue
-
-                                # 3. XLSX / XLS — use pandas
-                                if name_lower.endswith(('.xlsx', '.xls')):
-                                    try:
-                                        import pandas as _pd
-                                        _df = _pd.read_excel(_io.BytesIO(fbytes))
-                                        _csv_repr = _df.to_csv(index=False)
-                                        if _csv_repr.strip():
-                                            _raw_parts.append(f"--- {fname} (XLSX) ---\n{_csv_repr[:4000]}")
-                                    except Exception as _e:
-                                        logger.warning(f"XLSX extract failed for {fname}: {_e}")
-                                    continue
-
-                                # 4. PDF — use pypdf
-                                if name_lower.endswith('.pdf'):
-                                    try:
-                                        import pypdf as _pdf
-                                        _reader = _pdf.PdfReader(_io.BytesIO(fbytes))
-                                        _pdf_text = "\n".join(
-                                            (p.extract_text() or "") for p in _reader.pages[:20]
-                                        )
-                                        if _pdf_text.strip():
-                                            _raw_parts.append(f"--- {fname} (PDF) ---\n{_pdf_text[:4000]}")
-                                    except Exception as _e:
-                                        logger.warning(f"PDF extract failed for {fname}: {_e}")
-                                    continue
+                                block = build_evidence_block(fname, fbytes)
+                                if block and block.strip():
+                                    _raw_parts.append(block)
                             except Exception as _e:
-                                logger.warning(f"Raw text extraction skipped for {fname}: {_e}")
+                                logger.warning(f"Evidence extraction failed for {fname}: {_e}")
 
                         if _raw_parts and not self.raw_documents_text:
                             self.raw_documents_text = "\n\n".join(_raw_parts)[:16000]
