@@ -66,6 +66,24 @@ class ToolTimeoutError(Exception):
     pass
 
 
+import re
+
+
+def _sanitize_section_text(text: str) -> str:
+    """Removes internal evidence tags and metadata from LLM output."""
+    if not text:
+        return ""
+    # Remove common tags like [LOCKED FACT], [CALCULATED VALUE], [EVD-...]
+    text = re.sub(r'\[LOCKED FACT\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[CALCULATED VALUE\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[EVD-[A-Z0-9-]+\]', '', text, flags=re.IGNORECASE)
+    # Remove any other obvious bracket tags that are not legitimate markdown
+    text = re.sub(r'\[(?:SUMMARIZABLE TEXT|LOCKED FACT|CALCULATED VALUE|EVD-[^\]]+)\]', '', text, flags=re.IGNORECASE)
+    # Clean up multiple blank lines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
 class AgentCoordinator:
     """
     Deterministic Workflow Engine for MineIntel Report Generation.
@@ -445,7 +463,7 @@ class AgentCoordinator:
             )
 
         # Check if at least one section has non-empty content
-        has_at_least_one = any(bool(s.content_text and s.content_text.strip() and not s.content_text.startswith("⚠️")) for s in plan.sections)
+        has_at_least_one = any(bool(s.content_text and s.content_text.strip() and not (s.content_text.startswith("⚠️") or s.content_text.startswith("■"))) for s in plan.sections)
         if not has_at_least_one:
             if getattr(self, "raw_documents_text", None):
                 plan.sections[0].content_text = f"Executive Operational Summary & Telemetry:\n\n{self.raw_documents_text[:2000]}"
@@ -859,7 +877,7 @@ class AgentCoordinator:
                 charts=charts
             )
 
-            from backend.services.section_prompt_builder import build_section_prompt
+            from backend.services.section_prompt_builder import build_section_prompt, SYSTEM_INSTRUCTION
 
             section_prompt = build_section_prompt(
                 plan_title=plan_title,
@@ -871,7 +889,7 @@ class AgentCoordinator:
                 bounded_text=bounded_text,
             )
 
-            sec_content = ""
+            result = {"markdown": ""}
             async with semaphore:
                 sec_start = time.time()
                 sec_deadline = (
@@ -904,26 +922,30 @@ class AgentCoordinator:
                     sec_content = await asyncio.to_thread(
                         self._call_qwen,
                         prompt=section_prompt,
-                        system_instruction=(
-                            "You are a Senior Executive Consultant. "
-                            "Write in a professional, polished, board-room style. Use a human tone. "
-                            "Do not mention the AI process, the tool name, or 'deterministic parity' in the final text. "
-                            "Focus on business insights, variances, and strategic actions. "
-                            "Do not include machine-speak or technical pipeline labels such as "
-                            "'Deterministic Math Engines', 'AST Evaluated', 'Synthetic Records Unit', or 'AI Analytical Synthesis'."
-                        ),
+                        system_instruction=SYSTEM_INSTRUCTION,
                         state=state,
                         stage=stage,
                         max_tokens=800,
                         images=None,
                         deadline=sec_deadline
                     )
+                    result["markdown"] = sec_content or ""
+                    raw_markdown = result.get("markdown", "")
+                    clean_markdown = _sanitize_section_text(raw_markdown)
+                    result["markdown"] = clean_markdown
+                    sec_content = clean_markdown
+
                     if not sec_content or not str(sec_content).strip():
-                        sec_content = "⚠️ [Section Generation Failed: Error encountered during synthesis]"
+                        result["markdown"] = "⚠️ [Section Generation Failed: Error encountered during synthesis]"
+                        sec_content = result["markdown"]
                 except Exception as e:
-                    logger.error(f"Section '{sec_title}' synthesis failed: {e}")
+                    import traceback
+                    logger.error(f"LLM synthesis failed for section '{sec_title}': {e}")
+                    logger.error(traceback.format_exc())
                     safe_log_print(f"⚠️ [Section Error] Section '{sec_title}' generation failed: {e}")
-                    sec_content = "⚠️ [Section Generation Failed: Error encountered during synthesis]"
+                    # Keep the original fallback, but log the real cause
+                    result["markdown"] = f"■ [Section Generation Failed: {str(e)}]"
+                    sec_content = result["markdown"]
                 finally:
                     # Thread-safe state update: remove from active, add to completed, update count
                     if state_lock:
@@ -964,11 +986,13 @@ class AgentCoordinator:
                         state.heartbeat_at = int(time.time() * 1000)
                         update_task_state(state.model_dump())
 
-            return sec_content
+            return result["markdown"]
         except Exception as e:
-            logger.error(f"Section '{sec_title}' outer synthesis failed: {e}", exc_info=True)
+            import traceback
+            logger.error(f"LLM synthesis failed for section '{sec_title}' (outer): {e}")
+            logger.error(traceback.format_exc())
             safe_log_print(f"⚠️ [Section Error] Section '{sec_title}' generation failed: {e}")
-            return "⚠️ [Section Generation Failed: Error encountered during synthesis]"
+            return f"■ [Section Generation Failed: {str(e)}]"
 
     def run(
         self,
@@ -1544,7 +1568,7 @@ class AgentCoordinator:
             self._check_task_deadline(state, stage)
             self._set_stage(state, stage, STAGE_DEADLINE_SEC, progress_reason="Validating synthesized report data integrity...")
             # If at least one section has content, or if raw document text exists, proceed!
-            has_content = any(bool(s.content_text and s.content_text.strip() and not s.content_text.startswith("⚠️")) for s in plan.sections)
+            has_content = any(bool(s.content_text and s.content_text.strip() and not (s.content_text.startswith("⚠️") or s.content_text.startswith("■"))) for s in plan.sections)
             if not has_content:
                 if getattr(self, "raw_documents_text", None):
                     plan.sections[0].content_text = f"Executive Operational Summary & Telemetry:\n\n{self.raw_documents_text[:2000]}"
