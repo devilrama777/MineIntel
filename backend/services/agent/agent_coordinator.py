@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import uuid
-
+from backend.services.token_utils import compress_to_limit
 from backend import config
 from backend.services.agent.agent_models import AgentTaskState, AgentTaskStatus, StructuredError, WorkflowStage
 from backend.services.agent.agent_store import create_task, get_task, update_task_state
@@ -879,11 +879,13 @@ class AgentCoordinator:
 
             from backend.services.section_prompt_builder import build_section_prompt, SYSTEM_INSTRUCTION
 
+            safe_evidence = compress_to_limit(self.raw_documents_text or "", max_tokens=6000)
+
             section_prompt = build_section_prompt(
                 plan_title=plan_title,
                 section_title=sec_title,
                 section_topic=getattr(section, "topic", None) or sec_title,
-                raw_evidence=self.raw_documents_text,
+                raw_evidence=safe_evidence,
                 chunk_summaries=chunk_summaries,
                 evidence_items=evidence_items,
                 bounded_text=bounded_text,
@@ -939,12 +941,14 @@ class AgentCoordinator:
                         result["markdown"] = "⚠️ [Section Generation Failed: Error encountered during synthesis]"
                         sec_content = result["markdown"]
                 except Exception as e:
-                    import traceback
                     logger.error(f"LLM synthesis failed for section '{sec_title}': {e}")
-                    logger.error(traceback.format_exc())
-                    safe_log_print(f"⚠️ [Section Error] Section '{sec_title}' generation failed: {e}")
-                    # Keep the original fallback, but log the real cause
-                    result["markdown"] = f"■ [Section Generation Failed: {str(e)}]"
+                    # Do NOT dump raw evidence into the markdown
+                    result["markdown"] = (
+                        f"■ [Section Unavailable: '{sec_title}' generation failed due to LLM rate limit or network timeout. "
+                        f"Please retry in a moment.]"
+                    )
+                    # Apply sanitizer to guarantee no raw tags leak
+                    result["markdown"] = _sanitize_section_text(result["markdown"])
                     sec_content = result["markdown"]
                 finally:
                     # Thread-safe state update: remove from active, add to completed, update count
@@ -1141,7 +1145,8 @@ class AgentCoordinator:
                                 logger.warning(f"Evidence extraction failed for {fname}: {_e}")
 
                         if _raw_parts and not self.raw_documents_text:
-                            self.raw_documents_text = "\n\n".join(_raw_parts)[:16000]
+                            _combined = "\n\n".join(_raw_parts)
+                            self.raw_documents_text = compress_to_limit(_combined, max_tokens=6000)
                             state.structured_state["raw_documents_text"] = self.raw_documents_text[:2000]
                     try:
                         intelligence_service.organize_job_evidence(job_id=task_id, owner_id=self.owner_id)
