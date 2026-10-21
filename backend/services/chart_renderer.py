@@ -32,9 +32,9 @@ CHARTS_DIR = STATIC_CHARTS_DIR
 
 # Modern curated color palettes
 PALETTE = [
-    "#0EA5E9",  # Sky Blue
+    "#00D9FF",  # Primary Cyan
+    "#FFA726",  # Secondary Amber
     "#10B981",  # Emerald
-    "#F59E0B",  # Amber
     "#6366F1",  # Indigo
     "#EC4899",  # Pink
     "#14B8A6",  # Teal
@@ -44,11 +44,11 @@ PALETTE = [
 
 THEME_COLORS = {
     "mineintel_dark": {
-        "fig_bg": "#0F172A",
-        "ax_bg": "#1E293B",
-        "text": "#F8FAFC",
-        "grid": "#334155",
-        "spine": "#475569"
+        "fig_bg": "#050810",
+        "ax_bg": "#050810",
+        "text": "#FFFFFF",
+        "grid": "#1e293b",
+        "spine": "#1e293b"
     },
     "mineintel_light": {
         "fig_bg": "#FFFFFF",
@@ -115,7 +115,8 @@ class ChartRenderer:
         self,
         chart_config: ChartConfig,
         labels: List[str],
-        series: List[Dict[str, Any]]
+        series: List[Dict[str, Any]],
+        job_id: Optional[str] = None
     ) -> Tuple[str, str]:
         """
         Renders chart to PNG and SVG files.
@@ -269,24 +270,32 @@ class ChartRenderer:
 
             png_filename = f"{chart_id}.png"
             svg_filename = f"{chart_id}.svg"
+            effective_job_id = job_id or getattr(chart_config, "job_id", None) or "charts"
+            job_charts_dir = config.OUTPUTS_DIR / effective_job_id / "charts"
+            job_charts_dir.mkdir(parents=True, exist_ok=True)
+            STATIC_CHARTS_DIR.mkdir(parents=True, exist_ok=True)
+
+            png_output = job_charts_dir / png_filename
+            svg_output = job_charts_dir / svg_filename
             png_static = STATIC_CHARTS_DIR / png_filename
             svg_static = STATIC_CHARTS_DIR / svg_filename
-            png_output = OUTPUTS_CHARTS_DIR / png_filename
-            svg_output = OUTPUTS_CHARTS_DIR / svg_filename
 
-            fig.savefig(str(png_static), format="png", dpi=150, facecolor=fig.get_facecolor(), bbox_inches="tight")
-            fig.savefig(str(svg_static), format="svg", facecolor=fig.get_facecolor(), bbox_inches="tight")
+            fig.savefig(str(png_output), format="png", dpi=300, facecolor=fig.get_facecolor(), bbox_inches="tight")
+            fig.savefig(str(svg_output), format="svg", facecolor=fig.get_facecolor(), bbox_inches="tight")
 
             try:
-                if png_output != png_static:
-                    import shutil
-                    shutil.copy2(png_static, png_output)
-                    shutil.copy2(svg_static, svg_output)
+                import shutil
+                if png_static != png_output:
+                    shutil.copy2(png_output, png_static)
+                if svg_static != svg_output:
+                    shutil.copy2(svg_output, svg_static)
             except Exception:
                 pass
 
-            logger.info(f"Rendered chart {chart_id} to {png_static} and {svg_static}")
-            return str(png_static), str(svg_static)
+            abs_png_path = str(png_output.resolve())
+            abs_svg_path = str(svg_output.resolve())
+            logger.info(f"Rendered chart {chart_id} to {abs_png_path} and {abs_svg_path}")
+            return abs_png_path, abs_svg_path
 
         finally:
             plt.close(fig)

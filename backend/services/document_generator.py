@@ -517,8 +517,7 @@ class DocumentGenerator:
     def format_chart_markdown(chart_or_path: Any, description: Optional[str] = None) -> str:
         """
         Takes a returned chart file path or chart dict and converts it into a proper
-        Markdown image tag: ![Chart Description](URL_TO_STATIC_FOLDER).
-        E.g., ![Production Output](/static/charts/CHART-123.png)
+        Markdown image tag: ![Chart Description](file:///path/to/charts/chart1.png).
         Suppresses placeholders and fallback errors by returning an empty string.
         """
         if not chart_or_path:
@@ -533,11 +532,11 @@ class DocumentGenerator:
             cfg = chart_or_path.get("config") or {}
             if cfg.get("is_valid") is False:
                 return ""
-            desc = desc or cfg.get("title") or chart_or_path.get("title") or "Chart Visualization"
+            desc = desc or cfg.get("title") or chart_or_path.get("title") or "Chart"
             file_path_str = (
-                chart_or_path.get("url")
+                chart_or_path.get("png_path")
                 or chart_or_path.get("file_path")
-                or chart_or_path.get("png_path")
+                or chart_or_path.get("url")
                 or ""
             )
         elif isinstance(chart_or_path, str):
@@ -545,16 +544,16 @@ class DocumentGenerator:
                 return ""
             file_path_str = chart_or_path
             if not desc:
-                desc = "Chart Visualization"
+                desc = "Chart"
         else:
             file_path_str = str(chart_or_path)
             if not desc:
-                desc = "Chart Visualization"
+                desc = "Chart"
 
         if not file_path_str or not file_path_str.strip():
             return ""
 
-        desc_clean = re.sub(r'[\[\]]', '', str(desc)).strip() or "Chart Visualization"
+        desc_clean = re.sub(r'[\[\]]', '', str(desc)).strip() or "Chart"
         if "PLACEHOLDER" in desc_clean.upper():
             return ""
 
@@ -563,18 +562,20 @@ class DocumentGenerator:
         if not fname or fname.startswith("CHART-ERR-"):
             return ""
 
-        normalized = file_path_str.replace("\\", "/")
-
-        if "static/charts" in normalized:
-            static_url = f"/static/charts/{fname}"
-        elif "/static/" in normalized:
-            static_url = "/" + normalized.lstrip("/")
-        elif normalized.startswith("http://") or normalized.startswith("https://"):
-            static_url = normalized
+        clean_path = str(file_path_str).replace("\\", "/")
+        if clean_path.startswith("file:///"):
+            uri = clean_path
+        elif clean_path.startswith("file://"):
+            uri = "file:///" + clean_path[7:].lstrip("/")
+        elif clean_path.startswith("http://") or clean_path.startswith("https://"):
+            uri = clean_path
         else:
-            static_url = f"/static/charts/{fname}"
+            if clean_path.startswith("/"):
+                uri = f"file://{clean_path}"
+            else:
+                uri = f"file:///{clean_path}"
 
-        return f"![{desc_clean}]({static_url})"
+        return f"![{desc_clean}]({uri})"
 
     def compile_dossier_pdf(
         self,
@@ -672,23 +673,69 @@ class DocumentGenerator:
                     except Exception:
                         pass
 
-        if images is None and job_id:
+        if images is None:
+            images = []
+
+        # 1. Parse markdown image tags from summary_text (e.g. ![Chart](file:///...))
+        if summary_text:
+            import urllib.parse
+            md_imgs = re.findall(r'!\[.*?\]\(([^)]+)\)', summary_text)
+            for raw_target in md_imgs:
+                clean_target = raw_target.strip()
+                local_path_str = ""
+                if clean_target.startswith("file://"):
+                    parsed_url = urllib.parse.urlparse(clean_target)
+                    local_path_str = urllib.parse.unquote(parsed_url.path)
+                    # Windows absolute path adjustment: '/C:/...' -> 'C:/...'
+                    if len(local_path_str) >= 3 and local_path_str[0] == '/' and local_path_str[2] == ':':
+                        local_path_str = local_path_str[1:]
+                elif clean_target.startswith("/static/charts/"):
+                    fname = Path(clean_target).name
+                    if job_id:
+                        local_path_str = str((config.OUTPUTS_DIR / job_id / "charts" / fname).resolve())
+                    if not local_path_str or not Path(local_path_str).exists():
+                        static_dir = getattr(config, "STATIC_CHARTS_DIR", config.BACKEND_DIR / "static" / "charts")
+                        local_path_str = str((static_dir / fname).resolve())
+                elif not clean_target.startswith("http://") and not clean_target.startswith("https://"):
+                    local_path_str = clean_target
+
+                if local_path_str and Path(local_path_str).exists():
+                    p_obj = Path(local_path_str)
+                    if not p_obj.name.startswith("CHART-ERR-") and "placeholder" not in p_obj.name.lower():
+                        abs_p = str(p_obj.resolve())
+                        if abs_p not in images:
+                            images.append(abs_p)
+
+        # 2. Check job manifest and media assets
+        if job_id:
             job_dir = config.OUTPUTS_DIR / job_id
             manifest = job_dir / "media_manifest.json"
             if manifest.exists():
                 try:
                     m_data = json.loads(manifest.read_text(encoding="utf-8"))
-                    images = [img.get("path") for img in m_data.get("images", []) if img.get("path")]
+                    for img in m_data.get("images", []):
+                        if img.get("path") and img.get("path") not in images:
+                            images.append(img.get("path"))
                 except Exception:
                     pass
-            if not images:
-                active_media = job_dir / "active_media_assets.json"
-                if active_media.exists():
-                    try:
-                        m_data = json.loads(active_media.read_text(encoding="utf-8"))
-                        images = [img.get("path") for img in m_data.get("extracted_images", []) if img.get("path")]
-                    except Exception:
-                        pass
+            active_media = job_dir / "active_media_assets.json"
+            if active_media.exists():
+                try:
+                    m_data = json.loads(active_media.read_text(encoding="utf-8"))
+                    for img in m_data.get("extracted_images", []):
+                        if img.get("path") and img.get("path") not in images:
+                            images.append(img.get("path"))
+                except Exception:
+                    pass
+
+            # 3. Check job charts directory if no charts loaded yet
+            job_charts = job_dir / "charts"
+            if job_charts.exists():
+                for cp in sorted(job_charts.glob("*.png")):
+                    if cp.is_file() and not cp.name.startswith("CHART-ERR-") and "placeholder" not in cp.name.lower():
+                        abs_cp = str(cp.resolve())
+                        if abs_cp not in images:
+                            images.append(abs_cp)
 
         if not summary_text or not summary_text.strip():
             summary_text = "ERROR: No real data found in database. Ingestion failed."
